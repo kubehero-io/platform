@@ -1,0 +1,92 @@
+---
+title: Stack
+description: Every dependency, every integration, every OSS project we ride instead of rebuild.
+---
+
+KubeHero's thesis: **don't rebuild what OSS already nailed**. Our chart ships our own services; everything else is either consumed (Prometheus, Grafana, DCGM) or installed alongside us via `stack-install.sh`.
+
+## Storage
+
+| Role | Choice | Why this and not others |
+|---|---|---|
+| Time-series | **ClickHouse** (Altinity operator) | Columnar, billion-point compression. Same engine Cloudflare / PostHog / Signoz / Grafana Cloud run on. Postgres can't keep up at our event rate. |
+| Metadata + audit | **PostgreSQL** via **CloudNativePG** | CNCF sandbox. Operator-managed, backed up to S3 automatically. Beats Bitnami's chart for production. |
+| Cache + rate-limit | **Valkey** | Post-Redis-BSL: Valkey is the OSS answer. DragonflyDB is 25× faster but newer — Valkey is safer for v0. |
+| Cold archive | **S3 / Azure Blob / GCS** via Parquet | Cheap forever-storage of detailed pod-seconds. DuckDB or ClickHouse queries them on demand. |
+
+**Cloud mode** swaps all three for managed equivalents: Neon (Postgres), ClickHouse Cloud, Upstash (Valkey).
+
+## Auth
+
+| Component | Choice | Notes |
+|---|---|---|
+| **OIDC** | **Dex** (CNCF sandbox) | OIDC proxy. Connectors to Okta, Azure AD, Google Workspace, GitHub, GitLab, LDAP. We never see passwords. |
+
+## Observability
+
+We ride [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack), we don't fight it.
+
+- **Prometheus** — scrapes our `/metrics`, runs our PrometheusRule
+- **Grafana** — our 3 ConfigMap dashboards auto-load via the sidecar
+- **Alertmanager** — routes chargeback alerts to Slack / PagerDuty / OpsGenie
+- Optional: **Loki** (logs), **Tempo** (traces), **Pyroscope** (continuous profiling → flame graphs in workload drill-in)
+
+## Security (Posture view sources)
+
+| Tool | Role | OSS |
+|---|---|---|
+| **Trivy Operator** | CVE + misconfig scans on running workloads | Apache 2 · CNCF-adjacent |
+| **Falco** | Runtime anomaly detection | CNCF graduated |
+| **Tetragon** | eBPF-based runtime security | CNCF sandbox · Isovalent |
+| **Azure Defender / AWS Inspector v2 / GCP SCC** | Cloud posture + findings | vendor APIs |
+| **Pod Security Standards** | Built-in admission baseline | upstream K8s |
+
+We correlate findings against workload cost so a $18k/mo workload with an unpatched critical CVE ranks higher than either fact alone.
+
+## Secrets
+
+**External Secrets Operator** — bridges AWS Secrets Manager / Azure Key Vault / GCP Secret Manager / HashiCorp Vault → Kubernetes `Secret`s. Most mature clusters already run it.
+
+## Certs
+
+**cert-manager** — weekly mTLS rotation for agent ↔ control plane. We don't ship our own PKI.
+
+## Per-cloud integrations
+
+| Cloud | Auth | Pricing | Security | Autoscaler signal |
+|---|---|---|---|---|
+| **AWS** | IRSA | Pricing API + Savings Plans + Spot | Inspector v2 + GuardDuty + Security Hub | Karpenter, Cluster Autoscaler |
+| **GCP** | Workload Identity | Cloud Billing → BigQuery + CUD recommender | Security Command Center | GKE Autoscaler |
+| **Azure** | Workload Identity | Cost Management + Retail Prices + RIs/SPs | Defender for Cloud | AKS Autoscaler |
+
+Each cloud is a drop-in adapter behind a single Go interface — adding Oracle / IBM / Alibaba later is a new file.
+
+## Autoscaler signals (read-only)
+
+We **read** signals from whichever autoscaler is already running; we never replace.
+
+- **Karpenter** (AWS, expanding to Azure)
+- **Cluster Autoscaler** (all clouds, older)
+- **KEDA** (event-driven autoscaling)
+- **VPA** (Vertical Pod Autoscaler — we sanity-check our rightsizing against its recommendations)
+
+## What we deliberately DO NOT adopt
+
+- **OpenCost / Kubecost allocation engine** — their accuracy ceiling is our baseline. We offer an importer for their labels if a customer wants continuity.
+- **Kyverno / Gatekeeper** — admission-level. Our CRDs are resource-level. Orthogonal concerns.
+- **Temporal** — heavy. Add when we need durable long-running workflows, not before.
+
+## Install it all
+
+```bash
+# interactive — prompts for each dep
+./infra/demo/stack-install.sh
+
+# non-interactive full stack
+./infra/demo/stack-install.sh --all
+
+# just kubehero + kube-prometheus-stack (rest must already be present)
+./infra/demo/stack-install.sh --core-only
+```
+
+Every block in [`values.yaml`](https://github.com/kubehero-io/platform/blob/main/deploy/helm/kubehero/values.yaml) has `embedded: false` + `external: { ... }` — point at your existing deployment, or flip embedded to true and install via the script above.

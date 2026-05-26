@@ -1,0 +1,17 @@
+# kind cluster for the KubeHero chargeback demo.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kubehero-demo
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080  # grafana NodePort
+        hostPort: 30080
+        protocol: TCP
+  - role: worker
+    labels:
+      node.kubernetes.io/nodepool: cpu-workers
+  - role: worker
+    labels:
+      node.kubernetes.io/nodepool: gpu-workers
+      nvidia.com/gpu.present: "true"

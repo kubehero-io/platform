@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- kubehero_v1_budgetpolicy.yaml
+- kubehero_v1_ceilingpolicy.yaml
+- kubehero_v1_rightsizingpolicy.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

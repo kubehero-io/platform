@@ -1,0 +1,45 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Fleet spend (hourly)",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum(kubehero:team_cost_usd:rate1h)", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "type": "stat",
+      "title": "Recoverable (monthly)",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum(kubehero:team_recoverable_usd:rate1h) * 720", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "color": { "mode": "thresholds" } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Spend per cluster",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (cluster, cloud) * 3600",
+          "legendFormat": "{{cluster}} · {{cloud}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["kubehero", "fleet"],
+  "templating": { "list": [{ "name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus" }] },
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "KubeHero — Fleet",
+  "uid": "kubehero-fleet",
+  "version": 1
+}

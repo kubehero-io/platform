@@ -1,0 +1,39 @@
+---
+title: Security
+description: Runbook for auditors — how to verify each of our security commitments.
+---
+
+Everything on [kubehero.io/security](https://kubehero.io/security) has a corresponding runbook here. If you're an auditor or compliance reviewer, this is the page you want.
+
+## Read-only agent verification
+
+```bash
+kubectl auth can-i --as=system:serviceaccount:kubehero-system:kubehero-collector \
+  patch deployments --all-namespaces
+# Expected: no
+```
+
+The agent's `ClusterRole` only grants `get`, `list`, `watch` on pods, nodes, services, and deployments. No `update`, `patch`, `create`, or `delete` anywhere.
+
+## mTLS pinning
+
+Pin to our root CA — rotated weekly via `cert-manager`. Fingerprint and rotation history are published at `https://kubehero.io/.well-known/kubehero-ca.pem`.
+
+## Audit log export
+
+Three outputs, all first-class:
+
+```bash
+# syslog — forwards every audit event
+kubehero audit forward --syslog udp://siem.internal:514
+
+# webhook — HMAC-signed JSON per event
+kubehero audit forward --webhook https://siem.internal/hooks/kubehero
+
+# s3 — hourly JSONL dumps, GPG-signed
+kubehero audit forward --s3 s3://acme-compliance/kubehero/
+```
+
+## Disclosure
+
+Email [security@kubehero.io](mailto:security@kubehero.io). PGP on request. We acknowledge within 2 business days and keep you informed through resolution.

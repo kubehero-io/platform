@@ -1,0 +1,143 @@
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # OIDC → cosign keyless
+
+jobs:
+  # ─── Go services + CLI — one matrix job per image ────────────────────────
+  #
+  # Naming follows OCI convention: <registry>/<namespace>/<image>:<tag>.
+  # Namespace is `${{ github.repository_owner }}`; image names are bare
+  # (`collector`, not `kubehero-collector`) because the org already
+  # namespaces them.
+  #
+  # Final shape: `ghcr.io/<owner>/<image>:<version>` — matches the chart's
+  # `kubehero.image` helper. ghcr.io requires lowercase paths; forks
+  # into a Mixed-Case org should interpose `${VAR,,}`.
+  images:
+    name: image · ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: collector
+            context: .
+            dockerfile: services/collector/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/collector
+          - name: control-plane
+            context: .
+            dockerfile: services/control-plane/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/control-plane
+          - name: pricing-engine
+            context: .
+            dockerfile: services/pricing-engine/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/pricing-engine
+          - name: operator
+            context: services/operator
+            dockerfile: services/operator/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/operator
+          - name: cli
+            context: .
+            dockerfile: cli/kubehero/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/cli
+          - name: dashboard
+            context: .
+            dockerfile: apps/dashboard/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: build + push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+          build-args: |
+            VERSION=${{ github.ref_name }}
+
+      - name: cosign install
+        uses: sigstore/cosign-installer@v3
+
+      - name: cosign sign (keyless OIDC)
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "${{ matrix.image }}@${DIGEST}"
+
+      - name: syft install
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: SBOM + attest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          syft "${{ matrix.image }}@${DIGEST}" -o spdx-json > sbom.spdx.json
+          cosign attest --yes --predicate sbom.spdx.json \
+            --type spdxjson \
+            "${{ matrix.image }}@${DIGEST}"
+
+      - name: Trivy CVE scan (fail on HIGH+ unfixed)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "${{ matrix.image }}@${{ steps.build.outputs.digest }}"
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          scanners: vuln
+
+  # ─── Helm chart release ──────────────────────────────────────────────────
+  chart:
+    name: helm chart
+    runs-on: ubuntu-latest
+    needs: images
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.15.0
+      - name: Resolve subchart dependencies
+        run: helm dep update deploy/helm/kubehero
+      - name: package + push (OCI)
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          helm package deploy/helm/kubehero \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
+            --destination dist
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push dist/kubehero-$VERSION.tgz oci://ghcr.io/${{ github.repository_owner }}/charts

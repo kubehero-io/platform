@@ -1,0 +1,111 @@
+---
+title: How we compare
+description: Honest matrix vs Flexera, Kubecost, OpenCost, CAST AI, PerfectScale, Grafana + Prometheus alone.
+---
+
+Every vendor comparison page eventually turns into marketing. This one tries not to — we tell you exactly what each competitor does well and exactly where we think we're different. If we're wrong about anything, open an issue.
+
+## The matrix
+
+| | **KubeHero** | Flexera / Cloudability | Kubecost | OpenCost | CAST AI | PerfectScale | Grafana + Prom only |
+|---|---|---|---|---|---|---|---|
+| Attribution accuracy | eBPF 1s resolution | Billing records, 24h stale | cadvisor 5-min avg | cadvisor 5-min avg | proprietary | proprietary | DIY |
+| GPU / TPU first-class | ✓ DCGM + MIG + TPU API | Partial | Limited | No | No | No | DIY |
+| Retroactive Savings Plan replay | ✓ | No | No | No | N/A | N/A | No |
+| Multi-cloud normalization | AWS + GCP + Azure, single schema | Strong | Limited | Limited | AWS-bias | Limited | DIY |
+| Policy enforcement CRDs | `BudgetPolicy` / `CeilingPolicy` / `RightsizingPolicy` | Alerts only | No | No | Proprietary | Proprietary | No |
+| `humanArm` default | ✓ | N/A | N/A | N/A | Varies | Varies | N/A |
+| Reversible within cooldown | ✓ 10-min default | N/A | N/A | N/A | Partial | Partial | N/A |
+| Open-source | Apache 2.0 + BSL 1.1, fully self-hostable | Closed | Core open, adv. features paid | Full CNCF | Closed | Closed | Upstream |
+| Self-host + air-gap | ✓ Helm + `values.airgap.yaml` | Limited | ✓ | ✓ | No | No | ✓ |
+| Audit log export | syslog · webhook · S3 · SIEM | ✓ | Limited | No | Limited | Limited | DIY |
+| Keyboard-first UX | ✓ cmd-K, URL state, actions | No | Limited | N/A | Proprietary | Proprietary | Grafana |
+| License | Apache 2.0 / BSL 1.1, no gated tier | Enterprise-seat + platform fee | Free core + Enterprise | Free | % of savings | Enterprise | OSS |
+| Runs on Prometheus stack | ✓ ServiceMonitor + PrometheusRule + Grafana ConfigMap | Separate stack | Bundled | Separate | Separate | Separate | Native |
+
+## Head-to-head, honestly
+
+### Flexera / Cloudability
+
+**What they get right**: Multi-cloud ingest is polished — AWS, Azure, GCP, Oracle, IBM. Enterprise-ready commercial surface. Finance-team-friendly reporting and chargeback workflows.
+
+**Where we differ**:
+- Their Kubernetes attribution runs on billing records + tag-based allocation rules. 24–48h stale by design. Ours is 1-second eBPF-accurate.
+- Their GPU visibility is vendor-level (EC2 p4d spend) not pod-level.
+- Their policy engine is alerts. No enforcement, no `humanArm`, no reversible actions.
+- Their Savings Plan handling applies forward from the commit date; historical numbers don't restate.
+
+**Pick them if**: you're a Fortune 500 CFO office needing multi-cloud billing rollup for 20+ accounts and your Kubernetes footprint is small. **Pick us if**: Kubernetes is >40% of your compute and you want sub-minute accuracy.
+
+### Kubecost / Stackwatch
+
+**What they get right**: Kubernetes-focused from day one. Great allocation model for namespace / label / team attribution. Open core with a credible enterprise offering.
+
+**Where we differ**:
+- Same 5-minute cadvisor averaging ceiling as everyone in that product generation.
+- GPU support is there but not first-class. No MIG-slice attribution, no tensor-core utilization.
+- No policy enforcement CRDs. Their "Actions" feature is client-side recommendations, not reconciler-driven.
+- Savings Plan / CUD handling is billing-based, not replay-based.
+
+**Pick them if**: you need allocation for a single-cloud shop and are happy with 5-min accuracy. **Pick us if**: GPUs matter, or you want enforcement teeth.
+
+### OpenCost (CNCF sandbox)
+
+**What they get right**: It's the canonical cost allocation model in the CNCF ecosystem. Free, open, actively maintained. Kubecost's open core is built on it.
+
+**Where we differ**:
+- No UI. It's a library + a server exposing `/allocation`. You build the product.
+- Same cadvisor accuracy as Kubecost.
+- No enforcement layer.
+
+**Pick them if**: you have engineering capacity to build on top. **Pick us if**: you want a product.
+
+We can **ingest OpenCost allocation rules** via an importer if you've already built on their label schema — continuity matters.
+
+### CAST AI
+
+**What they get right**: Genuine autoscaling + rightsizing product. Strong on savings delivered. Commercial polish.
+
+**Where we differ**:
+- AWS-first, GCP okay, Azure catch-up.
+- Black-box attribution. You trust their number; you can't audit the derivation.
+- No CRD surface. Their actions don't survive a CAST AI uninstall — they run in their infrastructure.
+- Proprietary policy engine, no `humanArm`-level safety guarantees exposed.
+
+**Pick them if**: AWS-only, comfortable with SaaS-owned policy. **Pick us if**: multi-cloud, or you need every action to live as code in your cluster.
+
+### PerfectScale / ScaleOps
+
+**What they get right**: Rightsizing specifically. Good observation windows, statistical confidence scores.
+
+**Where we differ**:
+- Single-capability. They rightsize well; they don't attribute multi-cloud cost or run budget policies.
+- No K8s-native CRD surface for their actions.
+- No GPU story.
+
+**Pick them if**: you just want rightsizing and are happy running multiple FinOps tools. **Pick us if**: you want one tool.
+
+### Grafana + Prometheus alone
+
+**What they get right**: The actual data plane. Everyone else (including us) runs on top.
+
+**Where we differ**:
+- They're a library, not a product. You need to build attribution, recommendations, and actions yourself. That's a two-year engineering project.
+
+**Pick them + us**: we use both. KubeHero ships a ServiceMonitor, a PrometheusRule, and three Grafana dashboards so your existing stack is our UI.
+
+## The seven moats
+
+Pulled out of the matrix — each is a feature Flexera / Kubecost / OpenCost / CAST AI / PerfectScale structurally cannot ship without rewriting their data plane.
+
+1. **eBPF 1s resolution** — everyone else averages over minutes
+2. **Retroactive Savings Plan replay** — historical cost restates when a SP kicks in
+3. **`humanArm: true` default** — enforcement with safety rails, not alerts
+4. **Multi-cloud cost-per-second normalization** — one number across AWS / GCP / Azure SKUs
+5. **Keyboard-first operator UX** — cmd-K, URL state, action buttons everywhere
+6. **Open source, self-hostable** — agent + CLI + proto + cost-model under Apache 2.0, the rest under BSL 1.1
+7. **Posture + cost correlation** — CVE findings ranked by workload $/day (see [Posture](/docs/concepts#posture))
+
+## "What about X?"
+
+We'll add rows to the matrix as people ask. If we missed your tool or you think we're wrong about a row, [open an issue](https://github.com/kubehero-io/platform/issues).

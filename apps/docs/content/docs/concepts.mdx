@@ -1,0 +1,35 @@
+---
+title: Concepts
+description: Attribution, rightsizing, ceilings — the three ideas that power KubeHero.
+---
+
+KubeHero is built around three ideas. Once you understand these, the rest of the product falls out naturally.
+
+## Attribution
+
+**Who is spending the money, right now, at pod resolution?**
+
+Most K8s cost tools average CPU over 30 seconds or more. KubeHero attaches eBPF probes to the Linux scheduler, which gives us cgroup-accurate per-pod CPU time at 1-second resolution. Noisy neighbors, steal time, and syscall-heavy workloads all appear correctly — without relying on `metrics-server`.
+
+Each 1-second sample carries: pod UID, CPU millicores, memory bytes, GPU utilization, and the node it ran on. That maps to a **cost-per-pod-per-second** using the pricing engine's normalized SKU table.
+
+## Rightsizing
+
+**What's the smallest safe config that still honors my SLOs?**
+
+Rightsizing is a statistical decision, not a heuristic. KubeHero tracks the p95 of each workload's actual use over a configurable observation window (default 14 days) and proposes a new request that leaves a configurable headroom (default 40%). The recommendation ships with an exact YAML patch and a dry-run preview.
+
+Three modes, set via `RightsizingPolicy.spec.mode`:
+- **recommend** — surfaces suggestions, never mutates anything
+- **shadow** — mutates a shadow copy of the resource for comparison, no production effect
+- **apply** — mutates the real resource, bounded by `safety.maxChangePerDay`
+
+## Ceilings
+
+**When spend runs away faster than humans can react, what should happen automatically?**
+
+A `BudgetPolicy` sets a declarative spending limit (e.g. $100k/month for all `env=prod` clusters). A `CeilingPolicy` references it and defines what to do when the burn rate crosses a threshold — cap HPAs, evict low-priority pods, cordon burst pools. Each step waits a configurable delay before the next runs.
+
+**`humanArm: true` is the default.** Nothing fires until an operator arms it from the dashboard or CLI. This is intentional — we optimize for operators not getting fired, not for magical self-healing.
+
+Every action is reversible within the cooldown window. `kubehero undo <audit-id>` restores the original state.

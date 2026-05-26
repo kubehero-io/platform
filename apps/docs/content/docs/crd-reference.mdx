@@ -1,0 +1,102 @@
+---
+title: CRD reference
+description: BudgetPolicy, CeilingPolicy, RightsizingPolicy — every field, every default.
+---
+
+Three CRDs under `apiVersion: kubehero.kubehero.io/v1`. Each one is reconciled by the operator.
+
+## BudgetPolicy
+
+Declarative spending intent for a set of workloads.
+
+```yaml
+apiVersion: kubehero.kubehero.io/v1
+kind: BudgetPolicy
+metadata:
+  name: prod-monthly
+spec:
+  scope:
+    clusterSelector:
+      matchLabels: { env: prod }
+  ceiling: "$100000/mo"
+  hardStop: true
+  humanArm: true
+  escalation:
+    - action: hpa.cap
+      ratioPercent: 50
+      waitAfter: "2m"
+    - action: pod.evict
+      waitAfter: "3m"
+    - action: alert
+      channels: ["slack://ops-oncall"]
+  alertChannels:
+    - "slack://ops"
+    - "pagerduty://prod-p1"
+```
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `scope.clusterSelector` | `LabelSelector` | all | Clusters this policy applies to. |
+| `scope.namespaceSelector` | `LabelSelector` | all | Namespaces within matched clusters. |
+| `ceiling` | string | required | Human-readable limit: `$100000/mo` · `$300/hr`. |
+| `hardStop` | bool | `false` | If `false`, policy is advisory / alert-only. |
+| `humanArm` | bool | `true` | Requires CLI `kubehero cap --arm` before any escalation step runs. |
+| `escalation[]` | `EscalationStep[]` | | Ordered steps — `hpa.cap`, `pod.evict`, `nodepool.cordon`, `alert`. |
+| `alertChannels[]` | string[] | | Channels that receive threshold-crossing notifications (default: 50/80/95/100%). |
+
+## CeilingPolicy
+
+A burn-rate triggered enforcement policy that references a `BudgetPolicy`.
+
+```yaml
+apiVersion: kubehero.kubehero.io/v1
+kind: CeilingPolicy
+metadata:
+  name: prod-burn-rate-2x
+spec:
+  budgetRef: prod-monthly
+  trigger:
+    burnRateMilli: 2000   # 2.0x
+    window: "5m"
+  escalation:
+    - action: hpa.cap
+      ratioPercent: 40
+      waitAfter: "2m"
+  cooldown: "10m"
+  humanArm: true
+```
+
+## RightsizingPolicy
+
+How aggressively to recommend / auto-apply rightsizing.
+
+```yaml
+apiVersion: kubehero.kubehero.io/v1
+kind: RightsizingPolicy
+metadata:
+  name: non-prod-auto
+spec:
+  scope:
+    namespaceSelector:
+      matchLabels: { env: dev }
+  mode: apply
+  targetUtilization: 60
+  safety:
+    minReplicas: 1
+    p95HeadroomPct: 40
+    observationWindow: "14d"
+    maxChangePerDay: 3
+```
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `mode` | `recommend` · `apply` · `shadow` | required | |
+| `targetUtilization` | int 1–100 | `60` | Target p95 CPU utilization %. |
+| `safety.minReplicas` | int | `1` | Never scale below this. |
+| `safety.p95HeadroomPct` | int | `40` | Leave N% headroom above p95. |
+| `safety.observationWindow` | duration | `14d` | How far back to measure. |
+| `safety.maxChangePerDay` | int | `3` | Thrash guard. |
+
+## Applying policies
+
+Both `kubehero apply -f` and `kubectl apply -f` work. The operator reconciles within a few seconds.

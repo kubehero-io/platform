@@ -1,0 +1,123 @@
+---
+title: CLI reference
+description: Every subcommand and every flag of the kubehero binary.
+---
+
+The `kubehero` binary is a Go single-static binary. Install with `brew install kubehero`, `apt install kubehero`, or download from [GitHub Releases](https://github.com/kubehero-io/platform/releases).
+
+## Global flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--cluster` | | Target cluster name. Falls back to `current-context` from kubeconfig. |
+| `--context` | current | kubeconfig context to use. |
+| `--output`, `-o` | `table` | `table`, `json`, `yaml`, `wide`. |
+| `--verbose`, `-v` |  | Verbose logging. |
+| `--dry-run` | `true` for mutating commands | Preview changes without applying. |
+
+## `kubehero cluster`
+
+Manage cluster registrations against the control plane.
+
+### `kubehero cluster list`
+
+List clusters registered to your org. Honours `--output` for table / json / yaml / wide.
+
+```bash
+kubehero cluster list
+kubehero cluster list -o json
+```
+
+### `kubehero cluster add`
+
+Register a new cluster with the control plane. The server generates a UUID + a 32-byte enrollment token, stores **only the SHA-256 hash**, and returns the token to you exactly once. Pipe the token straight into `helm install` on the target cluster — there is no way to retrieve it later.
+
+```bash
+kubehero cluster add \
+  --name "prod-eu-1" \
+  --cloud aws \
+  --region eu-west-1
+```
+
+| Flag | Required | Notes |
+|---|---|---|
+| `--name` | yes | Human-readable cluster name. |
+| `--cloud` | yes | `aws` · `gcp` · `azure`. |
+| `--region` | yes | Cloud region, e.g. `eu-west-1`. |
+| `--slug` |  | URL-safe slug; defaults to a normalised `--name`. |
+
+The output looks like:
+
+```
+✓ cluster registered
+
+  id      e718a979-23b6-4bd0-968e-a96126e6822a
+  name    prod-eu-1
+  cloud   aws · eu-west-1
+
+  ENROLLMENT TOKEN (shown once · keep secret):
+
+    f0c45f2c0ba322507041b82253445c3367e14dfb5bf7fe9d8a1b384bc020fa88
+
+  Install on the target cluster:
+
+helm install kubehero kubehero/kubehero \
+  --namespace kubehero-system --create-namespace \
+  --set cluster.id=e718a979-23b6-4bd0-968e-a96126e6822a \
+  --set cluster.token=f0c45f2c0ba322507041b82253445c3367e14dfb5bf7fe9d8a1b384bc020fa88
+```
+
+Treat the token as a credential. If you lose it, run `cluster add` again to regenerate.
+
+## `kubehero scan`
+
+Scan a cluster for rightsizing opportunities.
+
+```bash
+kubehero scan --cluster prod-us-east-1 --report waste
+kubehero scan --report gpu
+```
+
+| Flag | Values | Notes |
+|---|---|---|
+| `--report` | `waste` · `gpu` · `overcommit` | Which signal to rank by. |
+| `--namespace`, `-n` | | Narrow to a single namespace. |
+| `--since` | `7d` | Observation window (`1h`, `24h`, `7d`, `30d`). |
+
+## `kubehero rightsize`
+
+Recommend or apply rightsizing for a workload.
+
+```bash
+kubehero rightsize vectordb-ingress --dry-run=true
+kubehero rightsize vectordb-ingress --dry-run=false
+```
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--dry-run` | `true` | When `false`, mutates the workload. Safety caps from the matching `RightsizingPolicy` still apply. |
+| `--target-utilization` | policy | Override `targetUtilization` for this call. |
+
+## `kubehero apply`
+
+Apply a `BudgetPolicy`, `CeilingPolicy`, or `RightsizingPolicy` from a YAML file.
+
+```bash
+kubehero apply -f policies/prod-budget.yaml
+```
+
+## `kubehero cap --arm`
+
+Arm a `CeilingPolicy` so its escalation plan can execute when triggered. No-op if the policy already has `humanArm: false`.
+
+```bash
+kubehero cap --arm --policy prod-monthly-ceiling
+```
+
+## `kubehero undo`
+
+Reverse the last action for an audit-log entry, within the cooldown window (default 10 minutes).
+
+```bash
+kubehero undo <audit-id>
+```

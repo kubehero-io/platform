@@ -1,0 +1,21 @@
+{{- if .Values.grafana.enabled -}}
+{{- $root := . -}}
+{{- $dashboards := .Values.grafana.dashboards -}}
+{{- range $name, $enabled := $dashboards -}}
+{{- if $enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubehero.fullname" $root }}-grafana-{{ $name }}
+  labels:
+    {{- include "kubehero.labels" $root | nindent 4 }}
+    {{ $root.Values.grafana.sidecarLabel }}: {{ $root.Values.grafana.sidecarLabelValue | quote }}
+  annotations:
+    grafana_folder: {{ $root.Values.grafana.folder | quote }}
+data:
+  {{ $name }}.json: |-
+    {{- $root.Files.Get (printf "dashboards/%s.json" $name) | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

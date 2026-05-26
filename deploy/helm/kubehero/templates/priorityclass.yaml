@@ -1,0 +1,27 @@
+{{- if .Values.priorityClass.create -}}
+# KubeHero ships a dedicated PriorityClass so its core control plane is
+# scheduled ahead of customer workloads but well below
+# system-cluster-critical (which is reserved for cluster add-ons that
+# the kube API server itself depends on, e.g. CoreDNS, kube-proxy).
+#
+# Reference: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/
+#
+# Values used here intentionally sit *below* system-cluster-critical
+# (2,000,000,000) and *above* common cluster-autoscaler default user
+# priorities (which are typically 0 or below).
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Values.priorityClass.name | default (printf "%s-control-plane" (include "kubehero.fullname" .)) }}
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  {{- with .Values.priorityClass.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+value: {{ .Values.priorityClass.value }}
+globalDefault: false
+preemptionPolicy: {{ .Values.priorityClass.preemptionPolicy | default "PreemptLowerPriority" }}
+description: >-
+  KubeHero control plane components (control-plane, operator,
+  pricing-engine, dashboard). Scheduled above customer workloads so
+  policy decisions and audit-log writes survive resource pressure.
+{{- end }}

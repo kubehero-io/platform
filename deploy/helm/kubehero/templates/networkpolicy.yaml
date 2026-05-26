@@ -1,0 +1,119 @@
+{{- if .Values.networkPolicies.enabled }}
+{{- $fullname := include "kubehero.fullname" . }}
+# Default-deny for the kubehero-system namespace with explicit allow rules
+# per component. Egress to storage + cloud APIs is open; intra-namespace
+# traffic is scoped to the minimum each component needs.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-default-deny
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+# DNS egress — required by every pod
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-allow-dns
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Control plane — accepts scrape from Prometheus + RPC from dashboard/cli
+{{- if .Values.controlPlane.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-control-plane
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: control-plane
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dashboard
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: collector
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
+      ports:
+        - { protocol: TCP, port: {{ .Values.controlPlane.service.port }} }
+  egress:
+    # Postgres + ClickHouse (any destination; customers lock down via external)
+    - ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 9440 }
+        - { protocol: TCP, port: 6379 }
+    # Outbound HTTPS to cloud APIs + Dex issuer
+    - ports:
+        - { protocol: TCP, port: 443 }
+{{- end }}
+---
+# Collector — accepts scrape + K8s API egress
+{{- if .Values.collector.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-collector
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: collector
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
+      ports:
+        - { protocol: TCP, port: {{ .Values.collector.service.port }} }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: control-plane
+      ports:
+        - { protocol: TCP, port: {{ .Values.controlPlane.service.port }} }
+    # K8s API
+    - ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 6443 }
+{{- end }}
+---
+# Dashboard — accepts HTTP from ingress, talks to control-plane
+{{- if .Values.dashboard.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-dashboard
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: dashboard
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - {}   # ingress controller routes — customers scope via their own policies
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: control-plane
+      ports:
+        - { protocol: TCP, port: {{ .Values.controlPlane.service.port }} }
+{{- end }}
+{{- end }}

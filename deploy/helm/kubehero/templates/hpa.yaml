@@ -1,0 +1,49 @@
+{{- $fullname := include "kubehero.fullname" . }}
+{{- if and .Values.autoscaling.enabled .Values.controlPlane.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullname }}-control-plane
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullname }}-control-plane
+  minReplicas: {{ .Values.autoscaling.controlPlane.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.controlPlane.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.controlPlane.targetCPU }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.controlPlane.targetMemory }}
+{{- end }}
+---
+{{- if and .Values.autoscaling.enabled .Values.dashboard.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullname }}-dashboard
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullname }}-dashboard
+  minReplicas: {{ .Values.autoscaling.dashboard.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.dashboard.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.dashboard.targetCPU }}
+{{- end }}

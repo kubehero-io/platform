@@ -1,0 +1,22 @@
+{
+  "name": "kubehero-platform",
+  "version": "0.0.0",
+  "private": true,
+  "description": "KubeHero product monorepo — agent, control plane, operator, dashboard, CLI.",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

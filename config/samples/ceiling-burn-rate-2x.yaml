@@ -1,0 +1,20 @@
+# Activates when burn rate sustains 2x the budgeted run-rate for 5 minutes.
+# Requires a BudgetPolicy named "prod-monthly-ceiling" to exist first.
+apiVersion: kubehero.kubehero.io/v1
+kind: CeilingPolicy
+metadata:
+  name: prod-burn-rate-2x
+  namespace: kubehero-system
+spec:
+  budgetRef: prod-monthly-ceiling
+  trigger:
+    burnRateMilli: 2000   # 2.0x
+    window: "5m"
+  escalation:
+    - action: hpa.cap
+      ratioPercent: 50
+      waitAfter: "1m"
+    - action: nodepool.cordon
+      waitAfter: "3m"
+  cooldown: "10m"
+  humanArm: true

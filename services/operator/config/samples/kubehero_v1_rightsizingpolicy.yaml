@@ -1,0 +1,9 @@
+apiVersion: kubehero.kubehero.io/v1
+kind: RightsizingPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: operator
+    app.kubernetes.io/managed-by: kustomize
+  name: rightsizingpolicy-sample
+spec:
+  # TODO(user): Add fields here

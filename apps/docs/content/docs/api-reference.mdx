@@ -1,0 +1,134 @@
+---
+title: API reference
+description: Connect-RPC services, methods, and message types. All traffic is HTTP/2, Protocol Buffers on the wire with a JSON fallback.
+---
+
+KubeHero's RPC surface is [Connect-RPC](https://connectrpc.com/) over HTTP/2. The same `.proto` files generate Go servers and TypeScript clients; any gRPC tooling (`grpcurl`, `buf curl`, `evans`) works against the endpoints.
+
+Protos live under `packages/proto/kubehero/v1/` and are the source of truth. When we release, the TypeScript client is published as `@kubehero/proto`.
+
+## Services
+
+### `ControlPlaneService`
+
+The primary read surface for the dashboard + CLI.
+
+#### `HealthCheck`
+
+```proto
+rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse) {}
+
+message HealthCheckResponse {
+  string status = 1;    // "ok" | "degraded"
+  string version = 2;   // control-plane build version
+}
+```
+
+Plain liveness ping. Returns the control-plane's build version so operators can confirm which revision their cluster talks to.
+
+```bash
+buf curl \
+  --schema packages/proto \
+  --protocol connect \
+  --data '{}' \
+  https://api.kubehero.io/kubehero.v1.ControlPlaneService/HealthCheck
+```
+
+#### `ListClusters`
+
+```proto
+rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {}
+
+message ListClustersRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message Cluster {
+  string id = 1;
+  string name = 2;
+  string cloud = 3;     // "aws" | "gcp" | "azure"
+  string region = 4;
+  int32 nodes = 5;
+}
+
+message ListClustersResponse {
+  repeated Cluster clusters = 1;
+  string next_page_token = 2;
+}
+```
+
+Paginated. Page tokens are opaque — pass the previous response's `next_page_token` as the next request's `page_token`.
+
+### `CollectorIngressService`
+
+Write surface for the DaemonSet agent. Customer-side code never calls this — only the agent does — but it's documented for curious operators and people building their own collectors.
+
+```proto
+rpc Ingest(IngestRequest) returns (IngestResponse) {}
+
+message PodMetric {
+  string pod_uid = 1;
+  double cpu_millicores = 2;
+  int64 mem_bytes = 3;
+  double gpu_util_pct = 4;
+  int64 ts_unix = 5;
+}
+
+message IngestRequest {
+  string cluster_id = 1;
+  string node_name = 2;
+  repeated PodMetric metrics = 3;
+}
+```
+
+Agents batch 5 seconds of 1-second ticks into a single `IngestRequest`, LZ4-compressed at the HTTP layer. Ordering guarantee: within a single agent → collector connection, metrics arrive in timestamp order.
+
+### `PricingService`
+
+Internal — the control plane asks the pricing engine for per-SKU quotes while attributing pod cost.
+
+```proto
+rpc Quote(QuoteRequest) returns (QuoteResponse) {}
+
+message QuoteRequest {
+  string cloud = 1;      // "aws" | "gcp" | "azure"
+  string sku = 2;        // e.g. "m5.large", "Standard_NC24ads_A100_v4"
+  string region = 3;
+  string lifecycle = 4;  // "on-demand" | "spot" | "savings-plan" | "committed"
+}
+
+message QuoteResponse {
+  double price_per_hour = 1;
+  string currency = 2;   // always "USD" in v1
+}
+```
+
+Responses are cached for 6 hours (tunable via `pricingEngine.schedule`). The control plane handles the Savings-Plan-replay rewrite out-of-band; the quote service is strictly spot-in-time pricing.
+
+## Authentication
+
+Two modes:
+
+- **Bearer token** — opaque token, validated against the `kubehero-session` table. Default on self-hosted.
+- **OIDC via Dex** — ID token forwarded as the `Authorization: Bearer <id_token>` header. See [Integrations · Identity](/docs/integrations/identity).
+
+## Errors
+
+Standard Connect error codes. The most common:
+
+| Code | Meaning |
+|---|---|
+| `unauthenticated` | Token missing or invalid |
+| `permission_denied` | RBAC blocks the scope |
+| `invalid_argument` | Malformed request (e.g. unknown cloud in `Quote`) |
+| `not_found` | SKU not in pricing catalog; cluster not registered |
+| `resource_exhausted` | Rate limit — retry with exponential backoff |
+
+## Streaming
+
+Not yet. Dashboard live panels today poll at 1–30s intervals. Connect streams land in v0.2 once we've wired an ingress-level backpressure story we trust.
+
+## Versioning
+
+Protos follow `packages/proto/kubehero/v1/...`. Breaking changes bump the version path to `v2` — we run both simultaneously through at least one minor release so client migrations are never hard cutover.

@@ -1,0 +1,20 @@
+{{- if .Values.certManager.enabled -}}
+{{- range .Values.certManager.certificates }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .name }}
+  labels: {{- include "kubehero.labels" $ | nindent 4 }}
+spec:
+  secretName: {{ .secretName }}
+  duration: {{ default $.Values.certManager.duration .duration }}
+  renewBefore: {{ default $.Values.certManager.renewBefore .renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef: {{- toYaml $.Values.certManager.issuerRef | nindent 4 }}
+  dnsNames: {{- toYaml .dnsNames | nindent 4 }}
+{{- end }}
+{{- end }}

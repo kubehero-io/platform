@@ -1,0 +1,22 @@
+# Aggressive rightsizing in non-prod namespaces. `mode: apply` means
+# the operator mutates live Deployments; safety caps limit the blast
+# radius to ≤3 changes per day per workload.
+apiVersion: kubehero.kubehero.io/v1
+kind: RightsizingPolicy
+metadata:
+  name: non-prod-auto
+  namespace: kubehero-system
+spec:
+  scope:
+    namespaceSelector:
+      matchLabels: { env: dev }
+  mode: apply
+  targetUtilization: 60
+  exclude:
+    - cert-manager-webhook
+    - ingress-nginx-controller
+  safety:
+    minReplicas: 1
+    p95HeadroomPct: 40
+    observationWindow: "14d"
+    maxChangePerDay: 3

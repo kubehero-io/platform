@@ -1,0 +1,47 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:enableMajor",
+    ":semanticCommits",
+    ":dependencyDashboard"
+  ],
+  "timezone": "Etc/UTC",
+  "schedule": ["before 5am on monday"],
+  "labels": ["dependencies"],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "schedule": ["at any time"]
+  },
+  "packageRules": [
+    {
+      "description": "Group all Go module bumps into one PR per week",
+      "matchManagers": ["gomod"],
+      "groupName": "go modules",
+      "groupSlug": "gomod"
+    },
+    {
+      "description": "Group all Dockerfile base bumps so the security scan runs once",
+      "matchManagers": ["dockerfile"],
+      "groupName": "container bases",
+      "groupSlug": "docker"
+    },
+    {
+      "description": "Group npm bumps in the dashboard to keep PR noise low",
+      "matchManagers": ["npm"],
+      "matchPaths": ["apps/**", "package.json"],
+      "groupName": "npm dependencies",
+      "groupSlug": "npm"
+    },
+    {
+      "description": "Pin Helm subchart majors so we never get surprise upstream API changes",
+      "matchManagers": ["helmv3"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 5am on monday"]
+  }
+}

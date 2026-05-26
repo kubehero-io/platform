@@ -1,0 +1,44 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "type": "heatmap",
+      "title": "GPU utilization heatmap",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "kubehero_pod_gpu_util_ratio",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Per-GPU idle-hour cost",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(20, kubehero:team_gpu_idle_cost_usd:rate1h) * 24 * 30",
+          "legendFormat": "{{team}}",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["kubehero", "gpu"],
+  "templating": { "list": [{ "name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus" }] },
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "KubeHero — GPU panel",
+  "uid": "kubehero-gpu",
+  "version": 1
+}

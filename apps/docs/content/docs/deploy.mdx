@@ -1,0 +1,35 @@
+---
+title: Deploy
+description: Helm install for self-hosted and air-gapped environments.
+---
+
+## Full stack
+
+Everything runs inside your own cluster. No egress required.
+
+```bash
+helm repo add kubehero https://charts.kubehero.io
+helm install kubehero kubehero/kubehero \
+  --namespace kubehero-system --create-namespace \
+  -f values.yaml
+```
+
+See `deploy/helm/kubehero/values.yaml` in the source for every tunable.
+
+## Air-gapped
+
+Pre-mirror images to your internal registry, then:
+
+```bash
+helm install kubehero kubehero/kubehero \
+  -f values.yaml \
+  -f values.airgap.yaml \
+  --set image.registry=registry.internal.acme.com \
+  --set imagePullSecrets[0].name=acme-regcred
+```
+
+## Troubleshooting
+
+- **"collector pods not ready"** — check RBAC; the DaemonSet needs `hostPID: true`. On GKE Autopilot, see the [GKE Autopilot guide](/docs/deploy#gke-autopilot).
+- **"no telemetry at control plane"** — `kubectl -n kubehero-system logs ds/kubehero-collector`. If you see `ebpf: load: invalid argument`, your kernel is too old. The collector falls back to cAdvisor automatically; see `--enable-cadvisor-fallback`.
+- **"policies not firing"** — confirm `humanArm` is false, or run `kubehero cap --arm --policy <name>`.

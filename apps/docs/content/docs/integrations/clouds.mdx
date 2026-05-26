@@ -1,0 +1,147 @@
+---
+title: Cloud providers
+description: AWS, GCP, and Azure integration — auth, pricing, security findings, autoscaler signals.
+---
+
+Each cloud integration ships as a drop-in adapter in the control plane. A single Go interface (`CloudProvider { Pricing · Discover · Security }`) means adding Oracle / IBM / Alibaba later is a new file.
+
+## AWS
+
+### Auth — IRSA
+
+We use IAM Roles for Service Accounts. Your cluster admin creates a role the control-plane pod assumes; no static keys.
+
+```yaml
+# values.yaml
+cloud:
+  aws:
+    enabled: true
+    roleArn: "arn:aws:iam::742190123456:role/kubehero-control-plane"
+    regions: []   # empty = discover all enabled regions
+```
+
+Your role trust policy binds to the `kubehero-control-plane` ServiceAccount in `kubehero-system`. Required permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": [
+        "pricing:GetProducts",
+        "savingsplans:Describe*",
+        "ec2:Describe*",
+        "eks:Describe*",
+        "inspector2:List*",
+        "inspector2:Get*",
+        "ce:GetCostAndUsage"
+      ], "Resource": "*" }
+  ]
+}
+```
+
+### Pricing catalog
+
+- **On-demand** — AWS Pricing API (`pricing.us-east-1.amazonaws.com`). Refreshed every 6h by the `kubehero-pricing-engine` CronJob.
+- **Spot** — EC2 Spot price history; we pull the last 24h and use the median per-AZ.
+- **Savings Plans** — `savingsplans:DescribeSavingsPlans`. Commitments trigger the Savings Plan Replay pass (see [Concepts · Retroactive cost](/docs/concepts)).
+- **Reserved Instances** — `ec2:DescribeReservedInstances`.
+- **Cost Explorer** — `ce:GetCostAndUsage` as a cross-check against our eBPF attribution.
+
+### Security
+
+- **Inspector v2** — `inspector2:List*` for CVE findings on running instances, ECR images, and Lambda functions.
+- **GuardDuty** — optional; we surface runtime anomalies in the Posture view.
+- **Security Hub** — aggregator findings ingested and ranked by workload cost.
+
+### Autoscaler signals
+
+- **Karpenter** — we read node-class provisioning events from Karpenter CRDs.
+- **Cluster Autoscaler** — we read the scale-up/down events log.
+
+## GCP
+
+### Auth — Workload Identity
+
+```yaml
+cloud:
+  gcp:
+    enabled: true
+    serviceAccount: "kubehero-control@acme-prod.iam.gserviceaccount.com"
+    projects: ["acme-prod", "acme-staging"]
+```
+
+Bind the GSA to the KSA `kubehero-control-plane` in `kubehero-system`. Required IAM:
+
+- `roles/billing.viewer`
+- `roles/bigquery.dataViewer` on the billing export dataset
+- `roles/recommender.computeViewer`
+- `roles/securitycenter.findingsViewer`
+- `roles/container.viewer`
+
+### Pricing catalog
+
+- **Cloud Billing export → BigQuery** — canonical cost source on GCP. We run scheduled queries against the detailed export table.
+- **Committed Use Discounts** — `google.cloud.recommender.v1` recommender API surfaces what CUDs would save; we factor them into forecasts.
+- **Spot VMs** — live prices via the Compute pricing API.
+
+### Security
+
+- **Security Command Center** — `securitycenter.findings` API. Project and organization scope both supported.
+- **Container Analysis** — CVE findings on images in Artifact Registry.
+
+### Autoscaler signals
+
+- **GKE Autoscaler** — read-only via the `container` API.
+- **Node Auto-Provisioning** — same.
+
+## Azure
+
+### Auth — Workload Identity
+
+```yaml
+cloud:
+  azure:
+    enabled: true
+    clientId: "83a1...c4fe"
+    tenantId: "81c7...fe9b"
+    subscriptions: ["81c7...fe9b", "a3b9...0e11"]
+```
+
+Federate the KSA against an Entra ID application. Required role assignments:
+
+- `Cost Management Reader` on each subscription
+- `Security Reader` on each subscription
+- `Reader` on the resource groups hosting AKS clusters
+
+### Pricing catalog
+
+- **Retail Prices API** — `prices.azure.com/api/retail/prices`. Unauthenticated, no rate limit worth worrying about.
+- **Cost Management API** — `Microsoft.CostManagement/query` for cross-check and historical reconciliation.
+- **Reservations + Savings Plans** — `Microsoft.Capacity/reservationOrders` and `Microsoft.BillingBenefits/savingsPlanOrders`.
+
+### Security
+
+- **Defender for Cloud** — `Microsoft.Security/assessments` for recommendations, `Microsoft.Security/alerts` for active findings.
+- **Defender for Containers** — CVE scans on AKS-hosted workloads.
+
+### Autoscaler signals
+
+- **AKS Cluster Autoscaler** — read-only via the `ManagedClusters` API.
+- **(future) Karpenter for Azure** — alpha at the time of writing; we'll wire as it matures.
+
+## Multi-account / multi-subscription
+
+KubeHero federates across arbitrary cloud boundaries as long as the control plane can assume each identity. The `cloud.<provider>.{accounts,projects,subscriptions}` arrays are the enumeration; leave empty to autodiscover from whatever the role has access to.
+
+Outputs:
+
+```bash
+kubehero cluster list
+# Typical multi-cloud fleet:
+# aks-westeu-prod-01   azure   westeurope    142 nodes
+# aks-ne-staging       azure   northeurope    24 nodes
+# gke-usc1-prod        gcp     us-central1    88 nodes
+# gke-euw4-batch       gcp     europe-west4   62 nodes
+# eks-use1-prod        aws     us-east-1     210 nodes
+# eks-usw2-dev         aws     us-west-2      38 nodes
+```

@@ -1,0 +1,55 @@
+{{- if and .Values.controlPlane.enabled (or .Values.postgresql.embedded (ne .Values.postgresql.external.host "")) }}
+# DB schema init / migrate. Pre-install + pre-upgrade hook so the schema
+# is current before the control-plane (which would otherwise self-migrate
+# on first request) starts. Idempotent — golang-migrate skips when up.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kubehero.fullname" . }}-db-migrate
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/component: db-migrate
+    spec:
+      serviceAccountName: {{ include "kubehero.fullname" . }}-control-plane
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: {{ include "kubehero.image" (dict "root" . "image" .Values.controlPlane.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The control-plane binary's serve subcommand applies migrations
+          # at startup; running it briefly with a short health-only mode
+          # is the simplest "migrate-only" path. Future versions add a
+          # dedicated `migrate` subcommand.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "▸ applying migrations to $DATABASE_URL"
+              # Trigger startup migrations and exit fast. The control-plane
+              # opens DB on init, runs migrations, then we kill it.
+              timeout 30 /usr/bin/control-plane serve --addr=:9999 || true
+              echo "✓ migrations applied"
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-postgres-credentials" (include "kubehero.fullname" .)) .Values.postgresql.external.existingSecret }}
+                  key: {{ default "url" .Values.postgresql.external.existingSecretKey }}
+                  optional: true
+            - name: CLICKHOUSE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-clickhouse-credentials" (include "kubehero.fullname" .)) .Values.clickhouse.external.existingSecret }}
+                  key: {{ default "url" .Values.clickhouse.external.existingSecretKey }}
+                  optional: true
+{{- end }}

@@ -1,0 +1,53 @@
+# deps
+node_modules
+.pnpm-store
+
+# next
+.next
+out
+next-env.d.ts
+*.tsbuildinfo
+
+# build output
+dist
+build
+bin
+coverage.out
+*.dylib
+*.so
+*.test
+*.out
+
+# env / secrets
+.env
+.env*.local
+*.pem
+*.key
+
+# editor / os
+.DS_Store
+.vscode
+.idea
+*.log
+.turbo
+.vercel
+
+# Generated proto code is checked in for ergonomic `go build` on a
+# fresh clone. Regenerate via `task proto` after editing any .proto.
+
+# terraform state
+.terraform
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# kubebuilder
+bin/
+cover.out
+
+# dagger
+.dagger
+
+# Helm subchart tarballs (resolved via `helm dep update`)
+deploy/helm/*/charts/
+deploy/helm/*/Chart.lock

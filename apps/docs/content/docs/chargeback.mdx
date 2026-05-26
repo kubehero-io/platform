@@ -1,0 +1,97 @@
+---
+title: Chargeback
+description: Attribute every dollar to a team, nodepool, or cost center. Grafana dashboards included.
+---
+
+KubeHero rolls up every pod-second of spend into **team**, **namespace**, **nodepool**, **cloud**, **region**, and (for GPUs) **gpu_kind** dimensions. The chart ships three Grafana dashboards that render those rollups out of the box.
+
+## The label convention
+
+KubeHero reads existing Kubernetes labels — no new configuration layer. Tag your workloads with one label and you're done.
+
+| Label (default) | What it means | Override via |
+|---|---|---|
+| `kubehero.io/team` | Owning team — the primary chargeback axis | `chargeback.teamLabel` |
+| `kubehero.io/cost-center` | Optional BU / cost center | `chargeback.costCenterLabel` |
+| nodepool label (cloud-native) | `cloud.google.com/gke-nodepool`, `agentpool`, `eks.amazonaws.com/nodegroup` | `chargeback.nodepoolLabel` |
+
+Pods without a team label roll up under the `unattributed` bucket — unallocated spend stays visible instead of silently dropped.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vectordb-ingress
+  labels:
+    kubehero.io/team: retrieval
+    kubehero.io/cost-center: ml-platform
+```
+
+## The metrics the collector exports
+
+| Metric | Labels | Units |
+|---|---|---|
+| `kubehero_pod_cost_usd_per_second` | `namespace, pod, team, cost_center, nodepool, cloud, region, gpu_kind` | USD/sec |
+| `kubehero_pod_recoverable_usd_per_second` | same | USD/sec (request minus actual use, priced out) |
+| `kubehero_pod_cpu_millicores` | same | millicores |
+| `kubehero_pod_memory_bytes` | same | bytes |
+| `kubehero_pod_gpu_util_ratio` | same | 0..1, GPU pods only |
+| `kubehero_node_cost_usd_per_hour` | `node, nodepool, cloud, region, sku, lifecycle` | USD/hr |
+
+## Recording rules shipped with the chart
+
+`deploy/helm/kubehero/templates/prometheusrule.yaml` installs:
+
+```text
+# Monthly projected spend per team
+kubehero:team_cost_usd:rate30d
+
+# Hourly burn per nodepool
+kubehero:nodepool_cost_usd:rate1h
+
+# GPU idle cost — $ teams spend on GPUs they aren't using
+kubehero:team_gpu_idle_cost_usd:rate1h
+
+# Recoverable via rightsizing, per team
+kubehero:team_recoverable_usd:rate1h
+```
+
+## Grafana dashboards
+
+The chart ships three dashboards as ConfigMaps labeled `grafana_dashboard=1` — kube-prometheus-stack's sidecar auto-discovers them.
+
+- **KubeHero — Chargeback by team** — hourly rate, 30-day projection, nodepool breakdown, GPU idle cost, ranked workload table
+- **KubeHero — Fleet** — total spend, recoverable, per-cluster time series
+- **KubeHero — GPU panel** — utilization heatmap + per-GPU idle cost ranking
+
+Disable any of them in values:
+
+```yaml
+grafana:
+  dashboards:
+    chargeback: true
+    fleet: true
+    gpu: false
+```
+
+## Budgets + alerts
+
+Pair chargeback with a `BudgetPolicy` to get alerting on projected overspend. Two alerts ship by default:
+
+- **`KubeHeroTeamOverBudgetProjected`** — `predict_linear` over 6h projects the team's 30-day spend past their budget; fires at 15m sustained.
+- **`KubeHeroGPUIdleExcessive`** — team burns > $500/hr on idle GPUs for 1h.
+
+See [`CRD reference`](/docs/crd-reference#budgetpolicy) for the full policy spec.
+
+## Verifying in a fresh cluster
+
+```bash
+helm install kubehero kubehero/kubehero \
+  --namespace kubehero-system --create-namespace \
+  --set prometheus.release=kube-prometheus-stack
+
+kubectl -n kubehero-system port-forward svc/kubehero-collector 8081:8081
+curl -s localhost:8081/metrics | grep kubehero_pod_cost_usd_per_second | head -5
+```
+
+You should see live `team=`, `nodepool=`, `cloud=` labels flowing within a minute.

@@ -1,0 +1,17 @@
+# Production: recommendation-only. The operator computes the ideal request,
+# exposes it via the CLI + dashboard, but never mutates pods.
+apiVersion: kubehero.kubehero.io/v1
+kind: RightsizingPolicy
+metadata:
+  name: prod-recommend
+  namespace: kubehero-system
+spec:
+  scope:
+    namespaceSelector:
+      matchLabels: { env: prod }
+  mode: recommend
+  targetUtilization: 70
+  safety:
+    minReplicas: 2
+    p95HeadroomPct: 50
+    observationWindow: "30d"

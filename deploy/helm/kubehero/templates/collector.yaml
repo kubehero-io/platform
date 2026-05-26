@@ -1,0 +1,50 @@
+{{- if .Values.collector.enabled -}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "kubehero.fullname" . }}-collector
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/component: collector
+    spec:
+      serviceAccountName: {{ include "kubehero.fullname" . }}-collector
+      {{- with (include "kubehero.priorityClassName" .) }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      tolerations: {{- toYaml .Values.collector.tolerations | nindent 8 }}
+      hostPID: true
+      containers:
+        - name: collector
+          image: {{ include "kubehero.image" (dict "root" . "image" .Values.collector.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "--addr=:8081"]
+          env:
+            # The collector reads pods+nodes from the kube API and ships
+            # synthetic-cost samples to the cp every 5s. CONTROL_PLANE_URL
+            # is the in-cluster Service; CLUSTER_ID stamps every sample
+            # so the cp can attribute rows. Token (if set via secret)
+            # carries the member-or-above role required by the IngestPodCost
+            # RPC.
+            - name: CONTROL_PLANE_URL
+              value: "http://{{ include "kubehero.fullname" . }}-control-plane.{{ .Release.Namespace }}.svc:{{ .Values.controlPlane.service.port }}"
+            - name: CLUSTER_ID
+              value: {{ .Values.cluster.id | default .Release.Name | quote }}
+            {{- if .Values.cluster.tokenSecret }}
+            - name: CONTROL_PLANE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cluster.tokenSecret }}
+                  key: token
+            {{- end }}
+          securityContext:
+            privileged: true
+          resources: {{- toYaml .Values.collector.resources | nindent 12 }}
+{{- end }}

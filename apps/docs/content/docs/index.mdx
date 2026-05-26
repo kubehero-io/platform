@@ -1,0 +1,49 @@
+---
+title: Getting started
+description: Install the agent, connect your first cluster, and see recoverable spend in under five minutes.
+---
+
+KubeHero is a unified cost and efficiency plane for AKS, GKE, and EKS. This page walks you through the fastest path from zero to "I can see which pods are wasting money."
+
+## Prerequisites
+
+- A Kubernetes cluster running 1.28 or newer
+- `kubectl` authenticated to that cluster
+- `helm` 3.x
+
+## Install the agent
+
+```bash
+helm repo add kubehero https://charts.kubehero.io
+helm install kubehero kubehero/kubehero \
+  --namespace kubehero-system --create-namespace \
+  -f values.yaml
+```
+
+That's the whole install. The agent runs read-only by default — no write permissions on your workloads.
+
+## Confirm telemetry is flowing
+
+```bash
+kubectl -n kubehero-system get pods
+kubectl -n kubehero-system logs daemonset/kubehero-collector --tail=20
+```
+
+You should see `attribution ok · pods=NNN · nodes=NN` within 30 seconds. If not, see [Troubleshooting](/docs/deploy#troubleshooting).
+
+## Your first scan
+
+The CLI works against your self-hosted control plane:
+
+```bash
+kubehero cluster list
+kubehero scan --cluster prod-us-east-1 --report waste
+```
+
+A minute later you'll see the top wasting workloads ranked by recoverable $/mo.
+
+## What's next
+
+- [Architecture](/docs/architecture) — how the pieces fit together
+- [CRD reference](/docs/crd-reference) — `BudgetPolicy`, `CeilingPolicy`, `RightsizingPolicy`
+- [CLI reference](/docs/cli) — every subcommand, every flag

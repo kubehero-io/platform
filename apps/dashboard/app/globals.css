@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+/* ===========================================================================
+   KUBEHERO — DESIGN TOKENS
+   ---------------------------------------------------------------------------
+   Tailwind v4 CSS-first config. Design intent: enterprise-grade, technical,
+   restrained. Tailscale / Linear / Vercel with a tasteful dose of terminal
+   language — NOT a terminal cosplay site.
+   =========================================================================== */
+
+@theme {
+  /* Surface palette — warm near-black, never pure #000 */
+  --color-bg:         #0a0a0a;
+  --color-bg-raised:  #111111;
+  --color-bg-sunken:  #070707;
+  --color-fg:         #ededeb;
+  --color-fg-dim:     #9a9a96;
+  --color-fg-faint:   #5a5a55;
+  --color-line:       rgba(255, 255, 255, 0.07);
+  --color-line-bright:rgba(255, 255, 255, 0.14);
+
+  /* Semantic — cluster-state colors. Accent reserved for kill-switch/urgency. */
+  --color-accent: #ff4d1c;      /* Kill-switch / critical only */
+  --color-signal: #3ee089;      /* Healthy */
+  --color-warn:   #f5c542;      /* Overcommitted */
+  --color-danger: #ff3b3b;      /* Burning */
+  --color-cool:   #6dd3ff;      /* Metadata / links */
+
+  /* Typography — sans body, mono for code/data/labels */
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Display scale — sans reads larger than mono at the same size, so we pull down a touch */
+  --text-display: clamp(2.75rem, 7vw, 5.75rem);
+  --text-hero:    clamp(1.75rem, 4vw, 3rem);
+
+  /* Radii — technical, not soft */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+}
+
+/* ===========================================================================
+   BASE
+   =========================================================================== */
+
+@layer base {
+  * { border-color: var(--color-line); }
+
+  html {
+    color-scheme: dark;
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Mono is opt-in for code, data, labels, section markers */
+  code, pre, kbd, samp, .font-mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "ss01", "ss02", "zero";
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-bg);
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--color-bg); }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-bright);
+    border: 2px solid var(--color-bg);
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-fg-faint); }
+}
+
+/* ===========================================================================
+   UTILITIES — minimal, intentional. Every class earns its place.
+   =========================================================================== */
+
+@layer utilities {
+
+  /* Subtle blueprint grid — only applied where it helps, masked to fade */
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, var(--color-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--color-line) 1px, transparent 1px);
+    background-size: 64px 64px;
+    background-position: -1px -1px;
+    mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+    -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+  }
+
+  /* Section marker — /// PROBLEM — 002 */
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-fg-dim);
+  }
+
+  /* Small, restrained corner brackets for feature cards */
+  .bracketed {
+    position: relative;
+  }
+  .bracketed::before,
+  .bracketed::after {
+    content: "";
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-color: var(--color-fg-faint);
+    border-style: solid;
+    border-width: 0;
+    pointer-events: none;
+  }
+  .bracketed::before {
+    top: -1px; left: -1px;
+    border-top-width: 1px; border-left-width: 1px;
+  }
+  .bracketed::after {
+    bottom: -1px; right: -1px;
+    border-bottom-width: 1px; border-right-width: 1px;
+  }
+
+  /* --- Buttons: flat, confident, sans, no uppercase shouting --- */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    background: var(--color-fg);
+    color: var(--color-bg);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    border-radius: var(--radius-sm);
+    transition: background 120ms ease;
+  }
+  .btn-primary:hover { background: #ffffff; }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    background: transparent;
+    color: var(--color-fg);
+    border: 1px solid var(--color-line-bright);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    border-radius: var(--radius-sm);
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .btn-secondary:hover {
+    border-color: var(--color-fg-dim);
+    background: var(--color-bg-raised);
+  }
+
+  /* Destructive button — reserved for the kill-switch execute action.
+     Flat, serious, no glow. */
+  .btn-destructive {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: var(--color-accent);
+    color: #ffffff;
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    border-radius: var(--radius-sm);
+    transition: background 120ms ease;
+    border: none;
+    cursor: pointer;
+  }
+  .btn-destructive:hover:not(:disabled) { background: #ff6039; }
+  .btn-destructive:disabled {
+    background: var(--color-bg-raised);
+    color: var(--color-fg-faint);
+    cursor: not-allowed;
+  }
+}

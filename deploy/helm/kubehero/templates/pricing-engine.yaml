@@ -1,0 +1,22 @@
+{{- if .Values.pricingEngine.enabled -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "kubehero.fullname" . }}-pricing-engine
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.pricingEngine.schedule | quote }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: {{ include "kubehero.fullname" . }}-pricing-engine
+          {{- with (include "kubehero.priorityClassName" .) }}
+          priorityClassName: {{ . }}
+          {{- end }}
+          restartPolicy: OnFailure
+          containers:
+            - name: refresh
+              image: {{ include "kubehero.image" (dict "root" . "image" .Values.pricingEngine.image) }}
+              args: ["quote", "--cloud=aws", "--sku=m5.large", "--region=us-east-1"]
+{{- end }}

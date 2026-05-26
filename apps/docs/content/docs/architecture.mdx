@@ -1,0 +1,33 @@
+---
+title: Architecture
+description: How the collector, control plane, and operator fit together.
+---
+
+KubeHero is four services plus an open CRD surface. The split is designed so you can run any subset in your own cluster without losing functionality.
+
+## Services
+
+| Service | Language | Where it runs | Responsibility |
+|---|---|---|---|
+| **collector** | Go + eBPF | Customer cluster (DaemonSet) | Per-pod CPU / memory / GPU attribution, cgroup-accurate. Streams compressed telemetry to the control plane. |
+| **control-plane** | Go + Connect-RPC | Your cluster | Ingests telemetry, evaluates policies, serves the dashboard and CLI. |
+| **pricing-engine** | Go (CronJob) | Your cluster | Pulls AKS/GKE/EKS pricing daily, normalizes across clouds and lifecycles (on-demand, spot, savings-plan, committed). |
+| **operator** | Go + kubebuilder | Customer cluster | Reconciles `BudgetPolicy`, `CeilingPolicy`, `RightsizingPolicy` CRDs. Never runs enforcement without `humanArm`. |
+
+## Data plane
+
+- **Telemetry**: 1-second ticks from the collector, batched into 5-second gRPC frames, LZ4 compressed. Target overhead: < 0.5% CPU, < 50 MiB RSS per node.
+- **Storage**: ClickHouse for time-series, PostgreSQL for metadata (users, orgs, policies, audit log).
+- **Transport**: mTLS end-to-end via `cert-manager` with your own CA.
+
+## The three CRDs
+
+- `BudgetPolicy` — declarative spending intent (ceiling, scope, escalation).
+- `CeilingPolicy` — burn-rate triggered enforcement that references a `BudgetPolicy`.
+- `RightsizingPolicy` — how aggressively to recommend or apply workload right-sizing.
+
+See the [CRD reference](/docs/crd-reference) for every field.
+
+## Licensing
+
+Open-core. Apache 2.0 for the agent, CLI, collector, cost-model library, and proto schemas. BSL 1.1 (converts to Apache 2.0 after three years) for the control plane, operator, pricing engine, and dashboard.

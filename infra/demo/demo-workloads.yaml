@@ -1,0 +1,116 @@
+# Synthetic workloads so chargeback dashboards have recognizable teams
+# and namespaces. Pure nginx — no actual load — the collector's demo
+# metrics carry the numbers.
+apiVersion: v1
+kind: Namespace
+metadata: { name: ml-inference, labels: { kubehero.io/team: ml-inference } }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: retrieval, labels: { kubehero.io/team: retrieval } }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: data, labels: { kubehero.io/team: data } }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: edge, labels: { kubehero.io/team: edge } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-server
+  namespace: ml-inference
+  labels:
+    app: model-server
+    kubehero.io/team: ml-inference
+    kubehero.io/cost-center: ml-platform
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: model-server } }
+  template:
+    metadata:
+      labels:
+        app: model-server
+        kubehero.io/team: ml-inference
+        kubehero.io/cost-center: ml-platform
+    spec:
+      containers:
+        - name: server
+          image: nginx:1.27-alpine
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vectordb-ingress
+  namespace: retrieval
+  labels:
+    app: vectordb-ingress
+    kubehero.io/team: retrieval
+    kubehero.io/cost-center: ml-platform
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: vectordb-ingress } }
+  template:
+    metadata:
+      labels:
+        app: vectordb-ingress
+        kubehero.io/team: retrieval
+        kubehero.io/cost-center: ml-platform
+    spec:
+      containers:
+        - name: server
+          image: nginx:1.27-alpine
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etl-nightly
+  namespace: data
+  labels:
+    app: etl-nightly
+    kubehero.io/team: data
+    kubehero.io/cost-center: analytics
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: etl-nightly } }
+  template:
+    metadata:
+      labels:
+        app: etl-nightly
+        kubehero.io/team: data
+        kubehero.io/cost-center: analytics
+    spec:
+      containers:
+        - name: worker
+          image: nginx:1.27-alpine
+          resources:
+            requests: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-gateway
+  namespace: edge
+  labels:
+    app: frontend-gateway
+    kubehero.io/team: edge
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: frontend-gateway } }
+  template:
+    metadata:
+      labels:
+        app: frontend-gateway
+        kubehero.io/team: edge
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }

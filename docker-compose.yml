@@ -1,0 +1,127 @@
+# KubeHero full stack for local development — no K8s required.
+#
+#   docker compose up --build -d
+#   open http://localhost:3001   # dashboard
+#
+# What you get:
+#   · collector on :8081 emitting demo chargeback metrics
+#   · control-plane on :8080 (Connect-RPC + /metrics)
+#   · pricing-engine on :8082
+#   · dashboard on :3001
+#   · postgres 16 on :5432 (metadata)
+#   · clickhouse on :9000 (time-series)
+#   · valkey on :6379 (cache + rate limit)
+#   · grafana on :3000 with pre-loaded dashboards
+#   · prometheus on :9090 scraping every service
+#
+# Tear down:
+#   docker compose down -v
+
+name: kubehero
+
+services:
+  # ─── storage ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kubehero
+      POSTGRES_PASSWORD: kubehero
+      POSTGRES_DB: kubehero
+    ports: ["5432:5432"]
+    volumes: [pg-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kubehero"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    environment:
+      CLICKHOUSE_USER: kubehero
+      CLICKHOUSE_PASSWORD: kubehero
+      CLICKHOUSE_DB: kubehero
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports: ["8123:8123", "9000:9000"]
+    volumes: [ch-data:/var/lib/clickhouse]
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    command: ["valkey-server", "--appendonly", "yes"]
+    ports: ["6379:6379"]
+    volumes: [valkey-data:/data]
+
+  # ─── KubeHero services ────────────────────────────────────────────────
+  collector:
+    build:
+      context: .
+      dockerfile: services/collector/Dockerfile
+    command: ["serve", "--addr=:8081", "--demo=true"]
+    ports: ["8081:8081"]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  control-plane:
+    build:
+      context: .
+      dockerfile: services/control-plane/Dockerfile
+    command: ["serve", "--addr=:8080"]
+    environment:
+      DATABASE_URL: "postgres://kubehero:kubehero@postgres:5432/kubehero?sslmode=disable"
+      CLICKHOUSE_URL: "clickhouse://kubehero:kubehero@clickhouse:9000/kubehero"
+      REDIS_URL: "redis://valkey:6379"
+    ports: ["8080:8080"]
+    depends_on:
+      postgres:   { condition: service_healthy }
+      clickhouse: { condition: service_started }
+      valkey:     { condition: service_started }
+
+  pricing-engine:
+    build:
+      context: .
+      dockerfile: services/pricing-engine/Dockerfile
+    command: ["serve", "--addr=:8082"]
+    ports: ["8082:8082"]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8080"
+    ports: ["3001:3001"]
+    depends_on: [control-plane]
+
+  # ─── observability ────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    volumes:
+      - ./infra/demo/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom-data:/prometheus
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: kubehero
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/demo/grafana-datasources.yml:/etc/grafana/provisioning/datasources/ds.yml:ro
+      - ./infra/demo/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./deploy/helm/kubehero/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  pg-data:
+  ch-data:
+  valkey-data:
+  prom-data:
+  grafana-data:

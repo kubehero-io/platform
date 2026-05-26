@@ -1,0 +1,186 @@
+---
+title: Troubleshooting
+description: Known failure modes and their runbooks.
+---
+
+If your issue isn't listed, check the [GitHub issues](https://github.com/kubehero-io/platform/issues) or reach out to `support@kubehero.io`.
+
+## Agent pods aren't ready
+
+```bash
+kubectl -n kubehero-system get pods -l app.kubernetes.io/component=collector
+```
+
+### Check 1 — RBAC
+
+The collector needs read access on pods, nodes, services, deployments. `helm install` creates a ClusterRole via `rbac.create: true`. If you disabled that or run in a locked-down cluster:
+
+```bash
+kubectl auth can-i --as=system:serviceaccount:kubehero-system:kubehero-collector \
+  list pods --all-namespaces
+# Expected: yes
+```
+
+If `no`: apply `templates/rbac.yaml` from the chart manually, or set `rbac.create: true` and re-run `helm upgrade`.
+
+### Check 2 — `hostPID` / `hostNetwork`
+
+The collector requests `hostPID: true` to attribute CPU to pod cgroups. GKE Autopilot and some hardened OpenShift clusters disallow this. Fallback:
+
+```yaml
+# values.yaml
+collector:
+  useCadvisorFallback: true
+  # Disables eBPF attribution in favor of cadvisor scraping — accuracy
+  # drops from 1s to 60s but the collector runs in any cluster.
+```
+
+### Check 3 — kernel version
+
+eBPF programs need Linux kernel ≥5.10. Check:
+
+```bash
+kubectl -n kubehero-system exec ds/kubehero-collector -- uname -r
+```
+
+If older: use the cadvisor fallback above, or upgrade nodes.
+
+## "no telemetry at control plane"
+
+```bash
+kubectl -n kubehero-system logs ds/kubehero-collector --tail=30 | grep -i error
+```
+
+### `ebpf: load: invalid argument`
+
+Kernel is too old or BPF is restricted (AppArmor / SELinux / Talos hardening). Fallback to cadvisor (see above).
+
+### `x509: certificate signed by unknown authority`
+
+mTLS cert doesn't match the control plane's CA. Rotate:
+
+```bash
+kubehero cluster rotate-cert --name <cluster>
+```
+
+Re-apply the updated secret, restart the collector DaemonSet.
+
+### `rpc error: code = Unauthenticated`
+
+The cluster token expired. cert-manager rotates the mTLS cert weekly by default. To rotate a static token manually:
+
+```bash
+kubehero auth rotate
+# then kubectl edit secret kubehero-creds and paste the new token
+```
+
+## Dashboards don't render in Grafana
+
+### Check 1 — dashboard ConfigMaps
+
+```bash
+kubectl -n monitoring get configmap -l grafana_dashboard=1 | grep kubehero
+```
+
+You should see 3 ConfigMaps (chargeback / fleet / gpu). If absent, the `grafana.enabled` value is false or your Grafana sidecar isn't watching this namespace.
+
+### Check 2 — sidecar label match
+
+kube-prometheus-stack's Grafana sidecar watches ConfigMaps with a specific label. Default: `grafana_dashboard=1`. Your chart may use a different label — check:
+
+```bash
+kubectl -n monitoring get deploy kps-grafana -o yaml | grep -A2 LABEL
+```
+
+Match it in KubeHero's values:
+
+```yaml
+grafana:
+  sidecarLabel: "your_label_here"
+  sidecarLabelValue: "1"
+```
+
+### Check 3 — PromQL returns empty
+
+Open Grafana → Explore → paste `kubehero:team_cost_usd:rate1h`. Empty?
+
+- **No data source**: make sure your dashboard's variable `${DS_PROMETHEUS}` is bound to your Prometheus datasource.
+- **Rules didn't install**: `kubectl get prometheusrule -A | grep kubehero-chargeback` — if absent, prometheus-operator CRDs aren't in the cluster or the discovery label doesn't match (see [Prometheus integration](/docs/integrations/prometheus-grafana)).
+- **Metrics not flowing**: port-forward the collector and curl `/metrics` — you should see `kubehero_pod_cost_usd_per_second` series.
+
+## "policies not firing"
+
+A policy observes by default. Nothing runs until armed.
+
+```bash
+kubectl get budgetpolicy -A -o wide
+# NAME                   HUMANARM   ARMED   STATUS
+# prod-monthly-ceiling   true       false   awaiting arm
+```
+
+Arm it:
+
+```bash
+kubehero cap --arm --policy prod-monthly-ceiling
+```
+
+If you don't want `humanArm`:
+
+```yaml
+spec:
+  humanArm: false   # not recommended for production — disables the safety gate
+```
+
+## Recording rules don't evaluate
+
+Prometheus picks up `PrometheusRule` resources via a label selector. Default mismatch is the most common reason they're ignored.
+
+```bash
+kubectl get prometheusrule -A -l release=kube-prometheus-stack | grep kubehero
+```
+
+If empty, set `prometheus.release: <your-kps-release-name>` in KubeHero's values and `helm upgrade`. Your Prometheus CR's `spec.ruleSelector.matchLabels.release` has to match.
+
+## Postgres / ClickHouse isn't reachable
+
+Check the connection string from within the control-plane pod:
+
+```bash
+kubectl -n kubehero-system exec deploy/kubehero-control-plane -- \
+  sh -c 'psql "$DATABASE_URL" -c "select 1"'
+
+kubectl -n kubehero-system exec deploy/kubehero-control-plane -- \
+  sh -c 'clickhouse-client --host=$CLICKHOUSE_HOST --secure -q "SELECT 1"'
+```
+
+Both should return `1`. If either fails:
+
+- Verify the `existingSecret` value references a real Secret in the right namespace.
+- If using `embedded: true`, confirm the subchart (CloudNativePG or clickhouse-operator) installed its own resources in the expected namespace.
+- Network policies may block egress to the DB namespace. The chart ships NetworkPolicies for this; re-apply.
+
+## Pricing quotes return `not_found`
+
+The pricing engine refreshes its SKU catalog every 6 hours. On first install, pricing data may be absent for ~6h.
+
+Force a refresh:
+
+```bash
+kubectl -n kubehero-system create job pricing-refresh-now \
+  --from=cronjob/kubehero-pricing-engine
+```
+
+## Audit log is empty
+
+The audit log persists to Postgres. Check the forwarders are configured:
+
+```bash
+kubehero audit status
+```
+
+If no forwarders are attached, events still accumulate in Postgres — you just don't get push to syslog / webhook / S3. Configure per [Production · Backups](/docs/production#backups).
+
+## Getting support
+
+- Community: [GitHub Discussions](https://github.com/kubehero-io/platform/discussions) and [issues](https://github.com/kubehero-io/platform/issues).
+- Security: `security@kubehero.io` (PGP key on the [Security](/docs/security) page).

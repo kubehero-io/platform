@@ -1,0 +1,29 @@
+# Monthly spending ceiling across all env=prod clusters.
+# Observation-only until armed. Escalation caps HPAs before evicting low-
+# priority workloads — high-pri pods are never touched.
+apiVersion: kubehero.kubehero.io/v1
+kind: BudgetPolicy
+metadata:
+  name: prod-monthly-ceiling
+  namespace: kubehero-system
+spec:
+  scope:
+    clusterSelector:
+      matchLabels: { env: prod }
+  ceiling: "$100000/mo"
+  hardStop: true
+  humanArm: true
+  escalation:
+    - action: alert
+      channels:
+        - "slack://ops-oncall"
+        - "pagerduty://prod-p1"
+      waitAfter: "30s"
+    - action: hpa.cap
+      ratioPercent: 60
+      waitAfter: "2m"
+    - action: pod.evict
+      waitAfter: "5m"
+  alertChannels:
+    - "slack://ops"
+    - "pagerduty://prod-p1"

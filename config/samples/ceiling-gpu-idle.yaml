@@ -1,0 +1,21 @@
+# GPU-specific ceiling — triggers when a workload's GPU utilization
+# stays below 15% for 4 hours. Idle GPUs burn ~$32/hr (A100) and are
+# a common waste source.
+apiVersion: kubehero.kubehero.io/v1
+kind: CeilingPolicy
+metadata:
+  name: gpu-inference-cap
+  namespace: kubehero-system
+spec:
+  budgetRef: prod-monthly-ceiling
+  trigger:
+    burnRateMilli: 1500
+    window: "4h"
+  escalation:
+    - action: alert
+      channels: ["slack://ml-ops"]
+    - action: hpa.cap
+      ratioPercent: 40
+      waitAfter: "30m"
+  cooldown: "1h"
+  humanArm: true

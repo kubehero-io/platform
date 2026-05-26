@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kubehero.v1;
+
+option go_package = "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1";
+
+service CollectorIngressService {
+  rpc Ingest(IngestRequest) returns (IngestResponse) {}
+}
+
+message PodMetric {
+  string pod_uid = 1;
+  double cpu_millicores = 2;
+  int64 mem_bytes = 3;
+  double gpu_util_pct = 4;
+  int64 ts_unix = 5;
+}
+
+message IngestRequest {
+  string cluster_id = 1;
+  string node_name = 2;
+  repeated PodMetric metrics = 3;
+}
+
+message IngestResponse {
+  int32 accepted = 1;
+}

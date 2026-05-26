@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "pnpm --filter @kubehero/dashboard build",
+  "installCommand": "pnpm install --frozen-lockfile --filter @kubehero/dashboard...",
+  "outputDirectory": ".next"
+}

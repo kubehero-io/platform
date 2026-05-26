@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+# KubeHero — recommended production overlay.
+#
+# Usage:
+#   helm upgrade --install kubehero kubehero/kubehero \
+#     -f values.production.yaml \
+#     -f values.<your-cluster>.yaml
+#
+# Layer your env-specific overrides on top (DB endpoints, image tags,
+# secrets references, ingress hostnames). Everything below is the safe
+# baseline a production install should not run without.
+
+# ─── HA replicas ──────────────────────────────────────────────────────────
+controlPlane:
+  replicas: 3
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits:   { cpu: 2,    memory: 1Gi }
+
+dashboard:
+  replicas: 2
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+operator:
+  replicas: 2  # leader-elect picks one; the other waits
+
+# ─── Schedule above customer workloads ────────────────────────────────────
+priorityClass:
+  create: true
+  value: 1000000000
+
+# ─── Default-deny network policies + tight pod security ───────────────────
+networkPolicies:
+  enabled: true
+
+podDisruptionBudget:
+  enabled: true
+
+# ─── HPA on control-plane + dashboard ─────────────────────────────────────
+autoscaling:
+  enabled: true
+  controlPlane:
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPU: 70
+    targetMemory: 75
+  dashboard:
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPU: 70
+
+# ─── Storage: external by default (BYO Postgres + ClickHouse) ─────────────
+postgresql:
+  embedded: false
+  external:
+    sslMode: verify-full
+    existingSecret: kubehero-postgres-credentials
+
+clickhouse:
+  embedded: false
+  external:
+    existingSecret: kubehero-clickhouse-credentials
+
+# ─── Auth via OIDC; embedded Dex off, point at customer issuer ────────────
+auth:
+  dex:
+    embedded: false
+  workos:
+    enabled: false
+
+# ─── Posture: turn on Trivy ingest in production ──────────────────────────
+security:
+  trivy:
+    embedded: false   # consume an existing Trivy Operator install
+
+# ─── Strict pod security context ──────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault

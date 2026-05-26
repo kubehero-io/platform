@@ -1,0 +1,28 @@
+{
+  "title": "KubeHero",
+  "pages": [
+    "index",
+    "overview",
+    "quickstart",
+    "comparison",
+    "---Product---",
+    "architecture",
+    "concepts",
+    "chargeback",
+    "stack",
+    "---Reference---",
+    "cli",
+    "crd-reference",
+    "api-reference",
+    "metrics-reference",
+    "---Integrations---",
+    "integrations/prometheus-grafana",
+    "integrations/clouds",
+    "integrations/identity",
+    "---Operations---",
+    "deploy",
+    "production",
+    "security",
+    "troubleshooting"
+  ]
+}

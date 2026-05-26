@@ -1,0 +1,97 @@
+---
+title: Identity · SSO · RBAC
+description: OIDC via Dex, role-based access, SCIM user provisioning.
+---
+
+Every path into KubeHero is authenticated. We don't ship an identity store of our own — we proxy to whatever your organization already runs.
+
+## OIDC via Dex
+
+Dex is the canonical OIDC proxy in the CNCF ecosystem. It connects to Okta, Azure AD, Google Workspace, GitHub, GitLab, or any LDAP.
+
+### Install
+
+```bash
+./infra/demo/stack-install.sh   # interactive, prompts for Dex
+# or
+helm install dex dex/dex \
+  --namespace dex --create-namespace \
+  --values dex-values.yaml
+```
+
+### Configure for Okta
+
+```yaml
+# dex-values.yaml
+config:
+  issuer: https://auth.acme.internal/dex
+  storage:
+    type: kubernetes
+    config: { inCluster: true }
+  connectors:
+    - type: oidc
+      id: okta
+      name: Okta
+      config:
+        issuer: https://acme.okta.com
+        clientID: 0oa4...
+        clientSecret: "$OKTA_CLIENT_SECRET"
+        scopes: [openid, email, profile, groups]
+```
+
+### Wire KubeHero to Dex
+
+```yaml
+# kubehero values.yaml
+auth:
+  dex:
+    embedded: false   # installed separately above
+    issuerURL: "https://auth.acme.internal/dex"
+```
+
+The dashboard now redirects unauthenticated users through Dex → Okta → back. The CLI uses device-flow or static client credentials.
+
+## RBAC
+
+Three built-in roles:
+
+| Role | Dashboard | CLI |
+|---|---|---|
+| **Admin** | Read + write everywhere, arm policies | Full |
+| **Operator** | Read + arm policies in scoped clusters | Arm / undo within scope |
+| **Viewer** | Read-only | Read-only |
+
+RBAC binds via OIDC group claims. In `values.yaml`:
+
+```yaml
+auth:
+  rbac:
+    mapping:
+      admin:    ["acme-sre-admins"]
+      operator: ["acme-sre-oncall", "acme-platform"]
+      viewer:   ["acme-engineering"]
+```
+
+Custom scopes per cluster / namespace are supported.
+
+## Audit
+
+Every authenticated action writes an `audit_log` row: `actor.sub`, `actor.email`, `actor.groups`, `action`, `target`, `result`, `request_id`. SIEM export via:
+
+```bash
+kubehero audit forward --syslog udp://siem.internal:514
+kubehero audit forward --webhook https://siem.internal/hooks/kubehero
+kubehero audit forward --s3 s3://acme-compliance/kubehero/
+```
+
+All three outputs include an HMAC signature so your SIEM can verify authenticity.
+
+## Token lifetimes
+
+- **Dashboard session** — 8 hours (sliding, refreshes on activity)
+- **CLI token** — 30 days, rotatable via `kubehero auth rotate`
+- **Agent mTLS cert** — 7 days, cert-manager rotates automatically
+
+## Service-to-service auth
+
+Intra-platform RPCs use mTLS via cert-manager's CA. The agent holds a per-cluster cert issued at `helm install` time via `kubehero cluster add`. Inbound control-plane calls verify the cert's common name matches a registered cluster.

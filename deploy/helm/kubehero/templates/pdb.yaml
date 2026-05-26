@@ -1,0 +1,28 @@
+{{- $fullname := include "kubehero.fullname" . }}
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.controlPlane.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullname }}-control-plane
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: control-plane
+{{- end }}
+---
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.dashboard.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullname }}-dashboard
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: dashboard
+{{- end }}

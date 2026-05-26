@@ -1,0 +1,47 @@
+{{- if .Values.operator.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubehero.fullname" . }}-operator
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/component: operator
+    spec:
+      serviceAccountName: {{ include "kubehero.fullname" . }}-operator
+      {{- with (include "kubehero.priorityClassName" .) }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- if gt (int .Values.operator.replicas) 1 }}
+      affinity: {{- include "kubehero.antiAffinity" (dict "component" "operator") | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: manager
+          image: {{ include "kubehero.image" (dict "root" . "image" .Values.operator.image) }}
+          args: ["--leader-elect"]
+          env:
+            # When CONTROL_PLANE_URL is set, the operator's CeilingPolicy
+            # reconciler asks the cp's GetBurnRate RPC (which reads
+            # ClickHouse) instead of the stub-zero provider — that is
+            # what lets a policy trip in the demo flow. CLUSTER_ID
+            # stamps audit events as they're emitted.
+            - name: CONTROL_PLANE_URL
+              value: "http://{{ include "kubehero.fullname" . }}-control-plane.{{ .Release.Namespace }}.svc:{{ .Values.controlPlane.service.port }}"
+            - name: CLUSTER_ID
+              value: {{ .Values.cluster.id | default .Release.Name | quote }}
+            {{- if .Values.cluster.tokenSecret }}
+            - name: CONTROL_PLANE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cluster.tokenSecret }}
+                  key: token
+            {{- end }}
+{{- end }}

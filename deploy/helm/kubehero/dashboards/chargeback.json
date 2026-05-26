@@ -1,0 +1,119 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Cost per team (hourly rate)",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "kubehero:team_cost_usd:rate1h",
+          "legendFormat": "{{team}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "showPoints": "never" }
+        }
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Monthly projected spend by team",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sort_desc(kubehero:team_cost_usd:rate30d)",
+          "legendFormat": "{{team}}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": { "mode": "continuous-BlPu" }
+        }
+      },
+      "options": { "displayMode": "gradient", "orientation": "horizontal" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cost per nodepool (hourly rate)",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "kubehero:nodepool_cost_usd:rate1h",
+          "legendFormat": "{{nodepool}} · {{cloud}} · {{region}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU idle cost per team",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "kubehero:team_gpu_idle_cost_usd:rate1h",
+          "legendFormat": "{{team}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Workloads by recoverable spend",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "topk(20, kubehero:pod_cost_usd:rate1m) * 30 * 24 * 60",
+          "legendFormat": "{{namespace}}/{{pod}} · {{team}}",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["kubehero", "chargeback", "finops"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      }
+    ]
+  },
+  "time": { "from": "now-24h", "to": "now" },
+  "timezone": "browser",
+  "title": "KubeHero — Chargeback by team",
+  "uid": "kubehero-chargeback",
+  "version": 1,
+  "weekStart": ""
+}

@@ -1,0 +1,33 @@
+{{- if .Values.controlPlane.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kubehero.fullname" . }}-test-control-plane"
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: probe
+      image: curlimages/curl:8.10.1
+      command: ["sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "▸ /healthz"
+          curl -sSf "http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}/healthz" || exit 1
+          echo "▸ /readyz"
+          curl -sSf "http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}/readyz" || exit 1
+          echo "▸ /metrics"
+          curl -sSf "http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}/metrics" | grep -q kubehero_up || exit 1
+          echo "▸ Connect HealthCheck"
+          R=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Connect-Protocol-Version: 1" \
+            -d '{}' \
+            "http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}/kubehero.v1.ControlPlaneService/HealthCheck")
+          echo "$R" | grep -q '"status"' || { echo "unexpected response: $R"; exit 1; }
+          echo "✓ all checks passed"
+{{- end }}

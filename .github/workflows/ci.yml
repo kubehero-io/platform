@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+
+jobs:
+  go:
+    name: Go — build + test + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Build every module
+        run: |
+          for d in services/control-plane services/collector services/pricing-engine services/operator cli/kubehero packages/cost-model infra/dagger; do
+            (cd "$d" && go build ./...)
+          done
+      - name: Test every module
+        run: |
+          for d in services/control-plane services/collector services/pricing-engine cli/kubehero packages/cost-model infra/dagger; do
+            (cd "$d" && go test ./...)
+          done
+
+  js:
+    name: JS — typecheck + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.15.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+
+  helm:
+    name: Helm — lint + template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Resolve subchart dependencies
+        # Required because Chart.yaml declares optional subcharts
+        # (postgresql/clickhouse/dex/trivy/etc). All conditions default
+        # to false in values.yaml so the rendered output stays minimal.
+        run: helm dep update deploy/helm/kubehero
+      - run: helm lint deploy/helm/kubehero
+      - name: Template with default values (every embedded:false)
+        run: helm template kh deploy/helm/kubehero > /dev/null
+      - name: Template with production overlay
+        run: helm template kh deploy/helm/kubehero -f deploy/helm/kubehero/values.production.yaml > /dev/null
+
+  proto:
+    name: Proto — buf lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-action@v1
+        with: { token: "" }

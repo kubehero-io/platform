@@ -1,0 +1,12 @@
+go 1.26.2
+
+use (
+	./cli/kubehero
+	./infra/dagger
+	./packages/cost-model
+	./packages/proto
+	./services/collector
+	./services/control-plane
+	./services/operator
+	./services/pricing-engine
+)

@@ -1,0 +1,407 @@
+# Default values for kubehero.
+# Every component is on by default; disable individually for bring-your-own.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # Pull pattern: <registry>/<repository>/<componentImage.name>:<tag>.
+  # Override `repository` if you mirror the published images into a
+  # private registry (Harbor, Artifactory, ECR, etc).
+  registry: ghcr.io
+  repository: kubehero
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+
+# ─── Cluster identity ─────────────────────────────────────────────────────
+# Stamped on every ingest sample so the control plane attributes rows
+# to the right cluster. The CLI's `kubehero cluster add` mints both
+# the id (UUID-shaped or slug, your choice) and the token; the helm
+# install command it prints sets these values via --set.
+cluster:
+  id: ""                      # e.g. "eks-use1-prod" — defaults to Release.Name
+  tokenSecret: ""             # name of a Secret carrying key=token (member+ role)
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ───────────────────────────────────────────────────────────────────────────
+# CRDs
+# ───────────────────────────────────────────────────────────────────────────
+crds:
+  # Install CustomResourceDefinitions with the chart. Set false if you
+  # manage CRDs out-of-band (GitOps via flux/argo, or a cluster admin
+  # installs them separately).
+  install: true
+  # When true, CRDs survive `helm uninstall` so existing user policies
+  # are not destroyed on chart removal.
+  keep: true
+
+# ───────────────────────────────────────────────────────────────────────────
+# Components
+# ───────────────────────────────────────────────────────────────────────────
+controlPlane:
+  enabled: true
+  replicas: 2
+  image:
+    name: control-plane
+    tag: "0.0.1"
+  service:
+    port: 8080
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 1,    memory: 512Mi }
+
+collector:
+  enabled: true
+  image:
+    name: collector
+    tag: "0.0.1"
+  service:
+    port: 8081
+  tolerations:
+    - operator: Exists
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+operator:
+  enabled: true
+  replicas: 1
+  image:
+    name: operator
+    tag: "0.0.1"
+
+pricingEngine:
+  enabled: true
+  replicas: 1
+  image:
+    name: pricing-engine
+    tag: "0.0.1"
+  service:
+    port: 8082
+  schedule: "0 */6 * * *"
+
+dashboard:
+  enabled: true
+  replicas: 1
+  image:
+    name: dashboard
+    tag: "0.0.1"
+  service:
+    port: 3001
+
+# ───────────────────────────────────────────────────────────────────────────
+# Chargeback / showback
+# ───────────────────────────────────────────────────────────────────────────
+# KubeHero attributes every pod-second of spend to a team, namespace,
+# nodepool, and cloud. These labels feed PromQL recording rules + the
+# Grafana dashboards shipped with this chart.
+chargeback:
+  enabled: true
+
+  # Label on customer pods that identifies the owning team. Teams already
+  # tag workloads; we read from one — no new configuration layer.
+  teamLabel: "kubehero.io/team"
+
+  # Label on customer pods that identifies the cost-center / BU. Optional;
+  # rolls up under team when absent.
+  costCenterLabel: "kubehero.io/cost-center"
+
+  # Label on nodes that identifies the nodepool. Most cloud-managed
+  # clusters set this automatically (cloud.google.com/gke-nodepool,
+  # agentpool on AKS, eks.amazonaws.com/nodegroup on EKS). Override here
+  # if your fleet uses a custom label.
+  nodepoolLabel: ""
+
+  # Default team for pods that carry no team label. Keeps unattributed
+  # spend visible rather than silently dropped.
+  defaultTeam: "unattributed"
+
+  # Optional static overrides — useful for third-party namespaces (e.g.
+  # cert-manager, kube-system) you want rolled up to a platform team.
+  # namespaceToTeam:
+  #   kube-system: platform
+  #   cert-manager: platform
+  namespaceToTeam: {}
+
+# ───────────────────────────────────────────────────────────────────────────
+# Prometheus integration (auto-detected via prometheus-operator CRDs)
+# ───────────────────────────────────────────────────────────────────────────
+prometheus:
+  # Emit ServiceMonitor + PrometheusRule resources. Requires prometheus
+  # operator CRDs in the cluster (e.g. kube-prometheus-stack installed).
+  enabled: true
+
+  # Install kube-prometheus-stack as a subchart of this release.
+  # Default: false — most production clusters already run it. Flip to
+  # true ONLY for greenfield clusters; otherwise you'll get duplicate
+  # Prometheus operators fighting over the same CRDs.
+  embedded: false
+
+  scrapeInterval: "30s"
+  scrapeTimeout: "10s"
+
+  # Selector label Prometheus uses to discover resources. kube-prometheus-
+  # stack's default matches `release: <helm-release-name>`.
+  release: "kube-prometheus-stack"
+
+  # Extra labels merged into every ServiceMonitor / PrometheusRule.
+  extraLabels: {}
+
+# ───────────────────────────────────────────────────────────────────────────
+# Grafana dashboards — picked up via the `grafana_dashboard=1` label
+# convention used by kube-prometheus-stack's sidecar.
+# ───────────────────────────────────────────────────────────────────────────
+grafana:
+  enabled: true
+  sidecarLabel: "grafana_dashboard"
+  sidecarLabelValue: "1"
+  folder: "KubeHero"
+  dashboards:
+    chargeback: true
+    fleet: true
+    gpu: true
+
+# ───────────────────────────────────────────────────────────────────────────
+# Telemetry (OTLP push — optional, for customers without Prometheus)
+# ───────────────────────────────────────────────────────────────────────────
+telemetry:
+  otlp:
+    enabled: false
+    endpoint: ""
+
+airgap: false
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STACK DEPENDENCIES
+# ═══════════════════════════════════════════════════════════════════════════
+# Every block below has two modes:
+#   · embedded: true  → install the upstream subchart in this release
+#   · embedded: false → point at an existing deployment via `external`
+# Greenfield clusters enable embedded; mature clusters use external.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── Postgres (metadata, audit, policy state) ──────────────────────────────
+postgresql:
+  # CloudNativePG — the CNCF-sandbox Kubernetes operator for Postgres.
+  embedded: false
+  external:
+    host: ""
+    port: 5432
+    database: "kubehero"
+    sslMode: "require"
+    # auth reads from the secret below; paste creds via ExternalSecret.
+    existingSecret: "kubehero-postgres-credentials"
+  # When embedded: subchart config passes through under the 'cloudnative-pg'
+  # key; see https://cloudnative-pg.io/documentation/current/installation_upgrade/
+
+# ─── ClickHouse (time-series — billions of cost-per-pod-second points) ────
+clickhouse:
+  embedded: false
+  external:
+    host: ""
+    port: 9440
+    database: "kubehero"
+    existingSecret: "kubehero-clickhouse-credentials"
+  # Embedded install uses altinity/clickhouse-operator; see
+  # https://docs.altinity.com/clickhouse-operator/
+
+# ─── Cache / rate-limit / pub-sub ─────────────────────────────────────────
+cache:
+  # Valkey — BSD-fork of Redis, fully upstream-compatible. Ships as a
+  # subchart. Swap for DragonflyDB or external Redis via `external`.
+  embedded: false
+  external:
+    host: ""
+    port: 6379
+    existingSecret: ""
+
+# ─── Auth ─────────────────────────────────────────────────────────────────
+auth:
+  # Self-hosted default: Dex as OIDC proxy to the customer's IdP (Okta,
+  # Azure AD, Google Workspace, GitHub, GitLab). Dashboard + CLI
+  # authenticate against Dex.
+  dex:
+    embedded: false
+    issuerURL: ""          # e.g. "https://auth.kubehero.internal/dex"
+    # Customer's IdP config lives here when embedded. See
+    # https://dexidp.io/docs/connectors/ for every supported source.
+    connectors: []
+  # Cloud mode: WorkOS provides SSO + SCIM. Populate only for SaaS.
+  workos:
+    enabled: false
+    apiKeySecret: ""
+    clientIdSecret: ""
+
+# ─── Secrets ──────────────────────────────────────────────────────────────
+secrets:
+  externalSecrets:
+    # External Secrets Operator bridges AWS Secrets Manager, Azure Key
+    # Vault, GCP Secret Manager, Vault, etc. → Kubernetes Secrets.
+    # Most mature clusters already run it — leave embedded=false then.
+    embedded: false
+
+# ─── Security posture ─────────────────────────────────────────────────────
+security:
+  trivy:
+    # Aqua's Trivy Operator — continuously scans workloads for CVEs +
+    # misconfigurations. Our Posture page correlates findings with $ spend.
+    embedded: false
+  tetragon:
+    # Cilium/Isovalent eBPF runtime security. Composes with our eBPF
+    # collector — same kernel hooks, different signal. Off by default
+    # since it needs kernel >= 5.10.
+    embedded: false
+  falco:
+    # CNCF graduated project. Pointer only — install separately.
+    enabled: false
+
+# ─── Cloud integration (per-cloud adapters in the control-plane) ──────────
+cloud:
+  # Enable the adapters for whichever clouds your clusters run in.
+  # Auth binds to IRSA (AWS) / Workload Identity (GCP, Azure) — no
+  # static keys required.
+  aws:
+    enabled: false
+    roleArn: ""          # IRSA role for the control-plane SA
+    regions: []          # empty = discover all
+  gcp:
+    enabled: false
+    serviceAccount: ""   # Workload Identity target
+    projects: []
+  azure:
+    enabled: false
+    clientId: ""
+    tenantId: ""
+    subscriptions: []
+
+# ─── Node autoscaler signals (we read; never replace) ─────────────────────
+autoscaler:
+  # We consume signals from whichever autoscaler you already run. The
+  # control plane treats them as an information source for rightsizing
+  # decisions and never tries to replace them.
+  karpenter:
+    enabled: false
+  clusterAutoscaler:
+    enabled: false
+  keda:
+    enabled: false
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PRODUCTION HARDENING
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── Network policies ─────────────────────────────────────────────────────
+# Default-deny inside kubehero-system with targeted allows per component.
+networkPolicies:
+  enabled: false   # Turn on once you've verified your CNI supports NetworkPolicy
+
+# ─── Pod Disruption Budgets ───────────────────────────────────────────────
+# Only take effect when a component's replica count > 1.
+podDisruptionBudget:
+  enabled: true
+
+# ─── Horizontal Pod Autoscaling ───────────────────────────────────────────
+autoscaling:
+  enabled: false
+  controlPlane:
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPU: 70
+    targetMemory: 75
+  dashboard:
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPU: 70
+
+# ─── Ingress ──────────────────────────────────────────────────────────────
+# Single Ingress resource that routes dashboard.kubehero.local to the
+# dashboard service and api.kubehero.local to the control-plane.
+ingress:
+  enabled: false
+  className: ""            # "nginx" · "traefik" · etc.
+  annotations: {}
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  #   nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+  hosts:
+    - host: dashboard.kubehero.local
+      paths:
+        - path: /
+          pathType: Prefix
+          backend: { service: dashboard, port: 3001 }
+    - host: api.kubehero.local
+      paths:
+        - path: /
+          pathType: Prefix
+          backend: { service: control-plane, port: 8080 }
+  tls: []
+  #   - hosts: [dashboard.kubehero.example.com]
+  #     secretName: kubehero-dashboard-tls
+
+# ─── cert-manager Certificate resources ───────────────────────────────────
+# When you run cert-manager (https://cert-manager.io/) and prefer to
+# manage TLS material as Kubernetes Certificate CRDs instead of pre-
+# created Secrets, flip this on. The chart emits one Certificate per
+# entry in `certManager.certificates`; the resulting Secret name is
+# what you reference from `ingress.tls[*].secretName` above.
+certManager:
+  enabled: false
+  # Cluster-wide or namespaced issuer the Certificates point at.
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+  # Default duration + renewal — cert-manager refuses values shorter
+  # than its minimums, so these are conservative.
+  duration: 2160h     # 90 days — matches Let's Encrypt
+  renewBefore: 360h   # rotate 15 days before expiry
+  certificates:
+    # One Certificate per dashboard host. Add another entry for the
+    # control-plane Ingress if you expose it directly.
+    - name: kubehero-dashboard-tls
+      secretName: kubehero-dashboard-tls
+      dnsNames:
+        - dashboard.kubehero.local
+    - name: kubehero-api-tls
+      secretName: kubehero-api-tls
+      dnsNames:
+        - api.kubehero.local
+
+# ─── Pod security context (defaults to restricted PSS) ────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# ─── Priority class (bump for production to avoid preemption) ─────────────
+# Two ways to use this:
+#   1. priorityClass.create=true  → chart creates a dedicated PriorityClass
+#      named "<release>-control-plane" with value 1,000,000,000 (well below
+#      system-cluster-critical at 2,000,000,000 but well above default user
+#      workloads). All KubeHero components default to using it.
+#   2. priorityClassName="foo"    → use an existing PriorityClass managed
+#      out of band (preempts whatever priorityClass.create does).
+priorityClass:
+  create: false
+  name: ""                         # default: <release>-control-plane
+  value: 1000000000
+  preemptionPolicy: PreemptLowerPriority   # or "Never" for non-preempting
+  annotations: {}
+
+# Override that wins over the chart-created PC. Leave empty to inherit
+# from priorityClass.create above.
+priorityClassName: ""

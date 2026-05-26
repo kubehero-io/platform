@@ -1,0 +1,128 @@
+---
+title: Prometheus + Grafana
+description: How KubeHero plugs into kube-prometheus-stack and what you get for free.
+---
+
+KubeHero is designed to ride your existing Prometheus + Grafana stack. The chart ships three resource types that plug into [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack):
+
+- **ServiceMonitor** — tells Prometheus where to scrape our `/metrics`
+- **PrometheusRule** — chargeback recording rules + alerts
+- **ConfigMap** dashboards — picked up by Grafana's sidecar via the `grafana_dashboard=1` label
+
+## Prerequisites
+
+You need the prometheus-operator CRDs in the cluster — installing the `kube-prometheus-stack` chart covers this. The KubeHero chart detects `monitoring.coreos.com/v1` and only emits the resources when those CRDs exist.
+
+## Values that wire it
+
+```yaml
+# values.yaml for kubehero
+prometheus:
+  enabled: true
+  scrapeInterval: "30s"
+  scrapeTimeout: "10s"
+  # Match whatever label your Prometheus CR uses for ServiceMonitor selection.
+  # kube-prometheus-stack's default is the release name of its own install.
+  release: "kube-prometheus-stack"
+  extraLabels: {}
+
+grafana:
+  enabled: true
+  sidecarLabel: "grafana_dashboard"
+  sidecarLabelValue: "1"
+  folder: "KubeHero"
+  dashboards:
+    chargeback: true
+    fleet: true
+    gpu: true
+```
+
+## What gets installed
+
+Inspect after `helm install`:
+
+```bash
+kubectl -n kubehero-system get servicemonitor,prometheusrule
+kubectl -n monitoring get configmap -l grafana_dashboard=1 | grep kubehero
+```
+
+You should see:
+
+- `servicemonitor/kubehero-collector`
+- `servicemonitor/kubehero-control-plane`
+- `prometheusrule/kubehero-chargeback`
+- 3 ConfigMaps (chargeback / fleet / gpu dashboards)
+
+## Troubleshooting discovery
+
+If Prometheus isn't scraping us:
+
+1. Confirm the `release:` label in `values.yaml` matches your Prometheus CR's `spec.serviceMonitorSelector.matchLabels.release`. Mismatch means Prometheus ignores our ServiceMonitor.
+2. Or disable label-based selection in your Prometheus:
+
+   ```yaml
+   # kube-prometheus-stack values
+   prometheus:
+     prometheusSpec:
+       serviceMonitorSelectorNilUsesHelmValues: false
+       ruleSelectorNilUsesHelmValues: false
+   ```
+
+3. Check the Prometheus web UI → **Status → Targets** — kubehero-collector should be `UP`.
+
+## Remote-write to Grafana Cloud
+
+If you terminate Prometheus at Grafana Cloud rather than self-hosted:
+
+```yaml
+# kube-prometheus-stack values.yaml
+prometheus:
+  prometheusSpec:
+    remoteWrite:
+      - url: https://prometheus-blocks-prod-us-central1.grafana.net/api/prom/push
+        basicAuth:
+          username: { name: grafana-cloud-creds, key: username }
+          password: { name: grafana-cloud-creds, key: password }
+```
+
+Our recording rules evaluate in your self-hosted Prometheus *and* arrive at Grafana Cloud pre-aggregated, so dashboard queries are fast even on the hosted side.
+
+## Shipped dashboards
+
+### Chargeback by team
+
+Five panels: hourly rate time series per team, 30-day projected spend bar gauge, nodepool breakdown, GPU idle cost per team, top-20 workloads table.
+
+### Fleet
+
+Headline stats: hourly burn, recoverable / month, per-cluster time series.
+
+### GPU panel
+
+Utilization heatmap + per-GPU idle-hour cost ranking.
+
+Disable any of them:
+
+```yaml
+grafana:
+  dashboards:
+    chargeback: true
+    fleet: true
+    gpu: false
+```
+
+## Custom PromQL for your own dashboards
+
+```text
+# Monthly projected spend per team
+kubehero:team_cost_usd:rate30d
+
+# Rank workloads by hourly recoverable $
+topk(20, sum(rate(kubehero_pod_recoverable_usd_per_second[5m])) by (namespace, pod)) * 3600
+
+# CVEs priced — workload cost × severity (requires Posture integration)
+kubehero_pod_cost_usd_per_second * on(pod, namespace) group_left
+  max(kubehero_workload_cve_severity_score) by (pod, namespace)
+```
+
+See [Metrics reference](/docs/metrics-reference) for the complete label set.

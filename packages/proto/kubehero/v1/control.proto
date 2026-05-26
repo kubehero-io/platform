@@ -1,0 +1,398 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kubehero.v1;
+
+option go_package = "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1";
+
+service ControlPlaneService {
+  // Liveness + version probe.
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse) {}
+
+  // Fleet view.
+  rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {}
+
+  // Register a new cluster. Server generates a UUID + a 32-byte enrollment
+  // token; the token is shown to the operator exactly once and a SHA-256
+  // hash is what the control-plane keeps. Pipe the token straight into
+  // `helm install --set cluster.id=… --set cluster.token=…`.
+  rpc RegisterCluster(RegisterClusterRequest) returns (RegisterClusterResponse) {}
+
+  // Append-only audit feed for the policy log.
+  rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse) {}
+
+  // Operators (the operator binary, the runner, future external SIEM
+  // forwarders) write into the audit log via this RPC. Server stamps the
+  // timestamp + HMAC signature; callers cannot forge either.
+  rpc AppendAuditEntry(AppendAuditEntryRequest) returns (AppendAuditEntryResponse) {}
+
+  // GetBurnRate returns the current burn rate (× 1000) for a budget over
+  // the given window. Operators call this every 30s as part of the
+  // CeilingPolicy reconcile so Tripped reflects real time-series data.
+  rpc GetBurnRate(GetBurnRateRequest) returns (GetBurnRateResponse) {}
+
+  // Top-N rightsize recommendations across the fleet.
+  rpc ListWasteRecommendations(ListWasteRecommendationsRequest) returns (ListWasteRecommendationsResponse) {}
+
+  // Drill-in for a single workload — pairs the latest rec with the
+  // audit history scoped to that workload.
+  rpc GetWorkload(GetWorkloadRequest) returns (GetWorkloadResponse) {}
+
+  // Budget + Ceiling policies as the user defined them.
+  rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse) {}
+
+  // Team / cost-center / cloud rollup for chargeback.
+  rpc GetTeamSpend(GetTeamSpendRequest) returns (GetTeamSpendResponse) {}
+
+  // Posture surface — vulnerabilities ingested from Trivy Operator
+  // (or other scanners) joined with workload spend for the
+  // "expensive AND vulnerable" cost × CVE ranking.
+  rpc ListVulnerabilities(ListVulnerabilitiesRequest) returns (ListVulnerabilitiesResponse) {}
+
+  // Statistically anomalous spend / posture / capacity signals across
+  // the fleet. Ranked by cost impact so the dashboard's overview can
+  // show the top-N "what changed worth $X" cards.
+  rpc ListAnomalies(ListAnomaliesRequest) returns (ListAnomaliesResponse) {}
+
+  // Ray-style "pending demands" view: pods that can't schedule
+  // against the current nodepool capacity, joined with a
+  // recommended capacity addition expressed in dollars.
+  rpc ListCapacityDemands(ListCapacityDemandsRequest) returns (ListCapacityDemandsResponse) {}
+
+  // Ingest endpoint for the collector. Each request is a batch of
+  // per-Pod-per-second cost samples. Servers stamps `at` if missing,
+  // resolves cluster slug → UUID, writes to ClickHouse pod_cost_1s.
+  // Idempotent on (cluster_id, pod, ts) — re-emitting the same
+  // window is a no-op so collectors can retry freely.
+  rpc IngestPodCost(IngestPodCostRequest) returns (IngestPodCostResponse) {}
+}
+
+// ─── HealthCheck ──────────────────────────────────────────────────────────
+
+message HealthCheckRequest {}
+message HealthCheckResponse {
+  string status = 1;
+  string version = 2;
+}
+
+// ─── ListClusters ─────────────────────────────────────────────────────────
+
+message ListClustersRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message Cluster {
+  string id = 1;
+  string name = 2;
+  string cloud = 3;  // aws | gcp | azure
+  string region = 4;
+  int32 nodes = 5;
+}
+
+message ListClustersResponse {
+  repeated Cluster clusters = 1;
+  string next_page_token = 2;
+}
+
+// ─── RegisterCluster ─────────────────────────────────────────────────────
+
+message RegisterClusterRequest {
+  string name = 1;        // required, becomes the slug if `slug` is empty
+  string cloud = 2;       // aws | gcp | azure
+  string region = 3;
+  string slug = 4;        // optional; defaults to a normalised `name`
+  string org = 5;         // optional; defaults to "default" until orgs are wired
+}
+
+message RegisterClusterResponse {
+  Cluster cluster = 1;
+  // Bearer token shown to the operator once. The server only retains
+  // a SHA-256 hash. Treat as a credential.
+  string token = 2;
+  // Helm install snippet pre-filled with cluster.id + cluster.token.
+  string helm_install = 3;
+}
+
+// ─── ListAuditLog ─────────────────────────────────────────────────────────
+
+message ListAuditLogRequest {
+  // Optional cluster filter; empty means fleet-wide.
+  string cluster_id = 1;
+  // Empty / 0 → server picks a sensible default (e.g. 50).
+  int32 limit = 2;
+  // Optional outcome filter: applied | armed | cooldown | reverted.
+  string outcome = 3;
+}
+
+message AuditEntry {
+  string id = 1;            // surrogate audit id, e.g. "aud-54021"
+  string at = 2;            // RFC3339 timestamp
+  string policy = 3;        // policy name (kind/name)
+  string action = 4;        // human-readable, e.g. "hpa.cap · 50%"
+  string cluster = 5;       // cluster scope (id or "all prod")
+  string outcome = 6;       // applied | armed | cooldown | reverted
+  double effect_usd_month = 7;  // optional realised saving, $/mo
+}
+
+message ListAuditLogResponse {
+  repeated AuditEntry entries = 1;
+}
+
+message AppendAuditEntryRequest {
+  string org = 1;             // optional; defaults to "default"
+  string cluster_id = 2;      // optional UUID for the originating cluster
+  string actor_sub = 3;       // who is recording the event ("operator", user sub, etc.)
+  string actor_email = 4;     // optional, for audit readability
+  string action = 5;          // e.g. "ceiling.tripped", "rightsize.apply"
+  string target_kind = 6;     // CRD kind ("CeilingPolicy", "Deployment")
+  string target_name = 7;     // resource name ("prod-burn-rate-2x")
+  bytes payload = 8;          // JSON; opaque to the server
+  string outcome = 9;         // applied | armed | cooldown | reverted | success | error
+  double effect_usd_month = 10; // optional realised saving for surfacing on the dashboard
+}
+
+message AppendAuditEntryResponse {
+  int64 id = 1;
+  string at = 2;     // RFC3339, server-stamped
+}
+
+message GetBurnRateRequest {
+  string cluster_id = 1;             // optional; "" means fleet-wide
+  string namespace = 2;              // workload namespace the policy scopes to
+  string window = 3;                 // "5m", "1h", "24h" (parsed server-side)
+  double monthly_ceiling_usd = 4;    // operator pre-parses BudgetPolicy.Ceiling
+}
+
+message GetBurnRateResponse {
+  int32 burn_rate_milli = 1;   // 1500 = 1.5× budgeted rate
+  // The reading is "available" only when ClickHouse rows exist for the
+  // window AND the BudgetPolicy resolved with a parseable ceiling. When
+  // false, callers should treat the policy as Unknown (matches the
+  // operator's BurnRateProvider error semantics).
+  bool available = 2;
+  string source = 3;           // "clickhouse" | "stub"
+}
+
+// ─── ListWasteRecommendations ────────────────────────────────────────────
+
+message ListWasteRecommendationsRequest {
+  string cluster_id = 1;    // optional fleet filter
+  int32 limit = 2;          // default 50
+}
+
+message WasteRecommendation {
+  string rank = 1;          // "01", "02", … (server-rendered for stable sort)
+  string workload = 2;
+  string namespace = 3;
+  string cluster = 4;       // human-readable cluster name
+  string cloud = 5;         // AKS | EKS | GKE
+  string signal = 6;        // detail line, e.g. "cpu.req=16  used=0.41"
+  double recoverable_usd_month = 7;
+  string action = 8;        // apply | review (UI hint)
+  string severity = 9;      // accent | warn (UI hint)
+}
+
+message ListWasteRecommendationsResponse {
+  repeated WasteRecommendation recommendations = 1;
+}
+
+// ─── GetWorkload ─────────────────────────────────────────────────────────
+
+message GetWorkloadRequest {
+  string cluster = 1;
+  string namespace = 2;
+  string name = 3;
+}
+
+message GetWorkloadResponse {
+  WasteRecommendation recommendation = 1;  // unset when no rec exists yet
+  repeated AuditEntry history = 2;          // newest first
+}
+
+// ─── ListPolicies ─────────────────────────────────────────────────────────
+
+message ListPoliciesRequest {
+  string cluster_id = 1;    // optional
+  string kind = 2;          // optional: BudgetPolicy | CeilingPolicy
+}
+
+message Policy {
+  string name = 1;
+  string scope = 2;             // "env=prod · all clusters"
+  double ceiling_usd = 3;       // monthly ceiling
+  int32 spent_pct = 4;          // 0..100
+  string kind = 5;              // BudgetPolicy | CeilingPolicy
+  bool armed = 6;
+}
+
+message ListPoliciesResponse {
+  repeated Policy policies = 1;
+}
+
+// ─── GetTeamSpend ─────────────────────────────────────────────────────────
+
+message GetTeamSpendRequest {
+  string window = 1;        // "30d" | "7d" | "24h" — default 30d
+}
+
+message TeamSpend {
+  string team = 1;
+  string cost_center = 2;
+  double spend_usd_month = 3;
+  double recoverable_usd_month = 4;
+  double gpu_idle_usd_month = 5;
+  double aws_usd_month = 6;
+  double gcp_usd_month = 7;
+  double azure_usd_month = 8;
+}
+
+message GetTeamSpendResponse {
+  repeated TeamSpend teams = 1;
+  double fleet_total_usd_month = 2;
+  double fleet_recoverable_usd_month = 3;
+}
+
+// ─── ListVulnerabilities ─────────────────────────────────────────────────
+
+message ListVulnerabilitiesRequest {
+  string cluster_id = 1;       // optional fleet filter
+  string severity = 2;         // optional: critical | high | medium | low
+  int32 limit = 3;             // default 50
+}
+
+message Vulnerability {
+  string id = 1;               // CVE id, e.g. "CVE-2024-1234"
+  string severity = 2;         // critical | high | medium | low
+  string workload = 3;         // owning workload name
+  string namespace = 4;
+  string cluster = 5;
+  string image = 6;            // container image w/ tag
+  string package_name = 7;
+  string installed_version = 8;
+  string fixed_version = 9;    // empty = no fix yet
+  double cvss = 10;            // 0..10
+  double cost_usd_month = 11;  // workload monthly cost — for cost × CVE ranking
+  string source = 12;          // "trivy" | "defender" | "inspector" | "gcp-scc"
+  string first_seen = 13;      // RFC3339
+}
+
+message ListVulnerabilitiesResponse {
+  repeated Vulnerability vulnerabilities = 1;
+  // Aggregate counts so the dashboard header doesn't have to recompute.
+  int32 critical_count = 2;
+  int32 high_count = 3;
+  int32 medium_count = 4;
+  int32 low_count = 5;
+}
+
+// ─── ListAnomalies ───────────────────────────────────────────────────────
+
+message ListAnomaliesRequest {
+  string scope = 1;        // "" | "team" | "namespace" | "cluster" | "workload"
+  string window = 2;        // "24h" | "7d" | "30d" — default 7d
+  int32 limit = 3;
+}
+
+message Anomaly {
+  string id = 1;            // surrogate id, e.g. "anom-7c91"
+  string kind = 2;          // "spend" | "capacity" | "posture"
+  string title = 3;         // "ml-inference spend +34% w/w"
+  string subject = 4;       // the affected target (team/namespace/cluster name)
+  string detail = 5;        // one-line plain-English context
+  double delta_pct = 6;     // signed pct change vs window mean
+  double impact_usd_month = 7;  // dollar exposure for ranking
+  string severity = 8;      // "info" | "warn" | "critical"
+  string source = 9;        // "demo" until real ClickHouse rows back this
+  // Deep-link the dashboard surfaces as a single button on the card.
+  string link_path = 10;    // e.g. "/workloads/eks-use1-prod/ml-inference/model-server-a100"
+}
+
+message ListAnomaliesResponse {
+  repeated Anomaly anomalies = 1;
+  // Aggregate so the overview's KPI doesn't recount.
+  int32 total = 2;
+}
+
+// ─── ListCapacityDemands ─────────────────────────────────────────────────
+
+message ListCapacityDemandsRequest {
+  string cluster_id = 1;     // optional fleet-wide filter
+  int32 limit = 2;
+}
+
+message CapacityDemand {
+  string id = 1;             // e.g. "demand-eks-use1-ml-1"
+  string cluster = 2;        // human cluster name
+  string namespace = 3;
+  string workload = 4;       // owning Deployment / StatefulSet
+  int32 pending_pods = 5;    // count blocked
+  string requested_cpu = 6;  // e.g. "16 cores", aggregated
+  string requested_mem = 7;  // e.g. "64 GiB"
+  string requested_gpu = 8;  // e.g. "2× A100" — empty if no GPU ask
+  string oldest_pending_age = 9;  // human duration since the oldest pending pod's createdAt
+  // Recommendation that would unstick the demand.
+  string recommended_action = 10;  // "scale nodepool batch-a100 by 2 nodes"
+  double recommended_cost_usd_month = 11;  // if you do that, this is what it costs
+  // Cost of doing nothing — sum of work the pending pods would have done.
+  double blocked_cost_usd_month = 12;
+  string source = 13;       // "demo" until kube-scheduler events ingest lands
+}
+
+message ListCapacityDemandsResponse {
+  repeated CapacityDemand demands = 1;
+  int32 total_pending_pods = 2;
+  double total_blocked_usd_month = 3;
+}
+
+// ─── IngestPodCost ───────────────────────────────────────────────────────
+
+message PodCostSample {
+  // Identifying the source. cluster may be a slug ("eks-use1-prod")
+  // or a UUID — server resolves either.
+  string cluster = 1;
+  string namespace = 2;
+  string pod = 3;
+  // Optional. Server stamps wall-clock when missing so collector
+  // retries don't drift the timeline.
+  int64 ts_unix_ms = 4;
+
+  // Attribution labels read from the Pod's metadata, propagated for
+  // the chargeback rollups (kubehero.io/team, kubehero.io/cost-center,
+  // and the nodepool label as detected on the host).
+  string team = 5;
+  string cost_center = 6;
+  string nodepool = 7;
+  string node = 8;
+  string region = 9;
+  string sku = 10;
+  string lifecycle = 11; // on-demand | spot | savings-plan | committed
+  string gpu_kind = 12;
+
+  // Resource-attribution snapshot at this tick.
+  uint32 cpu_millicores = 13;
+  uint64 mem_bytes = 14;
+  float gpu_util_pct = 15;
+
+  // Cost per second of wall clock at this tick. For the synthetic
+  // collector this is requests × node price. For the real eBPF
+  // collector this becomes utilisation-weighted.
+  double cost_usd_sec = 16;
+  double recoverable_usd_sec = 17;
+}
+
+message IngestPodCostRequest {
+  // Server stamps cluster_id from the calling principal when this is
+  // empty — the collector's API key carries the cluster identity.
+  string cluster_id = 1;
+  repeated PodCostSample samples = 2;
+}
+
+message IngestPodCostResponse {
+  // Number of rows actually written to ClickHouse (after dedup +
+  // validation). Less than `len(samples)` when some rows were
+  // dropped for missing fields.
+  int32 written = 1;
+  int32 dropped = 2;
+}

@@ -1,0 +1,133 @@
+version: "3"
+
+vars:
+  GO_PACKAGES: ./cli/... ./packages/cost-model/... ./services/...
+  MODULE_DIRS:
+    - cli/kubehero
+    - packages/cost-model
+    - services/collector
+    - services/control-plane
+    - services/operator
+    - services/pricing-engine
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task -l
+    silent: true
+
+  # ─── build ─────────────────────────────────────────────────────────────
+  build:
+    desc: Build every Go module and every TS/JS workspace
+    deps: [build:go, build:pnpm]
+
+  build:go:
+    desc: Build every Go module in go.work
+    cmds:
+      - for: { var: MODULE_DIRS }
+        cmd: (cd {{.ITEM}} && go build ./...)
+
+  build:pnpm:
+    desc: Build every TS/JS workspace via turbo
+    cmds:
+      - pnpm install --frozen-lockfile
+      - pnpm -w build
+
+  # ─── test ──────────────────────────────────────────────────────────────
+  test:
+    desc: Run every test in every module
+    deps: [test:go]
+
+  test:go:
+    cmds:
+      - for: { var: MODULE_DIRS }
+        cmd: (cd {{.ITEM}} && go test ./...)
+
+  # ─── lint ──────────────────────────────────────────────────────────────
+  lint:
+    desc: Lint Go and TS/JS
+    deps: [lint:go, lint:pnpm]
+
+  lint:go:
+    cmds:
+      - for: { var: MODULE_DIRS }
+        cmd: (cd {{.ITEM}} && golangci-lint run ./...)
+
+  lint:pnpm:
+    cmds:
+      - pnpm -w lint
+
+  # ─── proto ─────────────────────────────────────────────────────────────
+  proto:
+    desc: Generate TS + Go from .proto (buf)
+    dir: packages/proto
+    cmds:
+      - buf lint
+      - buf generate
+
+  # ─── helm ──────────────────────────────────────────────────────────────
+  helm:deps:
+    desc: Resolve subchart dependencies (postgresql, clickhouse, dex, trivy, …)
+    cmds:
+      - helm dep update deploy/helm/kubehero
+
+  helm:lint:
+    desc: helm lint the kubehero chart (runs `helm dep update` first)
+    deps: [helm:deps]
+    cmds:
+      - helm lint deploy/helm/kubehero
+
+  helm:template:
+    desc: Render the chart to stdout (spot-check)
+    deps: [helm:deps]
+    cmds:
+      - helm template deploy/helm/kubehero
+
+  smoke:
+    desc: Compose-based image integration smoke (build → boot → RPC roundtrips → tear down)
+    cmds:
+      - ./infra/demo/smoke.sh
+
+  demo:
+    desc: One-command end-to-end demo on a local kind cluster (full stack + tripping policy)
+    cmds:
+      - ./infra/demo/task-demo.sh
+
+  demo:clean:
+    desc: Tear down the kind demo cluster
+    cmds:
+      - ./infra/demo/task-demo.sh --clean
+
+  # ─── dev shortcuts ─────────────────────────────────────────────────────
+  dev:dashboard:
+    desc: Run the product dashboard at :3001
+    dir: apps/dashboard
+    cmds: [pnpm dev]
+
+  dev:control-plane:
+    desc: Run the control-plane locally
+    dir: services/control-plane
+    cmds: [go run ./cmd/control-plane serve]
+
+  dev:collector:
+    dir: services/collector
+    cmds: [go run ./cmd/collector serve]
+
+  dev:pricing-engine:
+    dir: services/pricing-engine
+    cmds: [go run ./cmd/pricing-engine serve]
+
+  # ─── license headers ───────────────────────────────────────────────────
+  license:apply:
+    desc: Apply Apache 2.0 / BSL 1.1 headers across the tree
+    cmds:
+      - bash scripts/add-license-headers.sh
+
+  # ─── clean ─────────────────────────────────────────────────────────────
+  clean:
+    cmds:
+      - for: { var: MODULE_DIRS }
+        cmd: (cd {{.ITEM}} && go clean ./... && rm -rf bin dist)
+      - pnpm -w clean || true
+      - rm -rf packages/proto/gen

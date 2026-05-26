@@ -1,0 +1,251 @@
+---
+title: Production deployment
+description: Sizing, HA, backups, disaster recovery, air-gap, and federation for production KubeHero installs.
+---
+
+This page covers production deployment concerns — the things you'd want answered before running KubeHero as a P1 system. For a five-minute install, see [Quickstart](/docs/quickstart).
+
+## Reference topology
+
+A production self-hosted deployment runs in a dedicated `kubehero-system` namespace with the following components:
+
+```text
+kubehero-system
+├── kubehero-control-plane  × 2 replicas   (HA via leader election)
+├── kubehero-operator        × 1 replica   (leader-elected, exclusive)
+├── kubehero-pricing-engine  × 1 replica   (CronJob, runs every 6h)
+├── kubehero-collector       DaemonSet      (one per node, eBPF)
+└── kubehero-dashboard       × 2 replicas   (stateless)
+
+storage (separate namespaces)
+├── cnpg-system              CloudNativePG cluster ×3 replicas
+├── clickhouse-system        ClickHouse ×3 shards ×2 replicas
+└── valkey                   sentinel mode ×3 replicas
+
+auth
+└── dex                      ×2 replicas  (connected to corp IdP)
+```
+
+## Sizing
+
+| Component | Sizing per 1,000 nodes |
+|---|---|
+| Control plane | 2× (2 vCPU / 2 GiB) |
+| Collector | 100m CPU / 50 MiB per node (overhead budget) |
+| Operator | 1× (500m CPU / 512 MiB) |
+| Pricing engine | 1× CronJob (500m CPU / 1 GiB during run) |
+| Dashboard | 2× (500m CPU / 1 GiB) |
+| PostgreSQL | 3× (4 vCPU / 16 GiB / 200 GiB SSD) |
+| ClickHouse | 3 shards × 2 replicas (8 vCPU / 32 GiB / 2 TiB NVMe per pod) |
+| Valkey | 3× (500m CPU / 1 GiB) |
+| Dex | 2× (200m CPU / 256 MiB) |
+
+Scale ClickHouse first as you grow — it's the hot path for dashboard queries. Everything else is comparatively flat.
+
+## High availability
+
+### Control plane
+
+Runs with `--leader-elect` via controller-runtime. Two replicas; one serves RPC, the other is warm standby. Leader election leases in PostgreSQL.
+
+### Operator
+
+Same leader-elect pattern. One active, one warm. CRD reconciliation is idempotent so a failover is invisible to customers.
+
+### Collector
+
+DaemonSet — every node runs one, no election. If a collector crashes, its node's telemetry gaps until the pod restarts. We buffer up to 60s of ticks in memory to cover brief pod restarts; longer outages show as a visible gap in the `kubehero_pod_cost_usd_per_second` series.
+
+### Dashboard
+
+Stateless Next.js; scale horizontally behind your existing ingress.
+
+### Postgres
+
+CloudNativePG runs 3 replicas with streaming replication + automated failover. Backup strategy below.
+
+### ClickHouse
+
+Altinity's operator manages 3 shards × 2 replicas. ZooKeeper or ClickHouse Keeper provides consensus. Reads prefer the local replica; writes go to the leader of each shard.
+
+## Backups
+
+### Postgres
+
+CloudNativePG ships WAL-archive + periodic base backups to object storage (S3-compatible):
+
+```yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: kubehero-postgres }
+spec:
+  instances: 3
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://acme-backups/kubehero-postgres
+      s3Credentials:
+        accessKeyId:     { name: pg-backup-creds, key: access_key }
+        secretAccessKey: { name: pg-backup-creds, key: secret_key }
+    retentionPolicy: 30d
+```
+
+RPO: 5 minutes (WAL archive interval). RTO: ~10 minutes (PITR restore + cluster re-bootstrap).
+
+### ClickHouse
+
+`BACKUP TABLE` to S3 daily; `s3_disk` storage policy for tiered cold storage of tables older than 90 days.
+
+```sql
+BACKUP TABLE kubehero.pod_cost_1s TO S3('s3://acme-backups/kubehero-clickhouse/2026-04-24', '...', '...');
+```
+
+RPO depends on backup schedule. RTO: hours for a full restore, but the time-series data is replayable from any raw ingest archive you kept.
+
+### Audit log
+
+Always tier to immutable storage — every action's signed record lands in S3-compatible object storage via the continuous audit exporter:
+
+```bash
+kubehero audit forward --s3 s3://acme-compliance/kubehero-audit/
+```
+
+## Disaster recovery
+
+Recovery scenarios we've rehearsed:
+
+### Single control-plane pod loss
+Leader lease expires within 15s; standby takes over. No data loss. No dashboard interruption beyond a brief `503`.
+
+### Full cluster loss
+Redeploy from the Helm chart. Restore Postgres from PITR, ClickHouse from the latest snapshot. Audit log survives in object storage. Agents reconnect to the new ingress endpoint automatically via the `kubehero-cluster-cert` ConfigMap.
+
+### Region-level cloud outage
+Configure Postgres cross-region replication (CloudNativePG supports this via `externalClusters`). Primary control plane in the surviving region. ClickHouse needs a separate decision — full cross-region replication is expensive; most customers accept a few hours of gap.
+
+## Air-gap install
+
+Pre-mirror every image to an internal registry, then install with the air-gap overlay:
+
+```bash
+helm install kubehero deploy/helm/kubehero \
+  -f deploy/helm/kubehero/values.yaml \
+  -f deploy/helm/kubehero/values.airgap.yaml \
+  --set image.registry=registry.internal.acme.com \
+  --set imagePullSecrets[0].name=acme-regcred
+```
+
+No outbound traffic required. Pricing catalog can be pre-populated via:
+
+```bash
+kubectl -n kubehero-system exec deploy/kubehero-pricing-engine -- \
+  kubehero pricing import --from ./pricing-snapshot.json
+```
+
+Customers in defense or regulated industries mirror this snapshot monthly.
+
+## Federation — multi-cluster
+
+One control plane. Many clusters. This is the default shape for customers running more than a handful of Kubernetes clusters.
+
+### Architecture
+
+```text
+┌──────────────── federation hub (KubeHero control plane) ───────────────────┐
+│                                                                             │
+│     ┌──── Postgres ─── ClickHouse ─── Valkey ─── Dex ─── Dashboard ────┐   │
+│     │                                                                   │   │
+│     └── ingress.kubehero.internal ─── mTLS listener ───────────────────┘   │
+│                                          ▲                                  │
+└──────────────────────────────────────────┼──────────────────────────────────┘
+                                           │
+                   ┌───────────────────────┼───────────────────────┐
+                   │                       │                       │
+          ┌────────┼──┐           ┌────────┼──┐           ┌────────┼──┐
+          │cluster-a  │           │cluster-b  │           │cluster-c  │
+          │ agent DS  │           │ agent DS  │           │ agent DS  │
+          │ operator  │           │ operator  │           │ operator  │
+          └───────────┘           └───────────┘           └───────────┘
+              AWS                      GCP                     Azure
+```
+
+Each edge cluster runs the agent DaemonSet + operator (for local CRD enforcement). The control plane runs once, usually in a dedicated platform cluster.
+
+### Registration
+
+```bash
+kubehero cluster add \
+  --name prod-us-east-1 \
+  --cloud aws --region us-east-1
+```
+
+This issues a per-cluster mTLS cert, which you drop into the agent Helm install on the edge cluster:
+
+```bash
+helm install kubehero-agent kubehero/kubehero \
+  --namespace kubehero-system --create-namespace \
+  --set controlPlane.enabled=false \
+  --set operator.enabled=true \
+  --set dashboard.enabled=false \
+  --set cloud.enabled=true \
+  --set cloud.hubEndpoint=https://ingress.kubehero.internal \
+  --set-file cloud.clusterCert=./cluster-cert.pem
+```
+
+### Cross-cluster policies
+
+Write a `BudgetPolicy` once in the hub with `scope.clusterSelector` — it replicates to every matching cluster's operator:
+
+```yaml
+apiVersion: kubehero.kubehero.io/v1
+kind: BudgetPolicy
+metadata: { name: all-prod-ceiling }
+spec:
+  scope:
+    clusterSelector:
+      matchLabels: { env: prod }   # matches every prod-* cluster
+  ceiling: "$500000/mo"
+  hardStop: true
+```
+
+The hub's operator watches the policy → pushes to each matched cluster's operator via the same Connect-RPC transport agents use. Each edge operator treats the policy as its own and applies locally.
+
+### Multi-tenant isolation
+
+RBAC scopes limit who can arm policies per cluster:
+
+```yaml
+auth:
+  rbac:
+    clusterScopes:
+      - name: acme-sre-east
+        groups: ["acme-sre-east"]
+        clusters: ["eks-use1-prod", "eks-use1-staging"]
+        role: operator
+      - name: acme-ml-platform
+        groups: ["acme-ml"]
+        clusters: ["aks-westeu-prod-01"]
+        role: operator
+```
+
+SRE East can't arm ML Platform's policies and vice versa, even though both appear in the same dashboard.
+
+## Hardening
+
+- **Network policies** — chart ships default-deny NetworkPolicies you can enable via `networkPolicies.enabled: true`.
+- **PSS baseline** — every manifest conforms to the restricted Pod Security Standard.
+- **Image signing** — chart references are all `@sha256:` pinned; images are Cosign-signed and verified by the chart's admission webhook if enabled.
+- **SBOM** — every image has a Syft-generated SBOM attached as a Cosign artifact.
+- **Supply chain** — our build pipelines are reproducible via Dagger; see [`infra/dagger/`](https://github.com/kubehero-io/platform/tree/main/infra/dagger).
+
+## Upgrading
+
+Chart versions follow semver. Minor upgrades are always zero-downtime if you run the HA topology. Major upgrades (v1 → v2) may have CRD migrations — we ship a `helm upgrade --atomic` path plus a one-command `kubehero migrate v1-v2` that walks your existing CRDs through the new schema.
+
+## Monitoring KubeHero itself
+
+We eat our own dog food. The chart ships PrometheusRules for:
+
+- **Control-plane liveness** — `up{service="kubehero-control-plane"} == 0`
+- **Collector coverage** — fires when a node's collector stops reporting for >60s
+- **Policy evaluation latency** — alerts if the operator's reconcile loop grows beyond 2s
+- **Database connection pool saturation** — both Postgres and ClickHouse

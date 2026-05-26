@@ -1,0 +1,74 @@
+{{ "" }}
+KubeHero v{{ .Chart.AppVersion }} installed.
+Release: {{ .Release.Name }} · namespace: {{ .Release.Namespace }}
+
+Components installed:
+{{- if .Values.controlPlane.enabled }}
+  ✓ control-plane    (Connect-RPC on :{{ .Values.controlPlane.service.port }})
+{{- end }}
+{{- if .Values.collector.enabled }}
+  ✓ collector        (DaemonSet, scrape on :{{ .Values.collector.service.port }})
+{{- end }}
+{{- if .Values.operator.enabled }}
+  ✓ operator         (reconciles BudgetPolicy / CeilingPolicy / RightsizingPolicy)
+{{- end }}
+{{- if .Values.pricingEngine.enabled }}
+  ✓ pricing-engine   (CronJob {{ .Values.pricingEngine.schedule }})
+{{- end }}
+{{- if .Values.dashboard.enabled }}
+  ✓ dashboard        (UI on :{{ .Values.dashboard.service.port }})
+{{- end }}
+
+NEXT STEPS
+
+1. Watch pods come up:
+   kubectl -n {{ .Release.Namespace }} get pods -w
+
+{{- if .Values.dashboard.enabled }}
+
+2. Open the dashboard:
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kubehero.fullname" . }}-dashboard {{ .Values.dashboard.service.port }}:{{ .Values.dashboard.service.port }}
+   open http://localhost:{{ .Values.dashboard.service.port }}
+{{- end }}
+
+3. Apply your first policy (samples in config/samples/):
+   kubectl apply -f https://raw.githubusercontent.com/kubehero/kubehero-platform/main/config/samples/budget-prod-monthly.yaml
+   kubehero cap --arm --policy prod-monthly-ceiling
+
+{{- if and .Values.prometheus.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") }}
+
+4. Prometheus is scraping us. Check Grafana for the "{{ .Values.grafana.folder }}" folder.
+{{- else }}
+
+4. Install kube-prometheus-stack alongside us to get the chargeback dashboards:
+   helm install kps prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
+{{- end }}
+
+{{- if eq .Values.postgresql.embedded false }}
+{{- if and (eq .Values.postgresql.external.host "") (eq .Values.controlPlane.enabled true) }}
+
+⚠️  postgresql.external.host is empty AND postgresql.embedded=false.
+   The control-plane is running in stub mode (no persistence).
+   Set CONTROL_PLANE will only return demo data until you provision Postgres.
+{{- end }}
+{{- end }}
+
+{{- if or .Values.postgresql.embedded .Values.clickhouse.embedded .Values.cache.embedded .Values.auth.dex.embedded .Values.security.trivy.embedded .Values.security.tetragon.embedded .Values.secrets.externalSecrets.embedded .Values.prometheus.embedded }}
+
+📦 SUBCHARTS
+   You enabled at least one `<component>.embedded: true`. Make sure
+   you ran `helm dep update` against this chart before installing —
+   otherwise the subchart resources will be missing. CI does this
+   automatically on release; local installs need it once after
+   pulling the chart.
+{{- end }}
+
+DOCS
+   https://kubehero.io/docs                       — full reference
+   https://kubehero.io/docs/quickstart            — 5-min walk-through
+   https://kubehero.io/docs/integrations/clouds   — AWS / GCP / Azure setup
+   https://kubehero.io/docs/troubleshooting       — failure modes + fixes
+
+SUPPORT
+   GitHub: https://github.com/kubehero-io/platform/issues
+   Email:  hello@kubehero.io

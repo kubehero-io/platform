@@ -1,0 +1,76 @@
+{{- if and .Values.prometheus.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") .Values.chargeback.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "kubehero.fullname" . }}-chargeback
+  labels:
+    {{- include "kubehero.labels" . | nindent 4 }}
+    release: {{ .Values.prometheus.release | quote }}
+    {{- with .Values.prometheus.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: kubehero.chargeback.recording
+      interval: 1m
+      rules:
+        # Per-pod cost rolled up per minute. The collector exports
+        # kubehero_pod_cost_usd_per_second with the labels:
+        #   namespace, pod, team, cost_center, nodepool, cloud, region,
+        #   gpu_kind (optional)
+        - record: kubehero:pod_cost_usd:rate1m
+          expr: sum(rate(kubehero_pod_cost_usd_per_second[1m])) by (namespace, pod, team, cost_center, nodepool, cloud, region, gpu_kind) * 60
+
+        # Team-level rollup — the headline chargeback number.
+        - record: kubehero:team_cost_usd:rate1h
+          expr: sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (team) * 3600
+
+        - record: kubehero:team_cost_usd:rate24h
+          expr: sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (team) * 86400
+
+        - record: kubehero:team_cost_usd:rate30d
+          expr: sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (team) * 86400 * 30
+
+        # Nodepool-level rollup — what each pool costs across all teams.
+        - record: kubehero:nodepool_cost_usd:rate1h
+          expr: sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (nodepool, cloud, region) * 3600
+
+        # Cost-center / BU rollup.
+        - record: kubehero:cost_center_cost_usd:rate1h
+          expr: sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (cost_center) * 3600
+
+        # GPU-specific: idle-time cost per team (what teams are burning
+        # on GPUs they're not actually using).
+        - record: kubehero:team_gpu_idle_cost_usd:rate1h
+          expr: |
+            sum(
+              rate(kubehero_pod_cost_usd_per_second{gpu_kind!=""}[5m])
+              * on(pod, namespace) group_left
+              (1 - max(kubehero_pod_gpu_util_ratio) by (pod, namespace))
+            ) by (team) * 3600
+
+        # Recoverable spend: delta between requested and used resources
+        # at the pod level, priced out.
+        - record: kubehero:team_recoverable_usd:rate1h
+          expr: sum(rate(kubehero_pod_recoverable_usd_per_second[5m])) by (team) * 3600
+
+    - name: kubehero.chargeback.alerting
+      rules:
+        - alert: KubeHeroTeamOverBudgetProjected
+          expr: |
+            predict_linear(kubehero:team_cost_usd:rate24h[6h], 86400 * 30)
+              > on(team) group_left
+            kubehero_team_budget_usd
+          for: 15m
+          labels: { severity: warning, team_scope: "true" }
+          annotations:
+            summary: "Team {{`{{ $labels.team }}`}} on track to exceed monthly budget"
+            runbook: "https://docs.kubehero.io/chargeback#over-budget-projection"
+        - alert: KubeHeroGPUIdleExcessive
+          expr: |
+            kubehero:team_gpu_idle_cost_usd:rate1h > 500
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: "Team {{`{{ $labels.team }}`}} burning >$500/hr on idle GPUs"
+{{- end }}

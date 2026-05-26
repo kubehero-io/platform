@@ -1,0 +1,8 @@
+# Values overlay for air-gapped installs.
+airgap: true
+image:
+  registry: ""   # Expect customer to mirror images to their own registry and
+                 # set this (plus imagePullSecrets) accordingly.
+telemetry:
+  otlp:
+    enabled: false

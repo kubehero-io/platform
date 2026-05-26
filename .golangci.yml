@@ -1,0 +1,38 @@
+run:
+  timeout: 5m
+  go: "1.23"
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - gofumpt
+    - gosec
+    - revive
+    - unused
+    - ineffassign
+    - staticcheck
+    - govet
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+linters-settings:
+  revive:
+    severity: warning
+    rules:
+      - name: exported
+      - name: error-return
+      - name: error-strings
+  gosec:
+    excludes:
+      - G404 # crypto/rand not required for policy eval jitter
+
+issues:
+  exclude-dirs:
+    - packages/proto/gen
+    - bin
+    - dist

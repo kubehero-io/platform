@@ -1,0 +1,49 @@
+{{- if and .Values.prometheus.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") -}}
+{{- if .Values.collector.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "kubehero.fullname" . }}-collector
+  labels:
+    {{- include "kubehero.labels" . | nindent 4 }}
+    release: {{ .Values.prometheus.release | quote }}
+    {{- with .Values.prometheus.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: collector
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.prometheus.scrapeInterval | quote }}
+      scrapeTimeout: {{ .Values.prometheus.scrapeTimeout | quote }}
+      honorLabels: true
+{{- end }}
+{{- if .Values.controlPlane.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "kubehero.fullname" . }}-control-plane
+  labels:
+    {{- include "kubehero.labels" . | nindent 4 }}
+    release: {{ .Values.prometheus.release | quote }}
+    {{- with .Values.prometheus.extraLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: control-plane
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.prometheus.scrapeInterval | quote }}
+      scrapeTimeout: {{ .Values.prometheus.scrapeTimeout | quote }}
+{{- end }}
+{{- end }}

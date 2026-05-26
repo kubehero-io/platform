@@ -1,0 +1,251 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KubeHero Helm chart values",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry":   { "type": "string" },
+        "repository": { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] },
+        "tag":        { "type": "string" }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "rbac": {
+      "type": "object",
+      "properties": { "create": { "type": "boolean" } }
+    },
+    "crds": {
+      "type": "object",
+      "properties": {
+        "install": { "type": "boolean" },
+        "keep":    { "type": "boolean" }
+      }
+    },
+    "controlPlane": {
+      "type": "object",
+      "properties": {
+        "enabled":  { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "image": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "tag":  { "type": "string" }
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+        }
+      }
+    },
+    "collector": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "service": {
+          "type": "object",
+          "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+        }
+      }
+    },
+    "operator":      { "type": "object" },
+    "pricingEngine": {
+      "type": "object",
+      "properties": {
+        "enabled":  { "type": "boolean" },
+        "schedule": { "type": "string", "description": "Cron expression" }
+      }
+    },
+    "dashboard": { "type": "object" },
+    "chargeback": {
+      "type": "object",
+      "properties": {
+        "enabled":         { "type": "boolean" },
+        "teamLabel":       { "type": "string" },
+        "costCenterLabel": { "type": "string" },
+        "nodepoolLabel":   { "type": "string" },
+        "defaultTeam":     { "type": "string" },
+        "namespaceToTeam": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "prometheus": {
+      "type": "object",
+      "properties": {
+        "enabled":        { "type": "boolean" },
+        "scrapeInterval": { "type": "string" },
+        "scrapeTimeout":  { "type": "string" },
+        "release":        { "type": "string" },
+        "extraLabels":    { "type": "object" }
+      }
+    },
+    "grafana": {
+      "type": "object",
+      "properties": {
+        "enabled":           { "type": "boolean" },
+        "sidecarLabel":      { "type": "string" },
+        "sidecarLabelValue": { "type": "string" },
+        "folder":            { "type": "string" },
+        "dashboards": {
+          "type": "object",
+          "properties": {
+            "chargeback": { "type": "boolean" },
+            "fleet":      { "type": "boolean" },
+            "gpu":        { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "properties": {
+        "embedded": { "type": "boolean" },
+        "external": {
+          "type": "object",
+          "properties": {
+            "host":           { "type": "string" },
+            "port":           { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "database":       { "type": "string" },
+            "sslMode":        { "type": "string", "enum": ["disable", "require", "verify-ca", "verify-full"] },
+            "existingSecret": { "type": "string" }
+          }
+        }
+      }
+    },
+    "clickhouse": {
+      "type": "object",
+      "properties": {
+        "embedded": { "type": "boolean" },
+        "external": { "type": "object" }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "properties": {
+        "embedded": { "type": "boolean" },
+        "external": { "type": "object" }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "dex":    { "type": "object" },
+        "workos": { "type": "object" }
+      }
+    },
+    "secrets": { "type": "object" },
+    "security": {
+      "type": "object",
+      "properties": {
+        "trivy":    { "type": "object" },
+        "tetragon": { "type": "object" },
+        "falco":    { "type": "object" }
+      }
+    },
+    "cloud": {
+      "type": "object",
+      "properties": {
+        "aws":   { "type": "object" },
+        "gcp":   { "type": "object" },
+        "azure": { "type": "object" }
+      }
+    },
+    "autoscaler":      { "type": "object" },
+    "telemetry":       { "type": "object" },
+    "networkPolicies": {
+      "type": "object",
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled":      { "type": "boolean" },
+        "controlPlane": {
+          "type": "object",
+          "properties": {
+            "minReplicas":  { "type": "integer", "minimum": 1 },
+            "maxReplicas":  { "type": "integer", "minimum": 1 },
+            "targetCPU":    { "type": "integer", "minimum": 1, "maximum": 100 },
+            "targetMemory": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "dashboard": {
+          "type": "object",
+          "properties": {
+            "minReplicas": { "type": "integer", "minimum": 1 },
+            "maxReplicas": { "type": "integer", "minimum": 1 },
+            "targetCPU":   { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled":     { "type": "boolean" },
+        "className":   { "type": "string" },
+        "annotations": { "type": "object" },
+        "hosts":       { "type": "array" },
+        "tls":         { "type": "array" }
+      }
+    },
+    "certManager": {
+      "type": "object",
+      "properties": {
+        "enabled":     { "type": "boolean" },
+        "duration":    { "type": "string" },
+        "renewBefore": { "type": "string" },
+        "issuerRef": {
+          "type": "object",
+          "properties": {
+            "name":  { "type": "string" },
+            "kind":  { "type": "string", "enum": ["ClusterIssuer", "Issuer"] },
+            "group": { "type": "string" }
+          }
+        },
+        "certificates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "secretName", "dnsNames"],
+            "properties": {
+              "name":        { "type": "string" },
+              "secretName":  { "type": "string" },
+              "dnsNames":    { "type": "array", "items": { "type": "string" } },
+              "duration":    { "type": "string" },
+              "renewBefore": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "podSecurityContext": { "type": "object" },
+    "securityContext":    { "type": "object" },
+    "priorityClass": {
+      "type": "object",
+      "properties": {
+        "create":           { "type": "boolean" },
+        "name":             { "type": "string" },
+        "value":            { "type": "integer", "minimum": 0, "maximum": 2000000000 },
+        "preemptionPolicy": { "type": "string", "enum": ["PreemptLowerPriority", "Never"] },
+        "annotations":      { "type": "object" }
+      }
+    },
+    "priorityClassName":  { "type": "string" },
+    "airgap":             { "type": "boolean" }
+  }
+}

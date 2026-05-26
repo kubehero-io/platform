@@ -1,0 +1,77 @@
+apiVersion: v2
+name: kubehero
+description: KubeHero — Kubernetes efficiency across every cloud you run.
+type: application
+version: 0.0.1
+appVersion: "0.0.1"
+kubeVersion: ">=1.28-0"
+maintainers:
+  - name: KubeHero
+    email: hello@kubehero.io
+    url: https://kubehero.io
+home: https://kubehero.io
+sources:
+  - https://github.com/kubehero-io/platform
+annotations:
+  category: monitoring
+  licenses: BUSL-1.1 AND Apache-2.0
+
+# ─── Subchart dependencies ────────────────────────────────────────────────
+#
+# Every dependency below is OFF by default — values.yaml ships
+# `<component>.embedded: false`, which keeps the chart installable
+# offline / air-gapped without `helm dep update`. Flip an `embedded`
+# value to true and re-run `helm dep update && helm upgrade --install`
+# to pull the subchart in.
+#
+# Mature clusters typically already run most of these as peers — we
+# install them via `infra/demo/stack-install.sh` for greenfield kind
+# / GKE / EKS, and as proper subcharts here for ops teams that prefer
+# a single helm release.
+#
+# Versions pinned to "tilde-major" so you get patch + minor updates
+# inside the major series we tested against, but never an upstream
+# major bump that breaks our values plumbing.
+
+dependencies:
+  - name: postgresql
+    version: ">=15.0.0 <17.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.embedded
+    tags: [storage]
+  - name: clickhouse
+    version: ">=6.0.0 <8.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: clickhouse.embedded
+    tags: [storage]
+  - name: valkey
+    version: ">=2.0.0 <4.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    alias: cache
+    condition: cache.embedded
+    tags: [storage]
+  - name: dex
+    version: ">=0.18.0 <1.0.0"
+    repository: "https://charts.dexidp.io"
+    condition: auth.dex.embedded
+    tags: [auth]
+  - name: trivy-operator
+    version: ">=0.20.0 <1.0.0"
+    repository: "https://aquasecurity.github.io/helm-charts/"
+    condition: security.trivy.embedded
+    tags: [security]
+  - name: tetragon
+    version: ">=1.0.0 <2.0.0"
+    repository: "https://helm.cilium.io"
+    condition: security.tetragon.embedded
+    tags: [security]
+  - name: external-secrets
+    version: ">=0.18.0 <1.0.0"
+    repository: "https://charts.external-secrets.io"
+    condition: secrets.externalSecrets.embedded
+    tags: [secrets]
+  - name: kube-prometheus-stack
+    version: ">=60.0.0 <100.0.0"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: prometheus.embedded
+    tags: [observability]

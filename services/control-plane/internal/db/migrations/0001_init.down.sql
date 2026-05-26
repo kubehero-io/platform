@@ -1,0 +1,12 @@
+DROP TRIGGER IF EXISTS policies_touch ON policies;
+DROP TRIGGER IF EXISTS orgs_touch     ON orgs;
+DROP FUNCTION IF EXISTS touch_updated_at();
+
+DROP TABLE IF EXISTS commitments;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS policies;
+DROP TABLE IF EXISTS clusters;
+DROP TABLE IF EXISTS org_members;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS orgs;

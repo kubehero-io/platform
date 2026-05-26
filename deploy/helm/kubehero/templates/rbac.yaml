@@ -1,0 +1,186 @@
+{{- if .Values.rbac.create }}
+{{- $fullname := include "kubehero.fullname" . }}
+---
+# ─── Operator RBAC ────────────────────────────────────────────────────────
+# The operator reconciles BudgetPolicy, CeilingPolicy, RightsizingPolicy,
+# writes status conditions, and (when policies are armed) cordons
+# nodepools / caps HPAs / evicts pods. The exact verbs are scoped narrowly.
+{{- if .Values.operator.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-operator
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+rules:
+  # KubeHero CRDs — full reconcile surface
+  - apiGroups: ["kubehero.kubehero.io"]
+    resources: ["budgetpolicies", "ceilingpolicies", "rightsizingpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["kubehero.kubehero.io"]
+    resources: ["budgetpolicies/status", "ceilingpolicies/status", "rightsizingpolicies/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["kubehero.kubehero.io"]
+    resources: ["budgetpolicies/finalizers", "ceilingpolicies/finalizers", "rightsizingpolicies/finalizers"]
+    verbs: ["update"]
+  # Rightsizing & enforcement — only read by default; mutation verbs are
+  # gated behind humanArm=true at the reconciler layer (see docs/concepts).
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/eviction"]
+    verbs: ["get", "list", "watch", "delete", "create"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["namespaces", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  # Leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Events — the operator emits events on every reconcile
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-operator
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-operator
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-operator
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-operator
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+---
+# ─── Collector RBAC ───────────────────────────────────────────────────────
+# Strict read-only. The agent never mutates customer resources.
+{{- if .Values.collector.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-collector
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "endpoints", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-collector
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-collector
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-collector
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-collector
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+{{- end }}
+
+---
+# ─── Control plane RBAC ───────────────────────────────────────────────────
+# Read-only introspection of the cluster's workload inventory.
+{{- if .Values.controlPlane.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-control-plane
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["kubehero.kubehero.io"]
+    resources: ["budgetpolicies", "ceilingpolicies", "rightsizingpolicies"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-control-plane
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-control-plane
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-control-plane
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-control-plane
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+---
+# ─── Pricing engine — no cluster privs (only needs cloud IAM) ────────────
+{{- if .Values.pricingEngine.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-pricing-engine
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+---
+# ─── Dashboard — reads only through the control-plane RPC ────────────────
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-dashboard
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+{{- end }}
+
+{{- end }}

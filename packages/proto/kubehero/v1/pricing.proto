@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kubehero.v1;
+
+option go_package = "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1";
+
+service PricingService {
+  rpc Quote(QuoteRequest) returns (QuoteResponse) {}
+}
+
+message QuoteRequest {
+  string cloud = 1;
+  string sku = 2;
+  string region = 3;
+  string lifecycle = 4;
+}
+
+message QuoteResponse {
+  double price_per_hour = 1;
+  string currency = 2;
+}

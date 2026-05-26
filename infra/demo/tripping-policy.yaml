@@ -1,0 +1,45 @@
+# Demo BudgetPolicy + CeilingPolicy intentionally sized to TRIP within
+# minutes of the synthetic ingest pipeline starting. Math:
+#
+#   ml-inference workloads ask 100m CPU + 128Mi mem × 2 replicas.
+#   On a 16c/64GiB node at the collector's $0.04/core/hr fallback rate,
+#   that's ~$0.012/hr per pod ≈ $17/mo for the whole namespace.
+#   We set the ceiling at $5/mo so the burn rate is ~3.4× — well above
+#   the 1.5× trigger.
+#
+# HardStop=false keeps the policy advisory: the operator alerts but
+# never disrupts the workloads. Flip to true (and arm via
+# `kubectl annotate budgetpolicy ml-inference-budget kubehero.io/armed=true`)
+# to see the escalator actually cap HPAs.
+apiVersion: kubehero.kubehero.io/v1
+kind: BudgetPolicy
+metadata:
+  name: ml-inference-budget
+  namespace: kubehero-system
+spec:
+  scope:
+    namespaceSelector:
+      matchLabels:
+        kubehero.io/team: ml-inference
+  ceiling: "$5/mo"
+  hardStop: false
+  alertChannels:
+    - "slack://#kubehero-demo"
+---
+apiVersion: kubehero.kubehero.io/v1
+kind: CeilingPolicy
+metadata:
+  name: ml-inference-ceiling
+  namespace: kubehero-system
+spec:
+  budgetRef: ml-inference-budget
+  trigger:
+    burnRateMilli: 1500   # 1.5× — well below the ~3.4× we'll observe
+    window: "5m"
+  cooldown: "10m"
+  escalation:
+    - action: alert
+      channels: ["slack://#kubehero-demo"]
+    - action: hpa.cap
+      ratioPercent: 80
+      waitAfter: "2m"

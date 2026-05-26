@@ -1,0 +1,22 @@
+# More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
+#
+# Ignore everything by default and re-include just what the build needs.
+# Note: Docker BuildKit drops parent directories that have no kept files
+# (legacy builder behaved differently), so we have to whitelist each
+# directory we care about explicitly even if its contents are kept.
+**
+
+# Re-include Go source — kept files first, then re-exclude tests so
+# the test files aren't copied into the image.
+!**/*.go
+**/*_test.go
+
+# Re-include each source directory tree we want preserved.
+!cmd
+!api
+!internal
+!hack
+
+# Module + workspace metadata
+!go.mod
+!go.sum
