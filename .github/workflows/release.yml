@@ -110,7 +110,7 @@ jobs:
             "${{ matrix.image }}@${DIGEST}"
 
       - name: Trivy CVE scan (fail on HIGH+ unfixed)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: "${{ matrix.image }}@${{ steps.build.outputs.digest }}"
           format: table
