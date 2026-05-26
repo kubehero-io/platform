@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubehero
 description: KubeHero — Kubernetes efficiency across every cloud you run.
 type: application
-version: 0.0.1
-appVersion: "0.0.1"
+version: 0.1.0
+appVersion: "0.1.0"
 kubeVersion: ">=1.28-0"
 maintainers:
   - name: KubeHero

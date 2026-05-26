@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # The CLI is primarily distributed via brew / apt / GitHub Releases, but
 # we also ship a container image so customers can `kubectl run kubehero
-# --image=ghcr.io/kubehero/kubehero-cli` for ad-hoc commands inside
+# --image=ghcr.io/kubehero-io/cli` for ad-hoc commands inside
 # their cluster.
 
 FROM golang:1.26-alpine AS build

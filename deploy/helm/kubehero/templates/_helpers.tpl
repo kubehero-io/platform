@@ -18,7 +18,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- define "kubehero.image" -}}
 {{- $reg := default .root.Values.image.registry .image.registry -}}
 {{- $repo := default .root.Values.image.repository .image.repository -}}
-{{- if $reg -}}{{ $reg }}/{{ end }}{{ $repo }}/{{ .image.name }}:{{ .image.tag }}
+{{- $tag := .image.tag | default .root.Values.image.tag | default .root.Chart.AppVersion -}}
+{{- if $reg -}}{{ $reg }}/{{ end }}{{ $repo }}/{{ .image.name }}:{{ $tag }}
 {{- end -}}
 
 {{/*

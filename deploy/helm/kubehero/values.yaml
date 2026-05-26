@@ -9,8 +9,9 @@ image:
   # Override `repository` if you mirror the published images into a
   # private registry (Harbor, Artifactory, ECR, etc).
   registry: ghcr.io
-  repository: kubehero
+  repository: kubehero-io
   pullPolicy: IfNotPresent
+  # Defaults to the chart's appVersion when blank.
   tag: ""
 
 imagePullSecrets: []
@@ -52,7 +53,7 @@ controlPlane:
   replicas: 2
   image:
     name: control-plane
-    tag: "0.0.1"
+    tag: ""
   service:
     port: 8080
   resources:
@@ -63,7 +64,7 @@ collector:
   enabled: true
   image:
     name: collector
-    tag: "0.0.1"
+    tag: ""
   service:
     port: 8081
   tolerations:
@@ -77,14 +78,14 @@ operator:
   replicas: 1
   image:
     name: operator
-    tag: "0.0.1"
+    tag: ""
 
 pricingEngine:
   enabled: true
   replicas: 1
   image:
     name: pricing-engine
-    tag: "0.0.1"
+    tag: ""
   service:
     port: 8082
   schedule: "0 */6 * * *"
@@ -94,7 +95,7 @@ dashboard:
   replicas: 1
   image:
     name: dashboard
-    tag: "0.0.1"
+    tag: ""
   service:
     port: 3001
 
