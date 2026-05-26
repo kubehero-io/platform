@@ -118,6 +118,7 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           scanners: vuln
+          trivyignores: .trivyignore
 
   # ─── Helm chart release ──────────────────────────────────────────────────
   chart:

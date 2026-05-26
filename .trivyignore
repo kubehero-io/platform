@@ -1,0 +1,7 @@
+# Base-image OS CVEs fixed upstream in Debian but not yet present in the
+# pinned distroless/nodejs22-debian12 base image (no apt in distroless, so
+# we can't patch in-Dockerfile — it clears when Google rebuilds the base).
+# Re-evaluate / remove on each base bump.
+
+# libssl3 heap buffer overflow on 32-bit — fixed in 3.0.19-1~deb12u2
+CVE-2026-31789
