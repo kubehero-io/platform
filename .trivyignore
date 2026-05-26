@@ -3,5 +3,9 @@
 # we can't patch in-Dockerfile — it clears when Google rebuilds the base).
 # Re-evaluate / remove on each base bump.
 
-# libssl3 heap buffer overflow on 32-bit — fixed in 3.0.19-1~deb12u2
+# libssl3 / openssl — all fixed in 3.0.19-1~deb12u2, pending the distroless base
 CVE-2026-31789
+CVE-2026-28387
+CVE-2026-28388
+CVE-2026-28389
+CVE-2026-28390
