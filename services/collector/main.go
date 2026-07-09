@@ -67,9 +67,10 @@ func serve(parent context.Context, addr string, demo bool) error {
 	// eBPF programs are loaded in probes_linux.go (build tag stub for now).
 	startProbes(parent, log)
 
-	// Cluster-aware synthetic ingest. Reads pods + nodes from the
-	// kube API every 5s, attributes synthetic cost from requests +
-	// node SKU, ships batches to the cp via Connect-RPC.
+	// Cluster-aware cost ingest. Reads pods + nodes from the kube API
+	// every 5s, blends resource requests with measured utilisation
+	// from the kubelet Summary API (request-based fallback when stats
+	// are unavailable), ships batches to the cp via Connect-RPC.
 	go func() {
 		err := ingest.Run(parent, ingest.Config{
 			ControlPlaneURL: os.Getenv("CONTROL_PLANE_URL"),

@@ -43,13 +43,16 @@ func (g *GCP) Quote(ctx context.Context, sku, region, lifecycle string) (Quote, 
 	if strings.ToLower(lifecycle) != "on-demand" {
 		// Spot (preemptible) and CUDs need the same SKU walk plus
 		// commitment-flag matching. Stub for now.
-		return Quote{}, ErrUnimplemented
+		return Quote{}, fmt.Errorf(
+			"gcp live pricing supports only the %q lifecycle (requested %q); spot and committed fall back to the static table when known: %w",
+			"on-demand", lifecycle, ErrUnimplemented)
 	}
 	if g.APIKey == "" {
 		return Quote{}, fmt.Errorf("gcp pricing: GCP_BILLING_API_KEY unset")
 	}
-	if g.HTTPClient == nil {
-		g.HTTPClient = &http.Client{Timeout: 10 * time.Second}
+	client := g.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	endpoint := g.Endpoint
 	if endpoint == "" {
@@ -77,7 +80,7 @@ func (g *GCP) Quote(ctx context.Context, sku, region, lifecycle string) (Quote, 
 		if err != nil {
 			return Quote{}, err
 		}
-		resp, err := g.HTTPClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			return Quote{}, fmt.Errorf("gcp pricing fetch: %w", err)
 		}
@@ -110,8 +113,8 @@ type gcpSkusPage struct {
 }
 
 type gcpSku struct {
-	Description    string   `json:"description"`
-	Category       struct {
+	Description string `json:"description"`
+	Category    struct {
 		ResourceFamily string `json:"resourceFamily"`
 		ResourceGroup  string `json:"resourceGroup"`
 		UsageType      string `json:"usageType"` // "OnDemand" | "Preemptible" | "Commit1Yr" | …

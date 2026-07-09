@@ -1,0 +1,9 @@
+# Local Terraform working files — never commit these.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+crash.log
+
+# Keep committed: .terraform.lock.hcl, *.tfvars.example

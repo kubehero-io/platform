@@ -207,3 +207,43 @@ export type ListCapacityDemandsResponse = {
   totalPendingPods: number;
   totalBlockedUsdMonth: number;
 };
+
+// ─── AdvisorService · GetBriefing ────────────────────────────────────────
+// Served by services/advisor (separate binary from the control-plane).
+
+export type AdvisorRisk = "low" | "medium" | "high";
+
+export type AdvisorActionKind =
+  | "rightsize.requests"
+  | "ceiling.arm"
+  | "nodepool.consolidate"
+  | "workload.investigate";
+
+export type AdvisorSource = "llm" | "rules" | "demo";
+
+export type AdvisorActionDTO = {
+  id: string;
+  title: string;
+  impactMonthlyUsd: number;
+  risk: AdvisorRisk;
+  kind: AdvisorActionKind;
+  /** "cluster/ns/workload" */
+  target: string;
+  rationale: string;
+  crdYaml: string;
+  status: string;
+};
+
+export type AdvisorBriefingDTO = {
+  id: string;
+  generatedAtUnix: number;
+  headline: string;
+  markdown: string;
+  spokenScript: string;
+  source: AdvisorSource;
+  actions: AdvisorActionDTO[];
+};
+
+export type GetBriefingResponse = {
+  briefing: AdvisorBriefingDTO;
+};

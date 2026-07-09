@@ -2927,7 +2927,7 @@ const file_kubehero_v1_control_proto_rawDesc = "" +
 	"\x13ListVulnerabilities\x12'.kubehero.v1.ListVulnerabilitiesRequest\x1a(.kubehero.v1.ListVulnerabilitiesResponse\"\x00\x12X\n" +
 	"\rListAnomalies\x12!.kubehero.v1.ListAnomaliesRequest\x1a\".kubehero.v1.ListAnomaliesResponse\"\x00\x12j\n" +
 	"\x13ListCapacityDemands\x12'.kubehero.v1.ListCapacityDemandsRequest\x1a(.kubehero.v1.ListCapacityDemandsResponse\"\x00\x12X\n" +
-	"\rIngestPodCost\x12!.kubehero.v1.IngestPodCostRequest\x1a\".kubehero.v1.IngestPodCostResponse\"\x00BRZPgithub.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1b\x06proto3"
+	"\rIngestPodCost\x12!.kubehero.v1.IngestPodCostRequest\x1a\".kubehero.v1.IngestPodCostResponse\"\x00BLZJgithub.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1b\x06proto3"
 
 var (
 	file_kubehero_v1_control_proto_rawDescOnce sync.Once

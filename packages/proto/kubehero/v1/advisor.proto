@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kubehero.v1;
+
+option go_package = "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1";
+
+// AdvisorService is KubeHero's agentic layer: it turns raw cost/ops
+// telemetry (waste recommendations, anomalies, burn rate, team spend)
+// into an explained briefing plus a set of PROPOSED guarded actions.
+//
+// The advisor is strictly read-only. It never mutates cluster state and
+// never calls control-plane mutation RPCs. Every proposed action carries
+// a ready-to-apply KubeHero CRD manifest (BudgetPolicy / CeilingPolicy /
+// RightsizingPolicy) that a human applies through the operator's
+// existing arming flow.
+service AdvisorService {
+  // GetBriefing returns the current advisor briefing for a cluster (or
+  // the fleet when cluster_id is empty): a headline, a full markdown
+  // report, a TTS-ready spoken script, and the proposed actions.
+  rpc GetBriefing(GetBriefingRequest) returns (GetBriefingResponse) {}
+
+  // ListAdvice returns just the proposed actions — the dashboard's
+  // action queue without the narrative.
+  rpc ListAdvice(ListAdviceRequest) returns (ListAdviceResponse) {}
+}
+
+// ─── GetBriefing ─────────────────────────────────────────────────────────
+
+message GetBriefingRequest {
+  string cluster_id = 1;  // optional; empty = fleet-wide
+  string window = 2;      // "24h" | "7d" — default 24h
+}
+
+message GetBriefingResponse {
+  Briefing briefing = 1;
+}
+
+message Briefing {
+  string id = 1;                 // surrogate id, e.g. "brf-7f3a9c12"
+  int64 generated_at_unix = 2;   // unix seconds, server-stamped
+  string headline = 3;           // one-line summary for the card header
+  // Full briefing, markdown. Rendered as-is by the dashboard.
+  string markdown = 4;
+  // TTS-ready plain prose, ~45-90 seconds spoken. No markdown syntax.
+  string spoken_script = 5;
+  // Which brain produced this: "llm" | "rules" | "demo".
+  string source = 6;
+  repeated ProposedAction actions = 7;
+}
+
+// ProposedAction is a single guarded recommendation. The advisor only
+// PROPOSES — status is always "proposed"; applying the crd_yaml goes
+// through the operator's human-arm flow.
+message ProposedAction {
+  string id = 1;
+  string title = 2;
+  double impact_monthly_usd = 3;
+  string risk = 4;    // "low" | "medium" | "high"
+  // "rightsize.requests" | "ceiling.arm" | "nodepool.consolidate" |
+  // "workload.investigate"
+  string kind = 5;
+  string target = 6;  // "cluster/namespace/workload"
+  string rationale = 7;
+  // Ready-to-apply guarded CRD manifest (BudgetPolicy / CeilingPolicy /
+  // RightsizingPolicy), or "" for investigate-only actions.
+  string crd_yaml = 8;
+  string status = 9;  // always "proposed"
+}
+
+// ─── ListAdvice ──────────────────────────────────────────────────────────
+
+message ListAdviceRequest {
+  string cluster_id = 1;  // optional; empty = fleet-wide
+}
+
+message ListAdviceResponse {
+  repeated ProposedAction actions = 1;
+}

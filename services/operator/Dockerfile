@@ -7,7 +7,7 @@
 #     LTS; the static variant has no shell, no package manager, no glibc;
 #     image attack surface is just our binary + ca-certs + nsswitch. CVE
 #     scans against this base typically come back clean.
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26.5-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 

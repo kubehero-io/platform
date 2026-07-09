@@ -37,3 +37,17 @@ func PodCostPerHour(node NodePrice, pod PodShare) float64 {
 func PodCostPerSecond(node NodePrice, pod PodShare) float64 {
 	return math.Round(PodCostPerHour(node, pod)/3600*1e10) / 1e10
 }
+
+// UtilizationBlend returns the billable share for a pod given what it
+// requested and what it measurably used: per dimension, the max of the
+// two. Requests floor the bill — the scheduler reserved that capacity
+// whether the pod used it or not — while measured usage above requests
+// bills the overage a burstable pod squats on. Callers without a
+// measurement (kubelet stats unavailable) should bill `requested`
+// directly rather than blending against a zero measurement.
+func UtilizationBlend(requested, measured PodShare) PodShare {
+	return PodShare{
+		CPUMillis: max(requested.CPUMillis, measured.CPUMillis),
+		MemBytes:  max(requested.MemBytes, measured.MemBytes),
+	}
+}

@@ -4,7 +4,7 @@
 # --image=ghcr.io/kubehero-io/cli` for ad-hoc commands inside
 # their cluster.
 
-FROM golang:1.26-alpine AS build
+FROM golang:1.26.5-alpine AS build
 WORKDIR /src
 COPY cli/kubehero/go.mod cli/kubehero/go.sum* cli/kubehero/
 RUN cd cli/kubehero && go mod download

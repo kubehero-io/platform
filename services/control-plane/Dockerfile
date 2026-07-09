@@ -7,7 +7,7 @@
 # pinning a `replace` directive. Layer order is mod-files-first so a
 # source change doesn't invalidate the dep download cache.
 
-FROM golang:1.26-alpine AS build
+FROM golang:1.26.5-alpine AS build
 WORKDIR /src
 RUN apk add --no-cache git
 
@@ -15,6 +15,7 @@ RUN apk add --no-cache git
 COPY go.work go.work.sum* ./
 COPY packages/proto/go.mod                  packages/proto/go.mod
 COPY packages/cost-model/go.mod             packages/cost-model/go.mod
+COPY services/advisor/go.mod                services/advisor/go.mod
 COPY services/collector/go.mod              services/collector/go.mod
 COPY services/control-plane/go.mod          services/control-plane/go.mod
 COPY services/control-plane/go.sum*         services/control-plane/

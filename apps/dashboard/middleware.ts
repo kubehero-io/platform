@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const AUTH_ROUTES = new Set(["/login", "/signup"]);
 const PROTECTED_PREFIXES = [
   "/overview",
+  "/advisor",
   "/fleet",
   "/clusters",
   "/waste",
@@ -43,9 +44,16 @@ export function middleware(req: NextRequest) {
 
   // Onboarding gate: if session exists but onboarded=false and they're
   // heading anywhere except /onboarding, nudge them through the wizard.
+  //
+  // The cookie is base64url(payload).base64url(hmac) — see lib/session-crypto.ts.
+  // Middleware runs on the edge runtime (no node:crypto), so it only *peeks*
+  // at the payload for this UX redirect. Signature verification happens
+  // server-side in getSession(), which treats tampered cookies as logged-out.
   if (hasSession && isProtected && pathname !== "/onboarding") {
     try {
-      const s = JSON.parse(hasSession) as { onboarded?: boolean };
+      const payload = hasSession.split(".")[0] ?? "";
+      const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+      const s = JSON.parse(json) as { onboarded?: boolean };
       if (!s.onboarded) {
         return NextResponse.redirect(new URL("/onboarding", req.url));
       }

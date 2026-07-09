@@ -157,7 +157,7 @@ const file_kubehero_v1_pricing_proto_rawDesc = "" +
 	"\x0eprice_per_hour\x18\x01 \x01(\x01R\fpricePerHour\x12\x1a\n" +
 	"\bcurrency\x18\x02 \x01(\tR\bcurrency2R\n" +
 	"\x0ePricingService\x12@\n" +
-	"\x05Quote\x12\x19.kubehero.v1.QuoteRequest\x1a\x1a.kubehero.v1.QuoteResponse\"\x00BRZPgithub.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1b\x06proto3"
+	"\x05Quote\x12\x19.kubehero.v1.QuoteRequest\x1a\x1a.kubehero.v1.QuoteResponse\"\x00BLZJgithub.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1b\x06proto3"
 
 var (
 	file_kubehero_v1_pricing_proto_rawDescOnce sync.Once

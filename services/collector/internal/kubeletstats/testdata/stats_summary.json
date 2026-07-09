@@ -1,0 +1,186 @@
+{
+  "node": {
+    "nodeName": "ip-10-0-1-23.ec2.internal",
+    "systemContainers": [
+      {
+        "name": "kubelet",
+        "startTime": "2026-07-08T11:02:14Z",
+        "cpu": {
+          "time": "2026-07-09T09:15:20Z",
+          "usageNanoCores": 48291000,
+          "usageCoreNanoSeconds": 3820019283000
+        },
+        "memory": {
+          "time": "2026-07-09T09:15:20Z",
+          "usageBytes": 189284352,
+          "workingSetBytes": 152043520,
+          "rssBytes": 141557760,
+          "pageFaults": 902144,
+          "majorPageFaults": 12
+        }
+      },
+      {
+        "name": "runtime",
+        "startTime": "2026-07-08T11:01:58Z",
+        "cpu": {
+          "time": "2026-07-09T09:15:20Z",
+          "usageNanoCores": 31882000,
+          "usageCoreNanoSeconds": 2510492811000
+        },
+        "memory": {
+          "time": "2026-07-09T09:15:20Z",
+          "workingSetBytes": 421527552
+        }
+      }
+    ],
+    "startTime": "2026-07-08T11:01:31Z",
+    "cpu": {
+      "time": "2026-07-09T09:15:20Z",
+      "usageNanoCores": 4123998211,
+      "usageCoreNanoSeconds": 301882736450000
+    },
+    "memory": {
+      "time": "2026-07-09T09:15:20Z",
+      "availableBytes": 41694183424,
+      "usageBytes": 26843545600,
+      "workingSetBytes": 24019214336,
+      "rssBytes": 22112436224,
+      "pageFaults": 48210441,
+      "majorPageFaults": 1093
+    },
+    "network": {
+      "time": "2026-07-09T09:15:20Z",
+      "name": "eth0",
+      "rxBytes": 913882731122,
+      "rxErrors": 0,
+      "txBytes": 402118839021,
+      "txErrors": 0
+    },
+    "fs": {
+      "time": "2026-07-09T09:15:20Z",
+      "availableBytes": 71034249216,
+      "capacityBytes": 107361579008,
+      "usedBytes": 36327329792,
+      "inodesFree": 51774102,
+      "inodes": 52428272,
+      "inodesUsed": 654170
+    }
+  },
+  "pods": [
+    {
+      "podRef": {
+        "name": "model-server-a100-0",
+        "namespace": "ml",
+        "uid": "8f7c9a1e-6f2d-4a41-9c33-b1a4e2d90210"
+      },
+      "startTime": "2026-07-08T14:22:03Z",
+      "containers": [
+        {
+          "name": "server",
+          "startTime": "2026-07-08T14:22:07Z",
+          "cpu": {
+            "time": "2026-07-09T09:15:18Z",
+            "usageNanoCores": 3423000000,
+            "usageCoreNanoSeconds": 228817263000000
+          },
+          "memory": {
+            "time": "2026-07-09T09:15:18Z",
+            "workingSetBytes": 18253611008,
+            "rssBytes": 17998184448
+          }
+        }
+      ],
+      "cpu": {
+        "time": "2026-07-09T09:15:18Z",
+        "usageNanoCores": 3423000000,
+        "usageCoreNanoSeconds": 228817263000000
+      },
+      "memory": {
+        "time": "2026-07-09T09:15:18Z",
+        "availableBytes": 921671680,
+        "usageBytes": 18578866176,
+        "workingSetBytes": 18253611008,
+        "rssBytes": 17998184448,
+        "pageFaults": 2210441,
+        "majorPageFaults": 3
+      },
+      "volume": [
+        {
+          "time": "2026-07-09T09:10:00Z",
+          "availableBytes": 8546820096,
+          "capacityBytes": 8589934592,
+          "usedBytes": 43114496,
+          "name": "model-cache"
+        }
+      ],
+      "ephemeral-storage": {
+        "time": "2026-07-09T09:15:18Z",
+        "availableBytes": 71034249216,
+        "capacityBytes": 107361579008,
+        "usedBytes": 197132288
+      }
+    },
+    {
+      "podRef": {
+        "name": "api-1",
+        "namespace": "edge",
+        "uid": "0d3b2c77-1a90-4b5e-8f1c-2a6de0b53f19"
+      },
+      "startTime": "2026-07-09T02:47:51Z",
+      "containers": [
+        {
+          "name": "api",
+          "startTime": "2026-07-09T02:47:55Z",
+          "cpu": {
+            "time": "2026-07-09T09:15:19Z",
+            "usageNanoCores": 41000000,
+            "usageCoreNanoSeconds": 1128374650000
+          },
+          "memory": {
+            "time": "2026-07-09T09:15:19Z",
+            "workingSetBytes": 73400320
+          }
+        }
+      ],
+      "cpu": {
+        "time": "2026-07-09T09:15:19Z",
+        "usageNanoCores": 41000000,
+        "usageCoreNanoSeconds": 1128374650000
+      },
+      "memory": {
+        "time": "2026-07-09T09:15:19Z",
+        "workingSetBytes": 73400320,
+        "rssBytes": 69906432,
+        "pageFaults": 88210,
+        "majorPageFaults": 0
+      }
+    },
+    {
+      "podRef": {
+        "name": "warmup-batch-7dk2p",
+        "namespace": "jobs",
+        "uid": "5e1f0a92-cc41-4d16-b6f0-91b7d0a4c3ee"
+      },
+      "startTime": "2026-07-09T09:15:12Z",
+      "containers": [],
+      "cpu": {
+        "time": "2026-07-09T09:15:19Z",
+        "usageNanoCores": null,
+        "usageCoreNanoSeconds": 0
+      },
+      "memory": {
+        "time": "2026-07-09T09:15:19Z",
+        "workingSetBytes": 524288
+      }
+    },
+    {
+      "podRef": {
+        "name": "sandbox-only-x9f4b",
+        "namespace": "jobs",
+        "uid": "77a4e6b3-2f0c-4bb2-a1de-cf00cf5b8a41"
+      },
+      "startTime": "2026-07-09T09:15:17Z",
+      "containers": []
+    }
+  ]
+}

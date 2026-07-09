@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,12 +46,60 @@ func serveCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the control plane HTTP server",
+		Long: `Run the control plane HTTP server.
+
+Configuration is via environment variables:
+
+  DATABASE_URL                  PostgreSQL DSN (clusters, policies, audit log).
+  CLICKHOUSE_URL                ClickHouse DSN (pod_cost_1s time series: burn
+                                rate, ingest, spend-anomaly detection).
+  KUBEHERO_DEMO_MODE            Unset/default: RPCs without a backing store fall
+                                back to built-in demo fixtures (DEMO mode). Set
+                                to "false" (or "0") to hard-disable fixtures —
+                                those RPCs then return FailedPrecondition
+                                instead of fake data. Required for production.
+  KUBEHERO_ANOMALY_Z_THRESHOLD  |z| at which ListAnomalies flags a workload's
+                                last-hour spend vs its trailing baseline
+                                (default 3.0).
+  AUDIT_HMAC_KEY                Symmetric secret to sign audit rows.
+  KUBEHERO_API_KEYS             Static API keys (see auth.ParseAPIKeys).
+  KUBEHERO_REQUIRE_AUTH         "true" to reject anonymous callers.
+  OIDC_ISSUER_URL / OIDC_AUDIENCE / KUBEHERO_GROUP_ROLES
+                                OIDC verification + group→role mapping.
+  KUBEHERO_SCIM_TOKEN           Enables SCIM 2.0 user provisioning.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return serve(cmd.Context(), addr)
 		},
 	}
 	c.Flags().StringVar(&addr, "addr", ":8080", "listen address")
 	return c
+}
+
+// demoFixturesDisabled reports whether KUBEHERO_DEMO_MODE hard-disables
+// the demo-fixture fallback. Only an explicit "false"/"0" disables;
+// unset keeps the graceful stub-mode default so docs builds, helm
+// template previews, and the kind demo profile keep working.
+func demoFixturesDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("KUBEHERO_DEMO_MODE"))) {
+	case "false", "0":
+		return true
+	}
+	return false
+}
+
+// anomalyZThreshold reads KUBEHERO_ANOMALY_Z_THRESHOLD; 0 lets the
+// provider fall back to its default (3.0).
+func anomalyZThreshold(log *slog.Logger) float64 {
+	raw := strings.TrimSpace(os.Getenv("KUBEHERO_ANOMALY_Z_THRESHOLD"))
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 {
+		log.Warn("invalid KUBEHERO_ANOMALY_Z_THRESHOLD, using default 3.0", "value", raw)
+		return 0
+	}
+	return v
 }
 
 func serve(parent context.Context, addr string) error {
@@ -72,6 +122,15 @@ func serve(parent context.Context, addr string) error {
 		log.Warn("clickhouse unavailable, running in stub mode", "err", err)
 	} else {
 		defer ch.Close()
+	}
+
+	fixturesOff := demoFixturesDisabled()
+	if pg == nil && ch == nil {
+		if fixturesOff {
+			log.Warn("no Postgres or ClickHouse configured and KUBEHERO_DEMO_MODE=false — data RPCs will return FailedPrecondition until DATABASE_URL/CLICKHOUSE_URL are set")
+		} else {
+			log.Warn("DEMO MODE: no Postgres or ClickHouse configured — serving built-in demo fixtures, NOT real data (set DATABASE_URL/CLICKHOUSE_URL, or KUBEHERO_DEMO_MODE=false to fail loudly instead)")
+		}
 	}
 
 	// ─── HTTP + RPC ───────────────────────────────────────────────────────
@@ -117,7 +176,9 @@ func serve(parent context.Context, addr string) error {
 	if ch != nil {
 		rpcOpts.BurnRate = &clickhouse.BurnRateProvider{DB: ch}
 		rpcOpts.PodCost = &clickhouse.PodCostWriter{DB: ch}
+		rpcOpts.Anomalies = &clickhouse.SpendAnomalyProvider{DB: ch, ZThreshold: anomalyZThreshold(log)}
 	}
+	rpcOpts.DemoFixturesDisabled = fixturesOff
 	authCfg := auth.Config{
 		APIKeys:        auth.ParseAPIKeys(os.Getenv("KUBEHERO_API_KEYS")),
 		OIDCIssuer:     os.Getenv("OIDC_ISSUER_URL"),

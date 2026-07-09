@@ -223,7 +223,7 @@ const file_kubehero_v1_collector_proto_rawDesc = "" +
 	"\x0eIngestResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\x05R\baccepted2^\n" +
 	"\x17CollectorIngressService\x12C\n" +
-	"\x06Ingest\x12\x1a.kubehero.v1.IngestRequest\x1a\x1b.kubehero.v1.IngestResponse\"\x00BRZPgithub.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1b\x06proto3"
+	"\x06Ingest\x12\x1a.kubehero.v1.IngestRequest\x1a\x1b.kubehero.v1.IngestResponse\"\x00BLZJgithub.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1b\x06proto3"
 
 var (
 	file_kubehero_v1_collector_proto_rawDescOnce sync.Once

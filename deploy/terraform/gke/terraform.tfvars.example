@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars and fill in. Only project_id is required.
+
+project_id = "my-gcp-project"
+region     = "us-central1"
+
+# cluster_name = "kubehero"
+# release_channel = "REGULAR"
+
+# Lock the public API endpoint to your ranges in production:
+# master_authorized_cidrs = [
+#   { cidr_block = "203.0.113.0/24", display_name = "office" },
+# ]
+
+# Cheaper dev-ish footprint:
+# general_machine_type       = "e2-standard-2"
+# general_min_nodes          = 2
+# postgres_tier              = "db-custom-1-3840"
+# clickhouse_disk_size       = "50Gi"
+
+# Production hardening:
+# postgres_availability_type = "REGIONAL"
+# deletion_protection        = true
+
+# kubehero_chart_version = "0.1.0"

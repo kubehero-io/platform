@@ -42,12 +42,17 @@ func (a *AWS) Quote(ctx context.Context, sku, region, lifecycle string) (Quote, 
 	if strings.ToLower(lifecycle) != "on-demand" {
 		// The public price list only carries on-demand. Spot needs
 		// the EC2 SpotPriceHistory API; reserved/SP need the
-		// pricing/savingsplans family. Both demand IAM. Defer to
-		// Static for those until creds are wired.
-		return Quote{}, ErrUnimplemented
+		// pricing/savingsplans family. Both demand IAM (signed
+		// requests via the AWS SDK, which we deliberately don't
+		// depend on). Defer to Static for those until creds are
+		// wired.
+		return Quote{}, fmt.Errorf(
+			"aws live pricing supports only the %q lifecycle (requested %q); spot, savings-plan, and committed require signed AWS APIs and fall back to the static table when known: %w",
+			"on-demand", lifecycle, ErrUnimplemented)
 	}
-	if a.HTTPClient == nil {
-		a.HTTPClient = &http.Client{Timeout: 10 * time.Second}
+	client := a.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	endpoint := a.Endpoint
 	if endpoint == "" {
@@ -67,7 +72,7 @@ func (a *AWS) Quote(ctx context.Context, sku, region, lifecycle string) (Quote, 
 	if err != nil {
 		return Quote{}, err
 	}
-	resp, err := a.HTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return Quote{}, fmt.Errorf("aws pricing fetch: %w", err)
 	}
@@ -95,8 +100,8 @@ func (a *AWS) Quote(ctx context.Context, sku, region, lifecycle string) (Quote, 
 // fields we need.
 type awsPriceIndex struct {
 	Products map[string]struct {
-		SKU           string `json:"sku"`
-		Attributes    map[string]string `json:"attributes"`
+		SKU        string            `json:"sku"`
+		Attributes map[string]string `json:"attributes"`
 	} `json:"products"`
 	Terms struct {
 		OnDemand map[string]map[string]struct {

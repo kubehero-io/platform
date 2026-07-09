@@ -5,8 +5,9 @@ package pricing
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"sort"
+	"strings"
 )
 
 // Static is a hand-maintained price map used in tests and as a fallback.
@@ -39,7 +40,7 @@ func (s *Static) Quote(_ context.Context, sku, region, lifecycle string) (Quote,
 	key := fmt.Sprintf("%s|%s|%s", sku, region, lifecycle)
 	price, ok := s.table[key]
 	if !ok {
-		return Quote{}, errors.New("sku not in static table")
+		return Quote{}, fmt.Errorf("%w: %s not in %s static table", ErrNotFound, key, s.cloud)
 	}
 	return Quote{
 		Cloud:        s.cloud,
@@ -49,4 +50,20 @@ func (s *Static) Quote(_ context.Context, sku, region, lifecycle string) (Quote,
 		PricePerHour: price,
 		Currency:     "USD",
 	}, nil
+}
+
+// Entries lists every price point in the table as QuoteKeys, sorted
+// for determinism. The Catalog uses these as the "popular SKUs" the
+// background Refresher keeps warm.
+func (s *Static) Entries() []QuoteKey {
+	out := make([]QuoteKey, 0, len(s.table))
+	for k := range s.table {
+		parts := strings.SplitN(k, "|", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		out = append(out, QuoteKey{Cloud: s.cloud, SKU: parts[0], Region: parts[1], Lifecycle: parts[2]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out
 }

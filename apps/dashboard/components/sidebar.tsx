@@ -15,6 +15,7 @@ import {
   Settings,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Zap,
 } from "lucide-react";
 
@@ -28,6 +29,7 @@ type Item = {
 
 const items: Item[] = [
   { href: "/overview",   label: "Overview",     icon: Gauge },
+  { href: "/advisor",    label: "Advisor",      icon: Sparkles,       count: 4, tone: "var(--color-accent)" },
   { href: "/fleet",      label: "Fleet",        icon: Layers,         count: 6 },
   { href: "/capacity",   label: "Capacity",     icon: Clock,          tone: "var(--color-warn)" },
   { href: "/waste",      label: "Waste",        icon: AlertTriangle,  tone: "var(--color-accent)" },

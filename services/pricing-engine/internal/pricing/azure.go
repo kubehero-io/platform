@@ -33,10 +33,13 @@ func (Azure) Name() Cloud { return CloudAzure }
 
 func (a *Azure) Quote(ctx context.Context, sku, region, lifecycle string) (Quote, error) {
 	if strings.ToLower(lifecycle) != "on-demand" {
-		return Quote{}, ErrUnimplemented
+		return Quote{}, fmt.Errorf(
+			"azure live pricing supports only the %q lifecycle (requested %q); spot, savings-plan, and committed fall back to the static table when known: %w",
+			"on-demand", lifecycle, ErrUnimplemented)
 	}
-	if a.HTTPClient == nil {
-		a.HTTPClient = &http.Client{Timeout: 10 * time.Second}
+	client := a.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
 	}
 	endpoint := a.Endpoint
 	if endpoint == "" {
@@ -59,7 +62,7 @@ func (a *Azure) Quote(ctx context.Context, sku, region, lifecycle string) (Quote
 	if err != nil {
 		return Quote{}, err
 	}
-	resp, err := a.HTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return Quote{}, fmt.Errorf("azure pricing fetch: %w", err)
 	}

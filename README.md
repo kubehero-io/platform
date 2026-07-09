@@ -1,5 +1,7 @@
 # kubehero-platform
 
+![KubeHero — one pane of glass for Kubernetes cost, efficiency, and control](docs/assets/banner.svg)
+
 Monorepo for **KubeHero** — open-source, self-hosted Kubernetes cost monitoring across AKS, GKE, and EKS. Find idle CPU, forgotten namespaces, and underused GPUs, then enforce a hard spending ceiling with Kubernetes-native policy CRDs.
 
 ## Layout

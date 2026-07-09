@@ -121,10 +121,10 @@ func demoCapacityDemands() []*kuberov1.CapacityDemand {
 // demoAnomalies returns a curated set of demo anomalies with stable
 // IDs. Each one deep-links into the page that owns the underlying
 // signal so the overview card → existing-page → action loop closes
-// in two clicks. `source` is "demo" until the ingest pipeline lands
-// real ClickHouse rolling-window stats — at that point this whole
-// function deletes and the cp computes the same shape from
-// pod_cost_1s + audit_log + vulnerability_reports.
+// in two clicks. Served only when ClickHouse is unwired (and
+// KUBEHERO_DEMO_MODE isn't "false"); with ClickHouse configured,
+// ListAnomalies computes real rolling z-scores over pod_cost_1s via
+// clickhouse.SpendAnomalyProvider + internal/anomaly instead.
 func demoAnomalies() []*kuberov1.Anomaly {
 	return []*kuberov1.Anomaly{
 		{

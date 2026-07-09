@@ -85,6 +85,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "nodes", "services", "endpoints", "namespaces"]
     verbs: ["get", "list", "watch"]
+  # Kubelet Summary API through the API-server node proxy
+  # (GET /api/v1/nodes/{node}/proxy/stats/summary) — measured pod
+  # utilisation for cost attribution. Read-only.
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["get"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
     verbs: ["get", "list", "watch"]

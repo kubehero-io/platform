@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) KubeHero contributors
 
-// Demo-mode session: a single JSON-encoded cookie. No server-side store,
+// Demo-mode session: a single HMAC-signed cookie. No server-side store,
 // no password, no JWT. It's here to shape the UX — arriving design
 // partners experience a real login → onboarding → dashboard flow without
 // us having to wire a real auth provider first.
+//
+// The cookie is httpOnly + signed (see lib/session-crypto.ts) so it can't
+// be read or forged from the browser; invalid or tampered cookies read as
+// logged-out. All reads/writes happen server-side (server components,
+// server actions, route handlers).
 //
 // When we ship real auth (Clerk / WorkOS / Dex), this file is the only
 // seam that changes.
 
 import { cookies } from "next/headers";
+import { signSession, verifySession } from "./session-crypto";
 
 export type Session = {
   email: string;
@@ -25,11 +31,7 @@ export async function getSession(): Promise<Session | null> {
   const c = await cookies();
   const raw = c.get(SESSION_COOKIE)?.value;
   if (!raw) return null;
-  try {
-    return JSON.parse(raw) as Session;
-  } catch {
-    return null;
-  }
+  return verifySession(raw);
 }
 
 export async function setSession(patch: Partial<Session>) {
@@ -41,9 +43,10 @@ export async function setSession(patch: Partial<Session>) {
   };
   const next: Session = { ...current, ...patch };
   const c = await cookies();
-  c.set(SESSION_COOKIE, JSON.stringify(next), {
+  c.set(SESSION_COOKIE, signSession(next), {
     path: "/",
-    httpOnly: false, // demo-mode: client code reads it too
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     maxAge: MAX_AGE,
   });

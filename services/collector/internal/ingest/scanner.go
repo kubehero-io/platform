@@ -2,17 +2,18 @@
 // Copyright (c) KubeHero contributors
 
 // Package ingest is the collector's data plane. It scans the Kubernetes
-// API for running Pods every `interval`, attributes a synthetic cost
-// per Pod based on resource requests + node SKU, and ships the batch
-// to the control-plane via Connect-RPC.
+// API for running Pods every `interval`, attributes a cost per Pod from
+// max(resource requests, measured usage) × the node's hourly rate, and
+// ships the batch to the control-plane via Connect-RPC.
 //
 // Architectural notes:
 //
-//   - Synthetic cost, not eBPF. The Pod's `requests.cpu/memory` get
-//     multiplied by a per-node hourly rate; we divide by the scan
-//     window to land on $/sec. This is honest enough for cluster-
-//     aware accounting, dishonest for utilisation. eBPF lands later
-//     and replaces this same struct shape with measured numbers.
+//   - Measured utilisation comes from the kubelet Summary API, fetched
+//     through the API-server node proxy (see internal/kubeletstats).
+//     One summary call per node per scan. When a node's stats are
+//     unavailable (RBAC, Windows kubelet) we degrade to a pure
+//     request-based estimate for that node's pods — never crash.
+//     eBPF probes will later sharpen the same numbers in-place.
 //
 //   - We call `Pods("").List()` per scan rather than a long-running
 //     informer. Cost is proportional to number of pods, not change
@@ -22,6 +23,10 @@
 //   - Node SKU is read from a node annotation set by the cloud's
 //     node-bootstrap script. We fall back to the node's instance-type
 //     label (well-known per cloud) when the annotation is missing.
+//
+//   - The $/sec math itself is packages/cost-model — the scanner only
+//     adapts kube objects into that package's inputs so the collector,
+//     control-plane and CLI all price a pod identically.
 
 package ingest
 
@@ -36,11 +41,13 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	costmodel "github.com/kubehero-io/platform/packages/cost-model"
+	"github.com/kubehero-io/platform/services/collector/internal/kubeletstats"
 )
 
 // Config carries every knob the scanner needs. Populated from env in
@@ -81,23 +88,61 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	httpc := &http.Client{Timeout: 8 * time.Second}
+	st := newScanState(kubeletstats.New(k8s))
 
 	tick := time.NewTicker(cfg.Interval)
 	defer tick.Stop()
 
 	// Run immediately + at every tick.
-	scan(ctx, log, k8s, httpc, cfg)
+	scan(ctx, log, k8s, httpc, cfg, st)
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-tick.C:
-			scan(ctx, log, k8s, httpc, cfg)
+			scan(ctx, log, k8s, httpc, cfg, st)
 		}
 	}
 }
 
-func scan(ctx context.Context, log *slog.Logger, k8s *kubernetes.Clientset, httpc *http.Client, cfg Config) {
+// scanState carries the pieces that persist across ticks: the kubelet
+// stats provider and the per-node "already warned" set that keeps a
+// permanently broken node (RBAC gap, Windows kubelet) from spamming a
+// warn line every 5 seconds.
+type scanState struct {
+	usage       kubeletstats.Provider
+	warnedNodes map[string]bool
+}
+
+func newScanState(usage kubeletstats.Provider) *scanState {
+	return &scanState{usage: usage, warnedNodes: map[string]bool{}}
+}
+
+// usageForNodes fetches measured pod utilisation, one summary call per
+// node per scan. A failing node logs a warn once, then degrades that
+// node's pods to request-based estimation until stats recover — this
+// path must never take the DaemonSet down.
+func (st *scanState) usageForNodes(ctx context.Context, log *slog.Logger, nodes []string) map[string]map[kubeletstats.PodKey]kubeletstats.Usage {
+	out := make(map[string]map[kubeletstats.PodKey]kubeletstats.Usage, len(nodes))
+	for _, node := range nodes {
+		u, err := st.usage.PodUsage(ctx, node)
+		if err != nil {
+			if !st.warnedNodes[node] {
+				st.warnedNodes[node] = true
+				log.Warn("kubelet stats unavailable — falling back to request-based cost", "node", node, "err", err)
+			}
+			continue
+		}
+		if st.warnedNodes[node] {
+			delete(st.warnedNodes, node)
+			log.Info("kubelet stats recovered", "node", node)
+		}
+		out[node] = u
+	}
+	return out
+}
+
+func scan(ctx context.Context, log *slog.Logger, k8s *kubernetes.Clientset, httpc *http.Client, cfg Config, st *scanState) {
 	// One round-trip listing every pod across every namespace. The
 	// apiserver caches this; we're light on it.
 	pods, err := k8s.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
@@ -118,6 +163,21 @@ func scan(ctx context.Context, log *slog.Logger, k8s *kubernetes.Clientset, http
 		}
 	}
 
+	// One kubelet summary per node hosting a running pod — measured
+	// usage sharpens the bill; missing stats degrade per-node.
+	nodeSet := map[string]bool{}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.Status.Phase == corev1.PodRunning && p.Spec.NodeName != "" {
+			nodeSet[p.Spec.NodeName] = true
+		}
+	}
+	nodeNames := make([]string, 0, len(nodeSet))
+	for n := range nodeSet {
+		nodeNames = append(nodeNames, n)
+	}
+	usageByNode := st.usageForNodes(ctx, log, nodeNames)
+
 	now := time.Now().UnixMilli()
 	samples := make([]map[string]any, 0, len(pods.Items))
 	for i := range pods.Items {
@@ -125,7 +185,13 @@ func scan(ctx context.Context, log *slog.Logger, k8s *kubernetes.Clientset, http
 		if p.Status.Phase != corev1.PodRunning {
 			continue
 		}
-		s := attributePod(p, nodeIndex[p.Spec.NodeName], cfg.Interval)
+		var measured costmodel.PodShare
+		measuredOK := false
+		if u, ok := usageByNode[p.Spec.NodeName][kubeletstats.PodKey{Namespace: p.Namespace, Name: p.Name}]; ok {
+			measured = costmodel.PodShare{CPUMillis: u.CPUMillicores, MemBytes: u.MemoryWorkingSetBytes}
+			measuredOK = true
+		}
+		s := attributePod(p, nodeIndex[p.Spec.NodeName], measured, measuredOK)
 		s["tsUnixMs"] = now
 		s["cluster"] = cfg.ClusterID
 		samples = append(samples, s)
@@ -148,19 +214,26 @@ func scan(ctx context.Context, log *slog.Logger, k8s *kubernetes.Clientset, http
 	log.Info("ingested", "samples", len(samples))
 }
 
-// attributePod computes a per-second cost from request × node-rate.
-// The math is deliberately simple — production replaces it with eBPF
-// utilisation × node-rate, but the wire shape is unchanged.
-func attributePod(p *corev1.Pod, n *corev1.Node, interval time.Duration) map[string]any {
+// attributePod computes a per-second cost via packages/cost-model. The
+// billable share is max(requests, measured usage) per dimension —
+// requests floor the bill because the scheduler reserved that capacity,
+// measured usage above requests bills burstable overage. When kubelet
+// stats were unavailable for the node (measuredOK=false) we fall back
+// to a pure request-based estimate.
+//
+// NOTE(wire): PodCostSample has no usage fields yet, and buf isn't
+// available here to add them, so measured usage only shapes costUsdSec;
+// cpuMillicores/memBytes stay the request snapshot and the wire format
+// is unchanged. When the proto grows cpu_usage_cores/memory_usage_bytes
+// the measured numbers should be emitted alongside.
+func attributePod(p *corev1.Pod, n *corev1.Node, measured costmodel.PodShare, measuredOK bool) map[string]any {
 	cpuMilli, memBytes := podRequests(p)
-	cpuCores := float64(cpuMilli) / 1000
-
-	hourlyUSD := nodeHourlyUSD(n) // $/hr for the whole node
-	cpuPerCorePerHour := hourlyUSD / float64(max32(nodeAllocatableCPU(n), 1))
-	memPerGiBPerHour := (hourlyUSD * 0.4) / float64(max32(nodeAllocatableMemGiB(n), 1)) // memory ≈ 40% of node cost
-
-	hourly := cpuCores*cpuPerCorePerHour + (float64(memBytes)/1024/1024/1024)*memPerGiBPerHour
-	costSec := hourly / 3600
+	requested := costmodel.PodShare{CPUMillis: int64(cpuMilli), MemBytes: int64(memBytes)}
+	billable := requested
+	if measuredOK {
+		billable = costmodel.UtilizationBlend(requested, measured)
+	}
+	costSec := costmodel.PodCostPerSecond(nodePrice(n), billable)
 
 	team := p.Labels["kubehero.io/team"]
 	if team == "" {
@@ -169,23 +242,36 @@ func attributePod(p *corev1.Pod, n *corev1.Node, interval time.Duration) map[str
 	cc := p.Labels["kubehero.io/cost-center"]
 
 	out := map[string]any{
-		"namespace":      p.Namespace,
-		"pod":            p.Name,
-		"team":           team,
-		"costCenter":     cc,
-		"node":           p.Spec.NodeName,
-		"cpuMillicores":  cpuMilli,
-		"memBytes":       memBytes,
-		"costUsdSec":     costSec,
+		"namespace":     p.Namespace,
+		"pod":           p.Name,
+		"team":          team,
+		"costCenter":    cc,
+		"node":          p.Spec.NodeName,
+		"cpuMillicores": cpuMilli,
+		"memBytes":      memBytes,
+		"costUsdSec":    costSec,
 	}
 	if n != nil {
 		out["nodepool"] = nodepoolOf(n)
 		out["region"] = n.Labels["topology.kubernetes.io/region"]
 		out["sku"] = nodeSKU(n)
 		out["lifecycle"] = nodeLifecycle(n)
-		_ = interval // kept for future window-aware attribution
 	}
 	return out
+}
+
+// nodePrice adapts a corev1.Node into the cost-model's input. A nil or
+// allocatable-less node yields the zero NodePrice, which cost-model
+// prices at $0 — honest for a pod we can't place on priced hardware.
+func nodePrice(n *corev1.Node) costmodel.NodePrice {
+	if n == nil {
+		return costmodel.NodePrice{}
+	}
+	return costmodel.NodePrice{
+		PerHourUSD: nodeHourlyUSD(n),
+		CPUMillis:  n.Status.Allocatable.Cpu().MilliValue(),
+		MemBytes:   n.Status.Allocatable.Memory().Value(),
+	}
 }
 
 func podRequests(p *corev1.Pod) (uint32, uint64) {
@@ -306,13 +392,6 @@ func parseFloat(s string) (float64, error) {
 	return v, err
 }
 
-func max32(a, b float32) float32 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // emit POSTs the batch to /kubehero.v1.ControlPlaneService/IngestPodCost.
 // Plain HTTP+JSON wire — Connect-RPC accepts that natively, and we
 // don't pull the generated Connect-Go stubs into the collector to
@@ -359,7 +438,3 @@ func kubeClient() (*kubernetes.Clientset, error) {
 	cfg.UserAgent = "kubehero-collector/0.1"
 	return kubernetes.NewForConfig(cfg)
 }
-
-// Used only to keep resource.Quantity reachable for future tighter
-// attribution (e.g. burstable QoS).
-var _ resource.Quantity

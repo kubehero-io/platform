@@ -1,0 +1,82 @@
+{{- if .Values.advisor.enabled -}}
+# The advisor is KubeHero's agentic layer: read-only briefings and
+# PROPOSED guarded actions. It only talks to the control-plane's read
+# RPCs, so — like the pricing engine — it needs no cluster privileges
+# and gets a bare ServiceAccount.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kubehero.fullname" . }}-advisor
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubehero.fullname" . }}-advisor
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.advisor.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: advisor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/component: advisor
+    spec:
+      serviceAccountName: {{ include "kubehero.fullname" . }}-advisor
+      {{- if and .Values.podSecurityContext (gt (len .Values.podSecurityContext) 0) }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- end }}
+      {{- if gt (int .Values.advisor.replicas) 1 }}
+      affinity: {{- include "kubehero.antiAffinity" (dict "component" "advisor") | nindent 8 }}
+      {{- end }}
+      {{- with (include "kubehero.priorityClassName" .) }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: advisor
+          image: {{ include "kubehero.image" (dict "root" . "image" .Values.advisor.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "--addr=:8083"]
+          env:
+            # Read-only data in: the control-plane's Connect API.
+            - name: CONTROL_PLANE_URL
+              value: "http://{{ include "kubehero.fullname" . }}-control-plane.{{ .Release.Namespace }}.svc:{{ .Values.controlPlane.service.port }}"
+            {{- if .Values.advisor.anthropic.existingSecret }}
+            # Enables the LLM brain. When the secret is absent the
+            # advisor runs its deterministic rules brain instead.
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.advisor.anthropic.existingSecret }}
+                  key: {{ .Values.advisor.anthropic.secretKey | default "api-key" }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8083
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+          resources: {{- toYaml .Values.advisor.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubehero.fullname" . }}-advisor
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/component: advisor
+  ports:
+    - port: {{ .Values.advisor.service.port }}
+      targetPort: http
+      name: http
+{{- end }}

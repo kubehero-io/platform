@@ -5,6 +5,7 @@ vars:
   MODULE_DIRS:
     - cli/kubehero
     - packages/cost-model
+    - services/advisor
     - services/collector
     - services/control-plane
     - services/operator

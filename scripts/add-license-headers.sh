@@ -12,6 +12,7 @@ apache=(
 )
 
 bsl=(
+  "services/advisor"
   "services/control-plane"
   "services/operator"
   "services/pricing-engine"

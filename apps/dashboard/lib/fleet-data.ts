@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) KubeHero contributors
 
-// TODO: replace with a Connect client call to ControlPlaneService.ListClusters.
-// See services/control-plane/internal/rpc/control.go — same shape.
+// Demo fixture for the six-cluster fleet. Server pages fetch live data via
+// lib/api/clusters.ts → ControlPlaneService.ListClusters when
+// CONTROL_PLANE_URL is set; this fixture is the fallback (and enriches live
+// rows with fields the Connect schema doesn't carry yet — cost, gpu, state).
 
 export type Cloud = "AKS" | "GKE" | "EKS";
 export type ClusterState = "healthy" | "warn" | "critical";

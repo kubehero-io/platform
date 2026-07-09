@@ -5,6 +5,7 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
@@ -13,20 +14,20 @@ import (
 	"github.com/kubehero-io/platform/services/pricing-engine/internal/pricing"
 )
 
-// Pricing is the in-process PricingService. Backed by Static sources today;
-// real cloud scrapers slot in behind the pricing.Source interface.
-type Pricing struct {
-	sources map[pricing.Cloud]pricing.Source
+// Quoter is what the handler needs from the pricing layer. The serving
+// path passes a *pricing.Catalog (cache + live sources + static
+// fallback); tests can pass anything that quotes.
+type Quoter interface {
+	Quote(ctx context.Context, cloud pricing.Cloud, sku, region, lifecycle string) (pricing.Quote, error)
 }
 
-func New() *Pricing {
-	return &Pricing{
-		sources: map[pricing.Cloud]pricing.Source{
-			pricing.CloudAWS:   pricing.NewStatic(pricing.CloudAWS),
-			pricing.CloudGCP:   pricing.NewStatic(pricing.CloudGCP),
-			pricing.CloudAzure: pricing.NewStatic(pricing.CloudAzure),
-		},
-	}
+// Pricing is the in-process PricingService, backed by a Quoter.
+type Pricing struct {
+	quoter Quoter
+}
+
+func New(q Quoter) *Pricing {
+	return &Pricing{quoter: q}
 }
 
 var _ kuberov1connect.PricingServiceHandler = (*Pricing)(nil)
@@ -35,16 +36,25 @@ func (p *Pricing) Quote(
 	ctx context.Context,
 	req *connect.Request[kuberov1.QuoteRequest],
 ) (*connect.Response[kuberov1.QuoteResponse], error) {
-	src, ok := p.sources[pricing.Cloud(req.Msg.GetCloud())]
-	if !ok {
+	cloud := pricing.Cloud(req.Msg.GetCloud())
+	switch cloud {
+	case pricing.CloudAWS, pricing.CloudGCP, pricing.CloudAzure:
+	default:
 		return nil, connect.NewError(
 			connect.CodeInvalidArgument,
 			fmt.Errorf("unsupported cloud: %q", req.Msg.GetCloud()),
 		)
 	}
-	q, err := src.Quote(ctx, req.Msg.GetSku(), req.Msg.GetRegion(), req.Msg.GetLifecycle())
+	q, err := p.quoter.Quote(ctx, cloud, req.Msg.GetSku(), req.Msg.GetRegion(), req.Msg.GetLifecycle())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		switch {
+		case errors.Is(err, pricing.ErrUnimplemented):
+			return nil, connect.NewError(connect.CodeUnimplemented, err)
+		case errors.Is(err, pricing.ErrNotFound):
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		default:
+			return nil, connect.NewError(connect.CodeUnavailable, err)
+		}
 	}
 	return connect.NewResponse(&kuberov1.QuoteResponse{
 		PricePerHour: q.PricePerHour,

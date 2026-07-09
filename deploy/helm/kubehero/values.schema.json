@@ -57,6 +57,31 @@
       }
     },
     "operator":      { "type": "object" },
+    "advisor": {
+      "type": "object",
+      "properties": {
+        "enabled":  { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "image": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "tag":  { "type": "string" }
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+        },
+        "anthropic": {
+          "type": "object",
+          "properties": {
+            "existingSecret": { "type": "string" },
+            "secretKey":      { "type": "string" }
+          }
+        }
+      }
+    },
     "pricingEngine": {
       "type": "object",
       "properties": {

@@ -7,6 +7,7 @@
 #   · collector on :8081 emitting demo chargeback metrics
 #   · control-plane on :8080 (Connect-RPC + /metrics)
 #   · pricing-engine on :8082
+#   · advisor on :8083 (agentic briefings; set ANTHROPIC_API_KEY for the LLM brain)
 #   · dashboard on :3001
 #   · postgres 16 on :5432 (metadata)
 #   · clickhouse on :9000 (time-series)
@@ -76,6 +77,18 @@ services:
       postgres:   { condition: service_healthy }
       clickhouse: { condition: service_started }
       valkey:     { condition: service_started }
+
+  advisor:
+    build:
+      context: .
+      dockerfile: services/advisor/Dockerfile
+    command: ["serve", "--addr=:8083"]
+    environment:
+      CONTROL_PLANE_URL: "http://control-plane:8080"
+      # Optional: enables the LLM brain; unset = deterministic rules brain.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    ports: ["8083:8083"]
+    depends_on: [control-plane]
 
   pricing-engine:
     build:

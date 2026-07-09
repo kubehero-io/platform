@@ -1,10 +1,13 @@
 go 1.26.2
 
+toolchain go1.26.5
+
 use (
 	./cli/kubehero
 	./infra/dagger
 	./packages/cost-model
 	./packages/proto
+	./services/advisor
 	./services/collector
 	./services/control-plane
 	./services/operator

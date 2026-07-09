@@ -90,6 +90,28 @@ pricingEngine:
     port: 8082
   schedule: "0 */6 * * *"
 
+# The advisor is KubeHero's agentic layer: read-only briefings +
+# proposed guarded actions served over Connect-RPC. It only calls the
+# control-plane's read RPCs and never touches the Kubernetes API.
+advisor:
+  enabled: true
+  replicas: 1
+  image:
+    name: advisor
+    tag: ""
+  service:
+    port: 8083
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+  # LLM brain (Claude). Leave existingSecret empty to run the built-in
+  # deterministic rules brain — no external API calls at all.
+  anthropic:
+    # Name of a pre-created Secret holding the Anthropic API key.
+    existingSecret: ""
+    # Key inside that Secret.
+    secretKey: "api-key"
+
 dashboard:
   enabled: true
   replicas: 1

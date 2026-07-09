@@ -70,26 +70,60 @@ func quoteCmd() *cobra.Command {
 }
 
 func serveCmd() *cobra.Command {
-	var addr string
+	var (
+		addr            string
+		cacheTTL        time.Duration
+		refreshInterval time.Duration
+	)
 	c := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the PricingService over Connect RPC",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return serve(cmd.Context(), addr)
+			return serve(cmd.Context(), addr, cacheTTL, refreshInterval)
 		},
 	}
 	c.Flags().StringVar(&addr, "addr", ":8082", "listen address")
+	c.Flags().DurationVar(&cacheTTL, "cache-ttl",
+		envDuration("PRICING_CACHE_TTL", pricing.DefaultCacheTTL),
+		"how long a resolved quote stays fresh in the in-memory catalog cache")
+	c.Flags().DurationVar(&refreshInterval, "refresh-interval",
+		envDuration("PRICING_REFRESH_INTERVAL", pricing.DefaultCacheTTL),
+		"background refresh cadence for popular SKUs (0 disables the loop)")
 	return c
 }
 
-func serve(parent context.Context, addr string) error {
-	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	mux := http.NewServeMux()
+// envDuration reads a time.Duration from the environment, falling back
+// to def when unset or unparsable. Flags override env.
+func envDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
+}
 
+func serve(parent context.Context, addr string, cacheTTL, refreshInterval time.Duration) error {
+	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
+	// The serving path answers from the catalog: in-memory cache first,
+	// live provider on miss, static table when the provider fails or
+	// doesn't know the SKU. AWS and Azure price APIs are public; GCP
+	// needs an API key, so its live source is wired only when present.
+	catalog := pricing.NewCatalog(cacheTTL, log).
+		WithLive(pricing.NewAWS()).
+		WithLive(pricing.NewAzure())
+	if key := os.Getenv("GCP_BILLING_API_KEY"); key != "" {
+		catalog.WithLive(&pricing.GCP{APIKey: key})
+	} else {
+		log.Info("GCP_BILLING_API_KEY unset; gcp quotes served from the static table")
+	}
+
+	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprintln(w, "ok")
 	})
-	path, handler := kuberov1connect.NewPricingServiceHandler(rpc.New())
+	path, handler := kuberov1connect.NewPricingServiceHandler(rpc.New(catalog))
 	mux.Handle(path, handler)
 
 	srv := &http.Server{
@@ -99,19 +133,42 @@ func serve(parent context.Context, addr string) error {
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", addr)
+		log.Info("listening", "addr", addr, "cache_ttl", cacheTTL.String(), "refresh_interval", refreshInterval.String())
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
+
 	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// In-process stand-in for the nightly pricing cron: prefetch the
+	// popular SKUs on startup, then re-resolve them on a jittered
+	// ticker. Cancelled with ctx; we wait for it below so shutdown is
+	// clean.
+	refresher := &pricing.Refresher{
+		Catalog:  catalog,
+		Interval: refreshInterval,
+		Jitter:   refreshInterval / 10,
+		Targets:  catalog.PopularSKUs(),
+		Log:      log,
+	}
+	refresherDone := make(chan struct{})
+	go func() {
+		defer close(refresherDone)
+		refresher.Run(ctx)
+	}()
+
 	select {
 	case <-ctx.Done():
 		log.Info("shutting down")
 	case err := <-errCh:
+		cancel()
+		<-refresherDone
 		return err
 	}
+	cancel()
+	<-refresherDone
 	sh, cancelSh := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelSh()
 	return srv.Shutdown(sh)

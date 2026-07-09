@@ -52,15 +52,26 @@ type ControlPlane struct {
 	// silently; this keeps the kind-demo path working when the cp is
 	// running without ClickHouse.
 	PodCost *clickhouse.PodCostWriter
+	// Anomalies computes rolling z-scores over pod_cost_1s. When nil,
+	// ListAnomalies falls back to the demo fixtures (unless
+	// DemoFixturesDisabled).
+	Anomalies *clickhouse.SpendAnomalyProvider
+	// DemoFixturesDisabled hard-disables the demo-fixture fallback
+	// (KUBEHERO_DEMO_MODE=false). RPCs that would otherwise serve
+	// fixtures return FailedPrecondition instead, so a misconfigured
+	// production deploy fails loudly rather than serving fake numbers.
+	DemoFixturesDisabled bool
 }
 
 // Options is a tiny option-bag so callers can grow capability without
 // changing the constructor signature again.
 type Options struct {
-	Clusters store.ClusterStore
-	Audit    store.AuditStore
-	BurnRate *clickhouse.BurnRateProvider
-	PodCost  *clickhouse.PodCostWriter
+	Clusters             store.ClusterStore
+	Audit                store.AuditStore
+	BurnRate             *clickhouse.BurnRateProvider
+	PodCost              *clickhouse.PodCostWriter
+	Anomalies            *clickhouse.SpendAnomalyProvider
+	DemoFixturesDisabled bool
 }
 
 func New(opts ...Options) *ControlPlane {
@@ -78,8 +89,23 @@ func New(opts ...Options) *ControlPlane {
 		if o.PodCost != nil {
 			cp.PodCost = o.PodCost
 		}
+		if o.Anomalies != nil {
+			cp.Anomalies = o.Anomalies
+		}
+		if o.DemoFixturesDisabled {
+			cp.DemoFixturesDisabled = true
+		}
 	}
 	return cp
+}
+
+// errDemoDisabled is what fixture-backed RPCs return when
+// KUBEHERO_DEMO_MODE=false and no real store is wired to serve the
+// call. FailedPrecondition (not Unavailable) because retrying won't
+// help — the deployment needs DATABASE_URL / CLICKHOUSE_URL.
+func errDemoDisabled(rpcName string) *connect.Error {
+	return connect.NewError(connect.CodeFailedPrecondition,
+		fmt.Errorf("%s: no backing store configured and demo fixtures are disabled (KUBEHERO_DEMO_MODE=false); set DATABASE_URL / CLICKHOUSE_URL", rpcName))
 }
 
 // Compile-time assertion the server matches the generated interface.
@@ -99,7 +125,7 @@ func (c *ControlPlane) ListClusters(
 	ctx context.Context,
 	req *connect.Request[kuberov1.ListClustersRequest],
 ) (*connect.Response[kuberov1.ListClustersResponse], error) {
-	all := demoClusters()
+	var all []*kuberov1.Cluster
 	if c.Clusters != nil {
 		// best-effort overlay: if the store has rows, prefer them
 		if rows, err := c.Clusters.List(ctx, "default", 100, 0); err == nil && len(rows) > 0 {
@@ -109,6 +135,16 @@ func (c *ControlPlane) ListClusters(
 					Id: r.ID, Name: r.Name, Cloud: r.Cloud, Region: r.Region, Nodes: r.NodesCount,
 				})
 			}
+		}
+	}
+	if len(all) == 0 {
+		if c.DemoFixturesDisabled {
+			if c.Clusters == nil {
+				return nil, errDemoDisabled("ListClusters")
+			}
+			// Store wired but empty: an honest empty list, not fixtures.
+		} else {
+			all = demoClusters()
 		}
 	}
 	ps := req.Msg.GetPageSize()
@@ -224,7 +260,14 @@ func (c *ControlPlane) ListAuditLog(
 	// Fallback to demo only when the store yielded nothing (stub mode or
 	// freshly-installed control plane without any policy fires yet).
 	if len(entries) == 0 {
-		entries = demoAuditEntries()
+		if c.DemoFixturesDisabled {
+			if c.Audit == nil {
+				return nil, errDemoDisabled("ListAuditLog")
+			}
+			// Store wired but empty: honest empty log, not fixtures.
+		} else {
+			entries = demoAuditEntries()
+		}
 	}
 
 	if outcome := req.Msg.GetOutcome(); outcome != "" {
@@ -393,6 +436,9 @@ func (c *ControlPlane) ListWasteRecommendations(
 	_ context.Context,
 	req *connect.Request[kuberov1.ListWasteRecommendationsRequest],
 ) (*connect.Response[kuberov1.ListWasteRecommendationsResponse], error) {
+	if c.DemoFixturesDisabled {
+		return nil, errDemoDisabled("ListWasteRecommendations")
+	}
 	recs := demoWaste()
 	if lim := req.Msg.GetLimit(); lim > 0 && int32(len(recs)) > lim {
 		recs = recs[:lim]
@@ -414,6 +460,9 @@ func (c *ControlPlane) GetWorkload(
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			errors.New("cluster, namespace and name are all required"))
 	}
+	if c.DemoFixturesDisabled {
+		return nil, errDemoDisabled("GetWorkload")
+	}
 
 	var rec *kuberov1.WasteRecommendation
 	for _, r := range demoWaste() {
@@ -432,6 +481,9 @@ func (c *ControlPlane) ListPolicies(
 	_ context.Context,
 	req *connect.Request[kuberov1.ListPoliciesRequest],
 ) (*connect.Response[kuberov1.ListPoliciesResponse], error) {
+	if c.DemoFixturesDisabled {
+		return nil, errDemoDisabled("ListPolicies")
+	}
 	policies := demoPolicies()
 	if kind := req.Msg.GetKind(); kind != "" {
 		filtered := policies[:0]
@@ -449,6 +501,9 @@ func (c *ControlPlane) ListVulnerabilities(
 	_ context.Context,
 	req *connect.Request[kuberov1.ListVulnerabilitiesRequest],
 ) (*connect.Response[kuberov1.ListVulnerabilitiesResponse], error) {
+	if c.DemoFixturesDisabled {
+		return nil, errDemoDisabled("ListVulnerabilities")
+	}
 	vulns := demoVulnerabilities()
 
 	if cluster := req.Msg.GetClusterId(); cluster != "" {
@@ -583,6 +638,9 @@ func (c *ControlPlane) ListCapacityDemands(
 	_ context.Context,
 	req *connect.Request[kuberov1.ListCapacityDemandsRequest],
 ) (*connect.Response[kuberov1.ListCapacityDemandsResponse], error) {
+	if c.DemoFixturesDisabled {
+		return nil, errDemoDisabled("ListCapacityDemands")
+	}
 	all := demoCapacityDemands()
 	if cluster := req.Msg.GetClusterId(); cluster != "" {
 		filtered := all[:0]
@@ -614,19 +672,46 @@ func (c *ControlPlane) ListCapacityDemands(
 // across the fleet, ranked by dollar impact. The dashboard's overview
 // page surfaces these as one-line cards with a deep-link verb.
 //
-// Today the ranking is deterministic over a curated demo set; once
-// the ingest pipeline lands the implementation will be a rolling
-// z-score over pod_cost_1s + a join against the audit + vulnerability
-// rows. The wire shape stays unchanged so the dashboard doesn't move.
+// When ClickHouse is wired the anomalies are real: a rolling z-score
+// of each workload's last-hour spend against its trailing baseline
+// (default 24h, request window "7d"/"30d" widens it), computed by
+// clickhouse.SpendAnomalyProvider over pod_cost_1s and scored by the
+// pure internal/anomaly package. |z| >= threshold (default 3.0,
+// KUBEHERO_ANOMALY_Z_THRESHOLD) makes the list. Without ClickHouse we
+// fall back to the curated demo set — same wire shape either way so
+// the dashboard doesn't move. The request's `scope` field is accepted
+// but ignored for now: detection is always workload-grained.
 func (c *ControlPlane) ListAnomalies(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[kuberov1.ListAnomaliesRequest],
 ) (*connect.Response[kuberov1.ListAnomaliesResponse], error) {
-	all := demoAnomalies()
 	limit := int(req.Msg.GetLimit())
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
+
+	var all []*kuberov1.Anomaly
+	switch {
+	case c.Anomalies != nil:
+		window, err := parseAnomalyWindow(req.Msg.GetWindow())
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		hits, err := c.Anomalies.Detect(ctx, window)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("anomaly detect: %w", err))
+		}
+		threshold := c.Anomalies.EffectiveThreshold()
+		all = make([]*kuberov1.Anomaly, 0, len(hits))
+		for _, h := range hits {
+			all = append(all, spendAnomalyToProto(h, threshold))
+		}
+	case c.DemoFixturesDisabled:
+		return nil, errDemoDisabled("ListAnomalies")
+	default:
+		all = demoAnomalies()
+	}
+
 	out := all
 	if int32(len(out)) > int32(limit) {
 		out = out[:limit]
@@ -641,6 +726,9 @@ func (c *ControlPlane) GetTeamSpend(
 	_ context.Context,
 	_ *connect.Request[kuberov1.GetTeamSpendRequest],
 ) (*connect.Response[kuberov1.GetTeamSpendResponse], error) {
+	if c.DemoFixturesDisabled {
+		return nil, errDemoDisabled("GetTeamSpend")
+	}
 	teams := demoTeamSpend()
 	var total, recoverable float64
 	for _, t := range teams {

@@ -16,6 +16,7 @@ import {
   Settings as SettingsIcon,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Terminal,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -37,6 +38,7 @@ type Item = {
 };
 
 const NAV: Item[] = [
+  { id: "nav-advisor",    label: "Advisor",        kind: "nav", href: "/advisor",    icon: Sparkles },
   { id: "nav-fleet",      label: "Fleet",          kind: "nav", href: "/fleet",      icon: Layers },
   { id: "nav-waste",      label: "Waste",          kind: "nav", href: "/waste",      icon: AlertTriangle },
   { id: "nav-chargeback", label: "Chargeback",     kind: "nav", href: "/chargeback", icon: Receipt },
