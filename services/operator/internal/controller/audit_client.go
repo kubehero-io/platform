@@ -45,8 +45,8 @@ type AuditEvent struct {
 // is a logged no-op so the operator never blocks on a missing cp.
 type HTTPAuditEmitter struct {
 	Endpoint string
-	Token    string         // optional Bearer for future RBAC
-	Client   *http.Client   // defaulted on first use
+	Token    string       // optional Bearer for future RBAC
+	Client   *http.Client // defaulted on first use
 }
 
 // NoopAuditEmitter is the test/stub default — never errors, never calls.

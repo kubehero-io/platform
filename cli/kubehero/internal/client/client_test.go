@@ -107,6 +107,27 @@ func TestRequestShaping(t *testing.T) {
 			wantBody: `null`,
 		},
 		{
+			name: "ArmPolicy",
+			call: func(c *Client) error {
+				_, err := c.ArmPolicy(&ArmPolicyRequest{
+					ClusterID: "eks-use1-prod", PolicyName: "gpu-inference-cap",
+					Armed: true, Reason: "runaway GPU spend",
+				})
+				return err
+			},
+			wantPath: "/kubehero.v1.ControlPlaneService/ArmPolicy",
+			wantBody: `{"clusterId":"eks-use1-prod","policyName":"gpu-inference-cap","armed":true,"reason":"runaway GPU spend"}`,
+		},
+		{
+			name: "ArmPolicy disarm keeps armed=false and omits empty optionals",
+			call: func(c *Client) error {
+				_, err := c.ArmPolicy(&ArmPolicyRequest{PolicyName: "gpu-inference-cap", Armed: false})
+				return err
+			},
+			wantPath: "/kubehero.v1.ControlPlaneService/ArmPolicy",
+			wantBody: `{"policyName":"gpu-inference-cap","armed":false}`,
+		},
+		{
 			name:     "Quote",
 			call:     func(c *Client) error { _, err := c.Quote("aws", "m5.large", "eu-west-1", "spot"); return err },
 			wantPath: "/kubehero.v1.PricingService/Quote",
@@ -209,6 +230,23 @@ func TestResponseDecoding(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got.Cluster.ID != "c-9" || got.Token != "agent-tok" || !strings.HasPrefix(got.HelmInstall, "helm install") {
+			t.Errorf("response = %+v", got)
+		}
+	})
+
+	t.Run("ArmPolicy", func(t *testing.T) {
+		// protojson encodes int64 as a string on the wire.
+		srv, _ := newCaptureServer(t, http.StatusOK,
+			`{"policyName":"gpu-inference-cap","armed":true,"effectiveAtUnix":"1767225600","auditId":"aud-42"}`)
+		c := New(&config.Config{Endpoint: srv.URL})
+		got, err := c.ArmPolicy(&ArmPolicyRequest{
+			ClusterID: "eks-use1-prod", PolicyName: "gpu-inference-cap", Armed: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.PolicyName != "gpu-inference-cap" || !got.Armed ||
+			got.EffectiveAtUnix != 1767225600 || got.AuditID != "aud-42" {
 			t.Errorf("response = %+v", got)
 		}
 	})

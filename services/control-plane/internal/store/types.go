@@ -9,8 +9,14 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrNotFound reports a lookup that matched no rows. Store methods wrap
+// it (fmt.Errorf("… %w", ErrNotFound)) so RPC handlers can map misses
+// onto CodeNotFound without string-matching.
+var ErrNotFound = errors.New("not found")
 
 type Cluster struct {
 	ID              string
@@ -72,6 +78,10 @@ type PolicyStore interface {
 	List(ctx context.Context, clusterID string) ([]*Policy, error)
 	Arm(ctx context.Context, id, userID string) error
 	Disarm(ctx context.Context, id string) error
+	// SetArmedByName flips the armed bit on the policy addressed by
+	// (cluster, name) — the shape the ArmPolicy RPC speaks — and
+	// returns the updated row. Wraps ErrNotFound when nothing matches.
+	SetArmedByName(ctx context.Context, clusterID, name string, armed bool, actor string) (*Policy, error)
 	RecordEval(ctx context.Context, id, result string) error
 }
 

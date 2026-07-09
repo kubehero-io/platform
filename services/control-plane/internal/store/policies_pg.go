@@ -85,6 +85,57 @@ func (s *PoliciesPG) Disarm(ctx context.Context, id string) error {
 	return err
 }
 
+// SetArmedByName flips the kill-switch on a policy addressed by
+// (cluster, name) rather than the surrogate id Arm/Disarm use.
+// clusterID may be a UUID or a cluster slug — slugs are resolved
+// against the clusters table, mirroring AuditPG's tolerance. armed_by
+// is a UUID FK to users(id), so the actor is only stamped there when
+// it is UUID-shaped; CLI / API-key actors are recorded in the audit
+// log instead.
+func (s *PoliciesPG) SetArmedByName(ctx context.Context, clusterID, name string, armed bool, actor string) (*Policy, error) {
+	if !looksLikeUUID(clusterID) {
+		var resolved string
+		if err := s.DB.QueryRowContext(ctx,
+			`SELECT id::text FROM clusters WHERE slug = $1 LIMIT 1`, clusterID).Scan(&resolved); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, fmt.Errorf("cluster %q: %w", clusterID, ErrNotFound)
+			}
+			return nil, err
+		}
+		clusterID = resolved
+	}
+
+	var armedBy sql.NullString
+	if armed && looksLikeUUID(actor) {
+		armedBy = sql.NullString{String: actor, Valid: true}
+	}
+	var armedAt sql.NullTime
+	if armed {
+		armedAt = sql.NullTime{Time: time.Now().UTC(), Valid: true}
+	}
+
+	const q = `
+	  UPDATE policies SET armed = $3, armed_by = $4, armed_at = $5
+	  WHERE cluster_id = $1 AND name = $2
+	  RETURNING id::text, cluster_id::text, kind, namespace, name, spec,
+	            armed, armed_by::text, armed_at, generation, last_eval,
+	            COALESCE(last_eval_result,''), updated_at`
+	p := &Policy{}
+	var by sql.NullString
+	err := s.DB.QueryRowContext(ctx, q, clusterID, name, armed, armedBy, armedAt).Scan(
+		&p.ID, &p.ClusterID, &p.Kind, &p.Namespace, &p.Name, &p.SpecJSON,
+		&p.Armed, &by, &p.ArmedAt, &p.Generation, &p.LastEval,
+		&p.LastEvalResult, &p.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("policy %q in cluster %s: %w", name, clusterID, ErrNotFound)
+	}
+	if by.Valid {
+		p.ArmedByUserID = &by.String
+	}
+	return p, err
+}
+
 func (s *PoliciesPG) RecordEval(ctx context.Context, id, result string) error {
 	const q = `UPDATE policies SET last_eval = $2, last_eval_result = $3 WHERE id = $1`
 	_, err := s.DB.ExecContext(ctx, q, id, time.Now().UTC(), result)

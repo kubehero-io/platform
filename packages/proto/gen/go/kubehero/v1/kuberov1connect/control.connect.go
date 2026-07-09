@@ -62,6 +62,9 @@ const (
 	// ControlPlaneServiceListPoliciesProcedure is the fully-qualified name of the ControlPlaneService's
 	// ListPolicies RPC.
 	ControlPlaneServiceListPoliciesProcedure = "/kubehero.v1.ControlPlaneService/ListPolicies"
+	// ControlPlaneServiceArmPolicyProcedure is the fully-qualified name of the ControlPlaneService's
+	// ArmPolicy RPC.
+	ControlPlaneServiceArmPolicyProcedure = "/kubehero.v1.ControlPlaneService/ArmPolicy"
 	// ControlPlaneServiceGetTeamSpendProcedure is the fully-qualified name of the ControlPlaneService's
 	// GetTeamSpend RPC.
 	ControlPlaneServiceGetTeamSpendProcedure = "/kubehero.v1.ControlPlaneService/GetTeamSpend"
@@ -107,6 +110,11 @@ type ControlPlaneServiceClient interface {
 	GetWorkload(context.Context, *connect.Request[v1.GetWorkloadRequest]) (*connect.Response[v1.GetWorkloadResponse], error)
 	// Budget + Ceiling policies as the user defined them.
 	ListPolicies(context.Context, *connect.Request[v1.ListPoliciesRequest]) (*connect.Response[v1.ListPoliciesResponse], error)
+	// Arm or disarm a policy's kill-switch. The server persists the
+	// armed bit, appends an HMAC-signed audit row recording who/why,
+	// and pages the configured alert channels — flipping a kill-switch
+	// is alert-worthy. Requires the admin role.
+	ArmPolicy(context.Context, *connect.Request[v1.ArmPolicyRequest]) (*connect.Response[v1.ArmPolicyResponse], error)
 	// Team / cost-center / cloud rollup for chargeback.
 	GetTeamSpend(context.Context, *connect.Request[v1.GetTeamSpendRequest]) (*connect.Response[v1.GetTeamSpendResponse], error)
 	// Posture surface — vulnerabilities ingested from Trivy Operator
@@ -194,6 +202,12 @@ func NewControlPlaneServiceClient(httpClient connect.HTTPClient, baseURL string,
 			connect.WithSchema(controlPlaneServiceMethods.ByName("ListPolicies")),
 			connect.WithClientOptions(opts...),
 		),
+		armPolicy: connect.NewClient[v1.ArmPolicyRequest, v1.ArmPolicyResponse](
+			httpClient,
+			baseURL+ControlPlaneServiceArmPolicyProcedure,
+			connect.WithSchema(controlPlaneServiceMethods.ByName("ArmPolicy")),
+			connect.WithClientOptions(opts...),
+		),
 		getTeamSpend: connect.NewClient[v1.GetTeamSpendRequest, v1.GetTeamSpendResponse](
 			httpClient,
 			baseURL+ControlPlaneServiceGetTeamSpendProcedure,
@@ -238,6 +252,7 @@ type controlPlaneServiceClient struct {
 	listWasteRecommendations *connect.Client[v1.ListWasteRecommendationsRequest, v1.ListWasteRecommendationsResponse]
 	getWorkload              *connect.Client[v1.GetWorkloadRequest, v1.GetWorkloadResponse]
 	listPolicies             *connect.Client[v1.ListPoliciesRequest, v1.ListPoliciesResponse]
+	armPolicy                *connect.Client[v1.ArmPolicyRequest, v1.ArmPolicyResponse]
 	getTeamSpend             *connect.Client[v1.GetTeamSpendRequest, v1.GetTeamSpendResponse]
 	listVulnerabilities      *connect.Client[v1.ListVulnerabilitiesRequest, v1.ListVulnerabilitiesResponse]
 	listAnomalies            *connect.Client[v1.ListAnomaliesRequest, v1.ListAnomaliesResponse]
@@ -288,6 +303,11 @@ func (c *controlPlaneServiceClient) GetWorkload(ctx context.Context, req *connec
 // ListPolicies calls kubehero.v1.ControlPlaneService.ListPolicies.
 func (c *controlPlaneServiceClient) ListPolicies(ctx context.Context, req *connect.Request[v1.ListPoliciesRequest]) (*connect.Response[v1.ListPoliciesResponse], error) {
 	return c.listPolicies.CallUnary(ctx, req)
+}
+
+// ArmPolicy calls kubehero.v1.ControlPlaneService.ArmPolicy.
+func (c *controlPlaneServiceClient) ArmPolicy(ctx context.Context, req *connect.Request[v1.ArmPolicyRequest]) (*connect.Response[v1.ArmPolicyResponse], error) {
+	return c.armPolicy.CallUnary(ctx, req)
 }
 
 // GetTeamSpend calls kubehero.v1.ControlPlaneService.GetTeamSpend.
@@ -343,6 +363,11 @@ type ControlPlaneServiceHandler interface {
 	GetWorkload(context.Context, *connect.Request[v1.GetWorkloadRequest]) (*connect.Response[v1.GetWorkloadResponse], error)
 	// Budget + Ceiling policies as the user defined them.
 	ListPolicies(context.Context, *connect.Request[v1.ListPoliciesRequest]) (*connect.Response[v1.ListPoliciesResponse], error)
+	// Arm or disarm a policy's kill-switch. The server persists the
+	// armed bit, appends an HMAC-signed audit row recording who/why,
+	// and pages the configured alert channels — flipping a kill-switch
+	// is alert-worthy. Requires the admin role.
+	ArmPolicy(context.Context, *connect.Request[v1.ArmPolicyRequest]) (*connect.Response[v1.ArmPolicyResponse], error)
 	// Team / cost-center / cloud rollup for chargeback.
 	GetTeamSpend(context.Context, *connect.Request[v1.GetTeamSpendRequest]) (*connect.Response[v1.GetTeamSpendResponse], error)
 	// Posture surface — vulnerabilities ingested from Trivy Operator
@@ -426,6 +451,12 @@ func NewControlPlaneServiceHandler(svc ControlPlaneServiceHandler, opts ...conne
 		connect.WithSchema(controlPlaneServiceMethods.ByName("ListPolicies")),
 		connect.WithHandlerOptions(opts...),
 	)
+	controlPlaneServiceArmPolicyHandler := connect.NewUnaryHandler(
+		ControlPlaneServiceArmPolicyProcedure,
+		svc.ArmPolicy,
+		connect.WithSchema(controlPlaneServiceMethods.ByName("ArmPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
 	controlPlaneServiceGetTeamSpendHandler := connect.NewUnaryHandler(
 		ControlPlaneServiceGetTeamSpendProcedure,
 		svc.GetTeamSpend,
@@ -476,6 +507,8 @@ func NewControlPlaneServiceHandler(svc ControlPlaneServiceHandler, opts ...conne
 			controlPlaneServiceGetWorkloadHandler.ServeHTTP(w, r)
 		case ControlPlaneServiceListPoliciesProcedure:
 			controlPlaneServiceListPoliciesHandler.ServeHTTP(w, r)
+		case ControlPlaneServiceArmPolicyProcedure:
+			controlPlaneServiceArmPolicyHandler.ServeHTTP(w, r)
 		case ControlPlaneServiceGetTeamSpendProcedure:
 			controlPlaneServiceGetTeamSpendHandler.ServeHTTP(w, r)
 		case ControlPlaneServiceListVulnerabilitiesProcedure:
@@ -529,6 +562,10 @@ func (UnimplementedControlPlaneServiceHandler) GetWorkload(context.Context, *con
 
 func (UnimplementedControlPlaneServiceHandler) ListPolicies(context.Context, *connect.Request[v1.ListPoliciesRequest]) (*connect.Response[v1.ListPoliciesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kubehero.v1.ControlPlaneService.ListPolicies is not implemented"))
+}
+
+func (UnimplementedControlPlaneServiceHandler) ArmPolicy(context.Context, *connect.Request[v1.ArmPolicyRequest]) (*connect.Response[v1.ArmPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kubehero.v1.ControlPlaneService.ArmPolicy is not implemented"))
 }
 
 func (UnimplementedControlPlaneServiceHandler) GetTeamSpend(context.Context, *connect.Request[v1.GetTeamSpendRequest]) (*connect.Response[v1.GetTeamSpendResponse], error) {

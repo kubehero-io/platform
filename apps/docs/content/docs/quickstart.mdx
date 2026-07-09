@@ -58,7 +58,7 @@ kubectl -n kubehero-system get pods
 kubectl -n kubehero-system logs ds/kubehero-collector --tail=20
 ```
 
-You should see `attribution ok · pods=NNN · nodes=NN` within 30 seconds of the agent starting. If not, see [Troubleshooting](/docs/troubleshooting).
+You should see `attribution ok · pods=NNN · nodes=NN` within 30 seconds of the collector starting. If not, see [Troubleshooting](/docs/troubleshooting).
 
 ## Your first scan
 
@@ -154,6 +154,7 @@ kubehero cap --arm --policy prod-monthly
 ## Next steps
 
 - [Concepts](/docs/concepts) — attribution, rightsizing, ceilings explained
+- [Advisor & agents](/docs/advisor) — daily briefings and proposed guarded actions (optionally Claude-powered)
 - [CRD reference](/docs/crd-reference) — every field of every CRD
 - [Chargeback](/docs/chargeback) — team / nodepool rollup via your existing Kubernetes labels
 - [Integrations](/docs/integrations/prometheus-grafana) — wiring details for each dependency

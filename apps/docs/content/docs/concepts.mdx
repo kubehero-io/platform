@@ -9,9 +9,9 @@ KubeHero is built around three ideas. Once you understand these, the rest of the
 
 **Who is spending the money, right now, at pod resolution?**
 
-Most K8s cost tools average CPU over 30 seconds or more. KubeHero attaches eBPF probes to the Linux scheduler, which gives us cgroup-accurate per-pod CPU time at 1-second resolution. Noisy neighbors, steal time, and syscall-heavy workloads all appear correctly — without relying on `metrics-server`.
+Most K8s cost tools price a pod's *requests* — paid-for air included. KubeHero prices **measured utilization**: every 5 seconds the collector reads each pod's actual CPU (`usageNanoCores`) and working-set memory from the kubelet Summary API and attributes cost from `max(requests, measured)` — without relying on `metrics-server`. eBPF scheduler probes, for 1-second cgroup-accurate burst attribution, are the roadmap's next accuracy step.
 
-Each 1-second sample carries: pod UID, CPU millicores, memory bytes, GPU utilization, and the node it ran on. That maps to a **cost-per-pod-per-second** using the pricing engine's normalized SKU table.
+Each sample carries: pod, CPU millicores, memory bytes, and the node it ran on. That maps to a **cost-per-pod-per-second** using the pricing engine's normalized SKU table.
 
 ## Rightsizing
 

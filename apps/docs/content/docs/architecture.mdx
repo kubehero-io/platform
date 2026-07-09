@@ -3,20 +3,21 @@ title: Architecture
 description: How the collector, control plane, and operator fit together.
 ---
 
-KubeHero is four services plus an open CRD surface. The split is designed so you can run any subset in your own cluster without losing functionality.
+KubeHero is five services plus an open CRD surface. The split is designed so you can run any subset in your own cluster without losing functionality.
 
 ## Services
 
 | Service | Language | Where it runs | Responsibility |
 |---|---|---|---|
-| **collector** | Go + eBPF | Customer cluster (DaemonSet) | Per-pod CPU / memory / GPU attribution, cgroup-accurate. Streams compressed telemetry to the control plane. |
-| **control-plane** | Go + Connect-RPC | Your cluster | Ingests telemetry, evaluates policies, serves the dashboard and CLI. |
-| **pricing-engine** | Go (CronJob) | Your cluster | Pulls AKS/GKE/EKS pricing daily, normalizes across clouds and lifecycles (on-demand, spot, savings-plan, committed). |
+| **collector** | Go | Customer cluster (DaemonSet) | Per-pod cost attribution from resource requests blended with **measured utilization** (kubelet Summary API via the API-server node proxy). Ships cost batches to the control plane. eBPF probes for 1-second burst attribution are future work. |
+| **control-plane** | Go + Connect-RPC | Your cluster | Ingests telemetry, evaluates policies, detects spend anomalies (rolling z-scores), serves the dashboard and CLI. |
+| **pricing-engine** | Go | Your cluster | Serves per-SKU quotes: in-memory cache, then live cloud pricing APIs, then a static built-in table as fallback. Normalizes across clouds and lifecycles (on-demand, spot, savings-plan, committed). |
 | **operator** | Go + kubebuilder | Customer cluster | Reconciles `BudgetPolicy`, `CeilingPolicy`, `RightsizingPolicy` CRDs. Never runs enforcement without `humanArm`. |
+| **advisor** | Go + Connect-RPC | Your cluster | Read-only agentic layer: briefings + proposed guarded actions from an LLM / rules / demo brain tier. See [Advisor & agents](/docs/advisor). |
 
 ## Data plane
 
-- **Telemetry**: 1-second ticks from the collector, batched into 5-second gRPC frames, LZ4 compressed. Target overhead: < 0.5% CPU, < 50 MiB RSS per node.
+- **Telemetry**: the collector scans pods and nodes every 5 seconds, blends requests with measured usage from the kubelet Summary API, and ships cost batches to the control plane over Connect-RPC. Target overhead: < 0.5% CPU, < 50 MiB RSS per node.
 - **Storage**: ClickHouse for time-series, PostgreSQL for metadata (users, orgs, policies, audit log).
 - **Transport**: mTLS end-to-end via `cert-manager` with your own CA.
 
@@ -30,4 +31,4 @@ See the [CRD reference](/docs/crd-reference) for every field.
 
 ## Licensing
 
-Open-core. Apache 2.0 for the agent, CLI, collector, cost-model library, and proto schemas. BSL 1.1 (converts to Apache 2.0 after three years) for the control plane, operator, pricing engine, and dashboard.
+Open-core. Apache 2.0 for the CLI, collector, cost-model library, and proto schemas. BSL 1.1 (converts to Apache 2.0 after three years) for the control plane, operator, pricing engine, advisor, and dashboard.

@@ -9,7 +9,7 @@ Every vendor comparison page eventually turns into marketing. This one tries not
 
 | | **KubeHero** | Flexera / Cloudability | Kubecost | OpenCost | CAST AI | PerfectScale | Grafana + Prom only |
 |---|---|---|---|---|---|---|---|
-| Attribution accuracy | eBPF 1s resolution | Billing records, 24h stale | cadvisor 5-min avg | cadvisor 5-min avg | proprietary | proprietary | DIY |
+| Attribution accuracy | Measured usage (kubelet), 5s scans; eBPF on roadmap | Billing records, 24h stale | cadvisor 5-min avg | cadvisor 5-min avg | proprietary | proprietary | DIY |
 | GPU / TPU first-class | ✓ DCGM + MIG + TPU API | Partial | Limited | No | No | No | DIY |
 | Retroactive Savings Plan replay | ✓ | No | No | No | N/A | N/A | No |
 | Multi-cloud normalization | AWS + GCP + Azure, single schema | Strong | Limited | Limited | AWS-bias | Limited | DIY |
@@ -30,7 +30,7 @@ Every vendor comparison page eventually turns into marketing. This one tries not
 **What they get right**: Multi-cloud ingest is polished — AWS, Azure, GCP, Oracle, IBM. Enterprise-ready commercial surface. Finance-team-friendly reporting and chargeback workflows.
 
 **Where we differ**:
-- Their Kubernetes attribution runs on billing records + tag-based allocation rules. 24–48h stale by design. Ours is 1-second eBPF-accurate.
+- Their Kubernetes attribution runs on billing records + tag-based allocation rules. 24–48h stale by design. Ours is measured from the kubelet on 5-second scans, minutes-fresh not days-stale — with eBPF 1-second resolution on the roadmap.
 - Their GPU visibility is vendor-level (EC2 p4d spend) not pod-level.
 - Their policy engine is alerts. No enforcement, no `humanArm`, no reversible actions.
 - Their Savings Plan handling applies forward from the commit date; historical numbers don't restate.
@@ -98,12 +98,12 @@ We can **ingest OpenCost allocation rules** via an importer if you've already bu
 
 Pulled out of the matrix — each is a feature Flexera / Kubecost / OpenCost / CAST AI / PerfectScale structurally cannot ship without rewriting their data plane.
 
-1. **eBPF 1s resolution** — everyone else averages over minutes
+1. **Measured-utilization attribution, minutes-fresh** — billing-record tools are a day stale; our roadmap's eBPF probes push this to 1s resolution
 2. **Retroactive Savings Plan replay** — historical cost restates when a SP kicks in
 3. **`humanArm: true` default** — enforcement with safety rails, not alerts
 4. **Multi-cloud cost-per-second normalization** — one number across AWS / GCP / Azure SKUs
 5. **Keyboard-first operator UX** — cmd-K, URL state, action buttons everywhere
-6. **Open source, self-hostable** — agent + CLI + proto + cost-model under Apache 2.0, the rest under BSL 1.1
+6. **Open source, self-hostable** — collector + CLI + proto + cost-model under Apache 2.0, the rest under BSL 1.1
 7. **Posture + cost correlation** — CVE findings ranked by workload $/day (see [Posture](/docs/concepts#posture))
 
 ## "What about X?"

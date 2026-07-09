@@ -5,6 +5,8 @@ description: BudgetPolicy, CeilingPolicy, RightsizingPolicy — every field, eve
 
 Three CRDs under `apiVersion: kubehero.kubehero.io/v1`. Each one is reconciled by the operator.
 
+These three kinds are also the only manifests the [advisor](/docs/advisor) is allowed to propose — anything an LLM drafts that isn't one of them is downgraded to an investigate-only suggestion.
+
 ## BudgetPolicy
 
 Declarative spending intent for a set of workloads.

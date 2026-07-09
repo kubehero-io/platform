@@ -164,12 +164,12 @@ func (r *CeilingPolicyReconciler) Reconcile(
 			ClusterID:  r.ClusterID,
 			Outcome:    "armed", // visible on /ceilings as a "Tripped → about to fire" row
 			PayloadJSON: map[string]any{
-				"namespace":      cp.Namespace,
-				"budgetRef":      cp.Spec.BudgetRef,
-				"burnRateMilli":  current,
-				"trigger":        cp.Spec.Trigger.BurnRateMilli,
-				"window":         cp.Spec.Trigger.Window,
-				"armed":          armed,
+				"namespace":     cp.Namespace,
+				"budgetRef":     cp.Spec.BudgetRef,
+				"burnRateMilli": current,
+				"trigger":       cp.Spec.Trigger.BurnRateMilli,
+				"window":        cp.Spec.Trigger.Window,
+				"armed":         armed,
 			},
 		}); err != nil {
 			log.Error(err, "failed to emit audit entry for tripped policy")

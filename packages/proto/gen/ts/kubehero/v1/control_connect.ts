@@ -5,7 +5,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AppendAuditEntryRequest, AppendAuditEntryResponse, GetBurnRateRequest, GetBurnRateResponse, GetTeamSpendRequest, GetTeamSpendResponse, GetWorkloadRequest, GetWorkloadResponse, HealthCheckRequest, HealthCheckResponse, IngestPodCostRequest, IngestPodCostResponse, ListAnomaliesRequest, ListAnomaliesResponse, ListAuditLogRequest, ListAuditLogResponse, ListCapacityDemandsRequest, ListCapacityDemandsResponse, ListClustersRequest, ListClustersResponse, ListPoliciesRequest, ListPoliciesResponse, ListVulnerabilitiesRequest, ListVulnerabilitiesResponse, ListWasteRecommendationsRequest, ListWasteRecommendationsResponse, RegisterClusterRequest, RegisterClusterResponse } from "./control_pb.js";
+import { AppendAuditEntryRequest, AppendAuditEntryResponse, ArmPolicyRequest, ArmPolicyResponse, GetBurnRateRequest, GetBurnRateResponse, GetTeamSpendRequest, GetTeamSpendResponse, GetWorkloadRequest, GetWorkloadResponse, HealthCheckRequest, HealthCheckResponse, IngestPodCostRequest, IngestPodCostResponse, ListAnomaliesRequest, ListAnomaliesResponse, ListAuditLogRequest, ListAuditLogResponse, ListCapacityDemandsRequest, ListCapacityDemandsResponse, ListClustersRequest, ListClustersResponse, ListPoliciesRequest, ListPoliciesResponse, ListVulnerabilitiesRequest, ListVulnerabilitiesResponse, ListWasteRecommendationsRequest, ListWasteRecommendationsResponse, RegisterClusterRequest, RegisterClusterResponse } from "./control_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -119,6 +119,20 @@ export const ControlPlaneService = {
       name: "ListPolicies",
       I: ListPoliciesRequest,
       O: ListPoliciesResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Arm or disarm a policy's kill-switch. The server persists the
+     * armed bit, appends an HMAC-signed audit row recording who/why,
+     * and pages the configured alert channels — flipping a kill-switch
+     * is alert-worthy. Requires the admin role.
+     *
+     * @generated from rpc kubehero.v1.ControlPlaneService.ArmPolicy
+     */
+    armPolicy: {
+      name: "ArmPolicy",
+      I: ArmPolicyRequest,
+      O: ArmPolicyResponse,
       kind: MethodKind.Unary,
     },
     /**

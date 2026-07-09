@@ -40,6 +40,10 @@ jobs:
             context: .
             dockerfile: services/pricing-engine/Dockerfile
             image: ghcr.io/${{ github.repository_owner }}/pricing-engine
+          - name: advisor
+            context: .
+            dockerfile: services/advisor/Dockerfile
+            image: ghcr.io/${{ github.repository_owner }}/advisor
           - name: operator
             context: services/operator
             dockerfile: services/operator/Dockerfile

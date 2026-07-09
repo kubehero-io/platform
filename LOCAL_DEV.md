@@ -11,6 +11,7 @@ docker compose up --build -d
 
 # Dashboard at     http://localhost:3001
 # Control plane at http://localhost:8080
+# Advisor at       http://localhost:8083  (set ANTHROPIC_API_KEY for the LLM brain)
 # Grafana at       http://localhost:3000  (admin / kubehero)
 # Prometheus at    http://localhost:9090
 ```

@@ -79,6 +79,17 @@ operator:
   image:
     name: operator
     tag: ""
+  # Where the operator reads live burn rates (GetBurnRate RPC) and posts
+  # audit events. When disabled — or when the URL resolves to nothing —
+  # the operator runs with a stub provider that always reads 0, so
+  # CeilingPolicies can NEVER trip (enforcement is effectively dry-run).
+  controlPlane:
+    # Flip to false to sever the operator from the control-plane and run
+    # observe-only (the operator logs this loudly at startup).
+    enabled: true
+    # Override the endpoint; empty means the chart's own control-plane
+    # Service (http://<release>-control-plane.<ns>.svc:<port>).
+    url: ""
 
 pricingEngine:
   enabled: true

@@ -82,10 +82,10 @@ func (r *Runner) Execute(
 		emitter = NoopAuditSink{}
 	}
 	bp, _ := json.Marshal(map[string]any{
-		"policy":     policy.Name,
-		"namespace":  policy.Namespace,
-		"budgetRef":  policy.Spec.BudgetRef,
-		"trigger":    policy.Spec.Trigger,
+		"policy":    policy.Name,
+		"namespace": policy.Namespace,
+		"budgetRef": policy.Spec.BudgetRef,
+		"trigger":   policy.Spec.Trigger,
 	})
 
 	steps := policy.Spec.Escalation

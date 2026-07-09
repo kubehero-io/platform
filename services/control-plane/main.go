@@ -22,6 +22,7 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1/kuberov1connect"
+	"github.com/kubehero-io/platform/services/control-plane/internal/alerter"
 	"github.com/kubehero-io/platform/services/control-plane/internal/auth"
 	"github.com/kubehero-io/platform/services/control-plane/internal/clickhouse"
 	"github.com/kubehero-io/platform/services/control-plane/internal/db"
@@ -62,6 +63,10 @@ Configuration is via environment variables:
                                 last-hour spend vs its trailing baseline
                                 (default 3.0).
   AUDIT_HMAC_KEY                Symmetric secret to sign audit rows.
+  KUBEHERO_ALERT_CHANNELS       Comma-separated alert channel URLs
+                                (slack://…, pagerduty://…, opsgenie://…)
+                                paged when a policy kill-switch is armed
+                                or disarmed via ArmPolicy.
   KUBEHERO_API_KEYS             Static API keys (see auth.ParseAPIKeys).
   KUBEHERO_REQUIRE_AUTH         "true" to reject anonymous callers.
   OIDC_ISSUER_URL / OIDC_AUDIENCE / KUBEHERO_GROUP_ROLES
@@ -164,6 +169,7 @@ func serve(parent context.Context, addr string) error {
 	var rpcOpts rpc.Options
 	if pg != nil {
 		rpcOpts.Clusters = &store.ClustersPG{DB: pg}
+		rpcOpts.Policies = &store.PoliciesPG{DB: pg}
 		// AUDIT_HMAC_KEY is the symmetric secret used to sign audit rows
 		// so a downstream SIEM can verify exports. Empty = signing disabled
 		// (dev mode); the entry still persists, signature column stays "".
@@ -179,6 +185,19 @@ func serve(parent context.Context, addr string) error {
 		rpcOpts.Anomalies = &clickhouse.SpendAnomalyProvider{DB: ch, ZThreshold: anomalyZThreshold(log)}
 	}
 	rpcOpts.DemoFixturesDisabled = fixturesOff
+	// KUBEHERO_ALERT_CHANNELS wires the ArmPolicy page-out. Same channel
+	// grammar as policy escalation steps: scheme selects the provider.
+	var alertChannels []string
+	for _, ch := range strings.Split(os.Getenv("KUBEHERO_ALERT_CHANNELS"), ",") {
+		if ch = strings.TrimSpace(ch); ch != "" {
+			alertChannels = append(alertChannels, ch)
+		}
+	}
+	if len(alertChannels) > 0 {
+		rpcOpts.Alerts = alerter.NewRouter(alerter.NewSlack(), alerter.NewPagerDuty(), alerter.NewOpsGenie())
+		rpcOpts.AlertChannels = alertChannels
+		log.Info("alerting wired", "channels", len(alertChannels))
+	}
 	authCfg := auth.Config{
 		APIKeys:        auth.ParseAPIKeys(os.Getenv("KUBEHERO_API_KEYS")),
 		OIDCIssuer:     os.Getenv("OIDC_ISSUER_URL"),

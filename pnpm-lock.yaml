@@ -36,6 +36,9 @@ importers:
         specifier: 19.0.0
         version: 19.0.0(react@19.0.0)
     devDependencies:
+      '@kubehero/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@tailwindcss/postcss':
         specifier: ^4.0.0
         version: 4.2.4
@@ -91,6 +94,9 @@ importers:
         specifier: 19.0.0
         version: 19.0.0(react@19.0.0)
     devDependencies:
+      '@kubehero/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@tailwindcss/postcss':
         specifier: ^4.0.0
         version: 4.2.4
@@ -115,6 +121,8 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+
+  packages/tsconfig: {}
 
 packages:
 

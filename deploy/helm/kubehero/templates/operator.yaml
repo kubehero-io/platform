@@ -31,10 +31,14 @@ spec:
             # When CONTROL_PLANE_URL is set, the operator's CeilingPolicy
             # reconciler asks the cp's GetBurnRate RPC (which reads
             # ClickHouse) instead of the stub-zero provider — that is
-            # what lets a policy trip in the demo flow. CLUSTER_ID
-            # stamps audit events as they're emitted.
+            # what lets a policy trip in the demo flow. Omitting it
+            # (operator.controlPlane.enabled=false) leaves enforcement
+            # dry-run: policies can never trip. CLUSTER_ID stamps audit
+            # events as they're emitted.
+            {{- if .Values.operator.controlPlane.enabled }}
             - name: CONTROL_PLANE_URL
-              value: "http://{{ include "kubehero.fullname" . }}-control-plane.{{ .Release.Namespace }}.svc:{{ .Values.controlPlane.service.port }}"
+              value: {{ .Values.operator.controlPlane.url | default (printf "http://%s-control-plane.%s.svc:%v" (include "kubehero.fullname" .) .Release.Namespace .Values.controlPlane.service.port) | quote }}
+            {{- end }}
             - name: CLUSTER_ID
               value: {{ .Values.cluster.id | default .Release.Name | quote }}
             {{- if .Values.cluster.tokenSecret }}

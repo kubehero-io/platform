@@ -8,9 +8,9 @@ Monorepo for **KubeHero** — open-source, self-hosted Kubernetes cost monitorin
 
 ```
 apps/        dashboard · docs
-services/    control-plane · collector · pricing-engine · operator
+services/    control-plane · collector · pricing-engine · operator · advisor
 cli/         kubehero (Go + cobra)
-packages/    proto · ui · cost-model · tsconfig
+packages/    proto · cost-model · tsconfig
 deploy/      helm · terraform
 infra/       dagger
 ```
@@ -19,8 +19,8 @@ infra/       dagger
 
 Open source. See `ARCHITECTURE.md` §1 for the exact split.
 
-- Apache 2.0 — agent, CLI, collector, cost-model, proto
-- BSL 1.1 — control-plane, operator, pricing-engine, dashboard (source-available, self-hostable, free to run)
+- Apache 2.0 — CLI, collector, cost-model, proto
+- BSL 1.1 — control-plane, operator, pricing-engine, advisor, dashboard (source-available, self-hostable, free to run)
 
 ## Getting started
 

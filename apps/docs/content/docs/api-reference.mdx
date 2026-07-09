@@ -60,9 +60,35 @@ message ListClustersResponse {
 
 Paginated. Page tokens are opaque — pass the previous response's `next_page_token` as the next request's `page_token`.
 
+### `AdvisorService`
+
+The advisor's read surface — briefings and proposed guarded actions. Full behavior (brain tiers, guardrails, caching) is on [Advisor & agents](/docs/advisor).
+
+```proto
+rpc GetBriefing(GetBriefingRequest) returns (GetBriefingResponse) {}
+rpc ListAdvice(ListAdviceRequest) returns (ListAdviceResponse) {}
+
+message GetBriefingRequest {
+  string cluster_id = 1;  // optional; empty = fleet-wide
+  string window = 2;      // "24h" | "7d" — default 24h
+}
+
+message Briefing {
+  string id = 1;
+  int64 generated_at_unix = 2;
+  string headline = 3;
+  string markdown = 4;        // full report, rendered as-is
+  string spoken_script = 5;   // TTS-ready prose for voice briefings
+  string source = 6;          // "llm" | "rules" | "demo"
+  repeated ProposedAction actions = 7;
+}
+```
+
+Every `ProposedAction` is guardrail-validated: whitelisted `kind`, sanitized impact/risk, and a `crd_yaml` that must be a `BudgetPolicy` / `CeilingPolicy` / `RightsizingPolicy` manifest (or empty for investigate-only actions). `status` is always `"proposed"`.
+
 ### `CollectorIngressService`
 
-Write surface for the DaemonSet agent. Customer-side code never calls this — only the agent does — but it's documented for curious operators and people building their own collectors.
+Write surface for the collector DaemonSet. Customer-side code never calls this — only the collector does — but it's documented for curious operators and people building their own collectors.
 
 ```proto
 rpc Ingest(IngestRequest) returns (IngestResponse) {}
@@ -82,7 +108,7 @@ message IngestRequest {
 }
 ```
 
-Agents batch 5 seconds of 1-second ticks into a single `IngestRequest`, LZ4-compressed at the HTTP layer. Ordering guarantee: within a single agent → collector connection, metrics arrive in timestamp order.
+Collectors batch each 5-second scan into a single `IngestRequest`, LZ4-compressed at the HTTP layer. Ordering guarantee: within a single collector → control-plane connection, metrics arrive in timestamp order.
 
 ### `PricingService`
 

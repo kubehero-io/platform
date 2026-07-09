@@ -2,7 +2,7 @@
   "name": "kubehero-platform",
   "version": "0.0.0",
   "private": true,
-  "description": "KubeHero product monorepo — agent, control plane, operator, dashboard, CLI.",
+  "description": "KubeHero product monorepo — collector, control plane, operator, advisor, dashboard, CLI.",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "build": "turbo run build",

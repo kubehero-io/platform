@@ -218,36 +218,47 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "BudgetPolicy")
 		os.Exit(1)
 	}
+	// Control-plane peer config, shared by the audit emitter and the
+	// burn-rate provider. KUBEHERO_API_TOKEN wins over the legacy
+	// CONTROL_PLANE_TOKEN so both spellings keep working.
+	cpURL := os.Getenv("CONTROL_PLANE_URL")
+	cpToken := getenv("KUBEHERO_API_TOKEN", os.Getenv("CONTROL_PLANE_TOKEN"))
+
 	// Audit emitter: when CONTROL_PLANE_URL is set, the operator posts
 	// fired-policy events into the cp's append-only audit log. When unset
 	// it falls back to a no-op so the kind demo profile and unit tests
 	// don't need a control-plane peer.
 	auditEmitter := controller.AuditEmitter(controller.NoopAuditEmitter{})
-	if cp := os.Getenv("CONTROL_PLANE_URL"); cp != "" {
+	if cpURL != "" {
 		auditEmitter = &controller.HTTPAuditEmitter{
-			Endpoint: cp,
-			Token:    os.Getenv("CONTROL_PLANE_TOKEN"),
+			Endpoint: cpURL,
+			Token:    cpToken,
 		}
 	}
 
-	// Burn-rate provider: when CONTROL_PLANE_URL is set, ask the cp via
-	// RPC (which reads ClickHouse). Otherwise stay in stub mode so dev
-	// + kind-demo never trip a policy without real data.
-	var burnRate controller.BurnRateProvider = controller.StubBurnRate{}
-	if cp := os.Getenv("CONTROL_PLANE_URL"); cp != "" {
-		k8s := mgr.GetClient()
-		burnRate = &controller.RPCBurnRate{
-			Endpoint:  cp,
-			Token:     os.Getenv("CONTROL_PLANE_TOKEN"),
-			ClusterID: os.Getenv("CLUSTER_ID"),
-			CeilingResolver: func(ctx context.Context, namespace, budgetRef string) (float64, error) {
-				bp := &kubeherov1.BudgetPolicy{}
-				if err := k8s.Get(ctx, k8sclient.ObjectKey{Namespace: namespace, Name: budgetRef}, bp); err != nil {
-					return 0, err
-				}
-				return controller.ParseCeilingUSD(bp.Spec.Ceiling), nil
-			},
+	// Burn-rate provider: when CONTROL_PLANE_URL is set, ask the cp's
+	// GetBurnRate RPC (which reads ClickHouse) via the generated connect
+	// client — readings are cached for 10s per policy scope. Otherwise
+	// stay in stub mode so dev + kind-demo never trip a policy without
+	// real data.
+	k8s := mgr.GetClient()
+	ceilingResolver := func(ctx context.Context, namespace, budgetRef string) (float64, error) {
+		bp := &kubeherov1.BudgetPolicy{}
+		if err := k8s.Get(ctx, k8sclient.ObjectKey{Namespace: namespace, Name: budgetRef}, bp); err != nil {
+			return 0, err
 		}
+		return controller.ParseCeilingUSD(bp.Spec.Ceiling), nil
+	}
+	burnRate, liveBurnRate := controller.SelectBurnRateProvider(
+		cpURL, cpToken, os.Getenv("CLUSTER_ID"), ceilingResolver)
+	if liveBurnRate {
+		setupLog.Info("Burn-rate provider: control-plane GetBurnRate RPC",
+			"endpoint", cpURL, "timeout", "5s", "cacheTTL", "10s", "auth", cpToken != "")
+	} else {
+		setupLog.Info("!!!! ENFORCEMENT IS DRY-RUN !!!! " +
+			"CONTROL_PLANE_URL is not set, so the burn-rate provider is a stub that always reads 0: " +
+			"CeilingPolicies will NEVER trip and escalation plans will NEVER run. " +
+			"Set CONTROL_PLANE_URL (helm: operator.controlPlane.url) to enable live burn-rate readings.")
 	}
 
 	// Escalation runner — the actuator is always wired (it talks to

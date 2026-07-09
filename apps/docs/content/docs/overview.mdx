@@ -27,16 +27,16 @@ KubeHero's positioning is explicit: **one pane of glass for every cluster, showi
 
 ## What ships
 
-The product is four services plus a CLI, packaged as a Helm chart:
+The product is five services plus a CLI, packaged as a Helm chart:
 
 ```
 ┌─────────── CUSTOMER CLUSTER (K8s 1.28+) ─────────────────────────────┐
 │                                                                        │
 │   ┌─────────────┐   ┌─────────────┐    ┌─────────────────────────┐   │
-│   │  Agent      │   │  Operator   │    │  Customer workloads     │   │
+│   │  Collector  │   │  Operator   │    │  Customer workloads     │   │
 │   │  DaemonSet  │   │  Deployment │    │  Deployments · STS · …  │   │
-│   │  eBPF probes│   │  watches    │    │                         │   │
-│   │  DCGM / MIG │   │  BudgetPol  │    │                         │   │
+│   │  kubelet    │   │  watches    │    │                         │   │
+│   │  stats API  │   │  BudgetPol  │    │                         │   │
 │   │  read-only  │   │  humanArm   │    │                         │   │
 │   └──────┬──────┘   └──────▲──────┘    └─────────────────────────┘   │
 │          │ gRPC (mTLS)     │ K8s API                                   │
@@ -45,8 +45,8 @@ The product is four services plus a CLI, packaged as a Helm chart:
            │                 │                 ┌── DASHBOARD + CLI ───┐
            ▼                 │                 │  Next.js  ·  kubehero │
      ┌──────────┐            │                 └──────────▲────────────┘
-     │ Collector│            │                            │ Connect-RPC
-     │ ingress  │            │                            │
+     │ CP ingest│            │                            │ Connect-RPC
+     │ (Connect)│            │                            │
      └────┬─────┘            │         ┌──────────────────┴──────────┐
           │                  └─────────┤  Control Plane (Go)         │
           ▼                            │  · RPC surface              │
@@ -73,9 +73,9 @@ Each is a filter that's rejected at least one reasonable-sounding feature reques
 
 Traditional `metrics-server` + Prometheus cadvisor scrape reports CPU averaged over 15s–1m windows. That averaging **hides** the bursts that matter for right-sizing, misattributes noisy-neighbor steal, and can't see memory pressure events as they happen.
 
-KubeHero's agent attaches eBPF probes to the Linux scheduler and reports pod CPU/memory at **1-second resolution with cgroup accuracy**. A real workload using 2 cores for 100ms per second shows up as 200 millicores — not as a 2s average of 100m, which is what cadvisor reports.
+That 1-second, cgroup-accurate resolution is the destination — and we're honest about where we are on the road. Today the collector reports **measured utilization** from the kubelet Summary API (`cpu.usageNanoCores`, `memory.workingSetBytes`) on a 5-second scan and prices `max(requests, measured)`, which already beats the request-based-only math most cost tools settle for. eBPF scheduler probes are the next step; the collector's probe stubs are in the tree waiting for them.
 
-This is the single largest accuracy gap between KubeHero and everything else in the market.
+Closing that gap fully is the top line item on the [roadmap](/docs/architecture).
 
 ### 2. `humanArm: true` is the default
 

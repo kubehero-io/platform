@@ -80,6 +80,23 @@ type QuoteResponse struct {
 	Currency     string  `json:"currency"`
 }
 
+type ArmPolicyRequest struct {
+	ClusterID  string `json:"clusterId,omitempty"`
+	PolicyName string `json:"policyName"`
+	Armed      bool   `json:"armed"`
+	Actor      string `json:"actor,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// ArmPolicyResponse mirrors the Connect JSON wire shape. protojson
+// encodes int64 as a JSON string, hence the ",string" tag.
+type ArmPolicyResponse struct {
+	PolicyName      string `json:"policyName"`
+	Armed           bool   `json:"armed"`
+	EffectiveAtUnix int64  `json:"effectiveAtUnix,string"`
+	AuditID         string `json:"auditId"`
+}
+
 func (c *Client) ListClusters(pageSize int32) (*ListClustersResponse, error) {
 	var out ListClustersResponse
 	err := c.call("kubehero.v1.ControlPlaneService", "ListClusters",
@@ -96,6 +113,12 @@ func (c *Client) RegisterCluster(req *RegisterClusterRequest) (*RegisterClusterR
 func (c *Client) HealthCheck() (*HealthCheckResponse, error) {
 	var out HealthCheckResponse
 	err := c.call("kubehero.v1.ControlPlaneService", "HealthCheck", nil, &out)
+	return &out, err
+}
+
+func (c *Client) ArmPolicy(req *ArmPolicyRequest) (*ArmPolicyResponse, error) {
+	var out ArmPolicyResponse
+	err := c.call("kubehero.v1.ControlPlaneService", "ArmPolicy", req, &out)
 	return &out, err
 }
 

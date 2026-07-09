@@ -42,6 +42,15 @@ type ControlPlane struct {
 	// is a no-op (the request still succeeds so callers don't error in
 	// stub mode).
 	Audit store.AuditStore
+	// Policies persists the CRD mirror + the armed kill-switch bit.
+	// When nil, ArmPolicy returns a fixture-shaped success (unless
+	// DemoFixturesDisabled, in which case it fails loudly).
+	Policies store.PolicyStore
+	// Alerts + AlertChannels page operators when a policy kill-switch
+	// flips. When either is unset, ArmPolicy skips the notification —
+	// the state change is still persisted + audited.
+	Alerts        Alerter
+	AlertChannels []string
 	// BurnRate reads pod_cost_1s in ClickHouse to compute the current
 	// burn rate × 1000. When nil, GetBurnRate returns available=false
 	// so the operator stays in "Tripped=Unknown" — never accidentally
@@ -68,6 +77,9 @@ type ControlPlane struct {
 type Options struct {
 	Clusters             store.ClusterStore
 	Audit                store.AuditStore
+	Policies             store.PolicyStore
+	Alerts               Alerter
+	AlertChannels        []string
 	BurnRate             *clickhouse.BurnRateProvider
 	PodCost              *clickhouse.PodCostWriter
 	Anomalies            *clickhouse.SpendAnomalyProvider
@@ -82,6 +94,15 @@ func New(opts ...Options) *ControlPlane {
 		}
 		if o.Audit != nil {
 			cp.Audit = o.Audit
+		}
+		if o.Policies != nil {
+			cp.Policies = o.Policies
+		}
+		if o.Alerts != nil {
+			cp.Alerts = o.Alerts
+		}
+		if len(o.AlertChannels) > 0 {
+			cp.AlertChannels = o.AlertChannels
 		}
 		if o.BurnRate != nil {
 			cp.BurnRate = o.BurnRate

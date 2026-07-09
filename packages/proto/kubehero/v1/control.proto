@@ -42,6 +42,12 @@ service ControlPlaneService {
   // Budget + Ceiling policies as the user defined them.
   rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse) {}
 
+  // Arm or disarm a policy's kill-switch. The server persists the
+  // armed bit, appends an HMAC-signed audit row recording who/why,
+  // and pages the configured alert channels — flipping a kill-switch
+  // is alert-worthy. Requires the admin role.
+  rpc ArmPolicy(ArmPolicyRequest) returns (ArmPolicyResponse) {}
+
   // Team / cost-center / cloud rollup for chargeback.
   rpc GetTeamSpend(GetTeamSpendRequest) returns (GetTeamSpendResponse) {}
 
@@ -229,6 +235,26 @@ message Policy {
 
 message ListPoliciesResponse {
   repeated Policy policies = 1;
+}
+
+// ─── ArmPolicy ────────────────────────────────────────────────────────────
+
+message ArmPolicyRequest {
+  string cluster_id = 1;   // cluster UUID or slug the policy lives in
+  string policy_name = 2;  // required; policy name as shown by ListPolicies
+  bool armed = 3;          // true = arm, false = disarm
+  string actor = 4;        // optional; defaults to the calling principal
+  string reason = 5;       // free-text justification, lands in the audit payload
+}
+
+message ArmPolicyResponse {
+  string policy_name = 1;
+  bool armed = 2;
+  // When the change took effect, unix seconds (server-stamped).
+  int64 effective_at_unix = 3;
+  // Audit row recording the change, e.g. "aud-1042". Feed it to
+  // `kubehero undo` / ListAuditLog.
+  string audit_id = 4;
 }
 
 // ─── GetTeamSpend ─────────────────────────────────────────────────────────
