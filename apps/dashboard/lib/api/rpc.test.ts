@@ -25,6 +25,7 @@ import {
   describeRpcError,
   parseConnectError,
   resolveCredential,
+  sharedCredential,
 } from "./rpc";
 
 const CP = "http://cp.test:18080";
@@ -87,11 +88,28 @@ describe("resolveCredential", () => {
     expect(await resolveCredential("cp")).toEqual({ header: null, source: "user" });
   });
 
-  it("ignores a demo session once the dashboard is in token mode", async () => {
+  it("ignores a demo session once the dashboard is in token mode — and never falls back to the shared key", async () => {
     vi.stubEnv("CONTROL_PLANE_URL", CP);
     vi.stubEnv("CONTROL_PLANE_TOKEN", "shared-cp");
+    vi.stubEnv("ADVISOR_TOKEN", "shared-adv");
     signIn({ mode: "demo", role: "admin" });
-    expect(await resolveCredential("cp")).toEqual({ header: "Bearer shared-cp", source: "shared" });
+    expect(await resolveCredential("cp")).toEqual({ header: null, source: "none" });
+    expect(await resolveCredential("advisor")).toEqual({ header: null, source: "none" });
+  });
+
+  it("sends nothing without a session in token mode, even with a shared key configured", async () => {
+    vi.stubEnv("CONTROL_PLANE_URL", CP);
+    vi.stubEnv("CONTROL_PLANE_TOKEN", "shared-cp");
+    expect(await resolveCredential("cp")).toEqual({ header: null, source: "none" });
+    // Explicit opt-in still works for a deliberately unauthenticated call.
+    expect(sharedCredential("cp")).toEqual({ header: "Bearer shared-cp", source: "shared" });
+  });
+
+  it("keeps using the shared key for demo sessions", async () => {
+    vi.stubEnv("ADVISOR_URL", ADV);
+    vi.stubEnv("ADVISOR_TOKEN", "shared-adv");
+    signIn({ mode: "demo", role: "admin" });
+    expect(await resolveCredential("advisor")).toEqual({ header: "Bearer shared-adv", source: "shared" });
   });
 });
 

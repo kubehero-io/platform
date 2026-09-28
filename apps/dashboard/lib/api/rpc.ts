@@ -18,7 +18,12 @@
 //   · token-mode session  → the signed-in user's own token, so the
 //     control plane enforces that user's RBAC;
 //   · anonymous session against an open control plane → no header;
-//   · otherwise → the shared CONTROL_PLANE_TOKEN / ADVISOR_TOKEN.
+//   · demo mode → the shared CONTROL_PLANE_TOKEN / ADVISOR_TOKEN;
+//   · token mode without a token session → NO header. Nothing should get
+//     here (pages are gated by proxy.ts, API routes check the session),
+//     and the shared token is an admin key in the Helm chart: a route
+//     that forgets its session check must fail closed, not act as admin.
+//     A deliberately unauthenticated call opts in with sharedCredential().
 //
 // Every call has a deadline (Connect-Timeout-Ms + an abort signal), a
 // response-size cap, and returns a typed result instead of throwing — the
@@ -28,6 +33,7 @@
 
 import "server-only";
 import { redirect } from "next/navigation";
+import { authMode } from "@/lib/auth-mode";
 import { getSession } from "@/lib/session";
 import { encodeEnvelope } from "./connect-stream";
 
@@ -94,6 +100,12 @@ export function upstreamBase(u: Upstream): string | null {
   return v && v.length > 0 ? v.replace(/\/+$/, "") : null;
 }
 
+/** The shared service credential (CONTROL_PLANE_TOKEN / ADVISOR_TOKEN), for explicit opt-in. */
+export function sharedCredential(u: Upstream): Credential {
+  const shared = process.env[ENV[u].token]?.trim();
+  return shared ? { header: `Bearer ${shared}`, source: "shared" } : { header: null, source: "none" };
+}
+
 export async function resolveCredential(u: Upstream): Promise<Credential> {
   const session = await getSession();
   if (session?.mode === "token") {
@@ -103,8 +115,8 @@ export async function resolveCredential(u: Upstream): Promise<Credential> {
         // authRequired=false: presenting any token would be rejected.
         { header: null, source: "user" };
   }
-  const shared = process.env[ENV[u].token]?.trim();
-  return shared ? { header: `Bearer ${shared}`, source: "shared" } : { header: null, source: "none" };
+  if (authMode() === "token") return { header: null, source: "none" };
+  return sharedCredential(u);
 }
 
 function headersFor(cred: Credential, timeoutMs: number, contentType: string): Record<string, string> {

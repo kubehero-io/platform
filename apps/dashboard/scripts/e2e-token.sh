@@ -59,6 +59,7 @@ code() { curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$@"; }
 start_cp "${ADMIN}:admin,${VIEWER}:viewer"
 JA="$TMP/admin.jar"; JV="$TMP/viewer.jar"
 
+expect "health endpoint needs no session" "200" "$(code "$B/api/healthz")"
 expect "anon page → login" "307 $B/login?next=%2Foverview" "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$B/overview")"
 expect "/signup → login" "307 $B/login" "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$B/signup")"
 expect "/onboarding → login" "307 $B/login" "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$B/onboarding")"

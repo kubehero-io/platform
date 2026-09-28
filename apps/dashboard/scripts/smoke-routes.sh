@@ -54,6 +54,7 @@ check "/ (signed in) → /overview" "/overview" "$(location -b "kh_session=$CK" 
 check "anon page → login" "/login?next=%2Foverview" "$(location "$BASE/overview")"
 check "gate Location ignores a foreign Host" "/login?next=%2Flogs" "$(location -H "Host: dash.example.com" "$BASE/logs")"
 check "/login anon" "200" "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/login")"
+check "/api/healthz anon" "200" "$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/healthz")"
 for a in /api/nav "/api/logs/tail?q=%7Bnamespace%3D%22shop%22%7D" "/api/export/allocation?window=7d" "/api/export/focus?window=30d"; do
   check "$a anon" "401" "$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$BASE$a")"
 done
