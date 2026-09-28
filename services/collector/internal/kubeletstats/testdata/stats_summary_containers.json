@@ -1,0 +1,28 @@
+{
+  "node": {
+    "nodeName": "gke-prod-pool-1-a1b2",
+    "startTime": "2026-09-01T08:00:00Z",
+    "cpu": {"time": "2026-09-28T10:00:00Z", "usageNanoCores": 1750500000, "usageCoreNanoSeconds": 99999999},
+    "memory": {"time": "2026-09-28T10:00:00Z", "availableBytes": 8000000000, "usageBytes": 9000000000, "workingSetBytes": 7516192768},
+    "systemContainers": [{"name": "kubelet", "cpu": {"usageNanoCores": 20000000}}]
+  },
+  "pods": [
+    {
+      "podRef": {"name": "checkout-7d9f8b6c5-x2x4q", "namespace": "shop", "uid": "11111111-2222-3333-4444-555555555555"},
+      "containers": [
+        {"name": "app", "cpu": {"usageNanoCores": 250500000}, "memory": {"workingSetBytes": 268435456}},
+        {"name": "istio-proxy", "cpu": {"usageNanoCores": 12000000}, "memory": {"workingSetBytes": 50331648}},
+        {"name": "warming-up", "cpu": {"usageNanoCores": null}},
+        {"name": "", "cpu": {"usageNanoCores": 1}}
+      ],
+      "cpu": {"usageNanoCores": 262500000},
+      "memory": {"workingSetBytes": 318767104},
+      "volume": [{"name": "kube-api-access", "usedBytes": 12288}],
+      "network": {"name": "eth0", "rxBytes": 1, "txBytes": 2}
+    },
+    {
+      "podRef": {"name": "", "namespace": "shop", "uid": "nameless"},
+      "cpu": {"usageNanoCores": 1}
+    }
+  ]
+}
