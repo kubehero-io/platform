@@ -47,7 +47,14 @@ spec:
           env:
             # Read-only data in: the control-plane's Connect API.
             - name: CONTROL_PLANE_URL
-              value: "http://{{ include "kubehero.fullname" . }}-control-plane.{{ .Release.Namespace }}.svc:{{ .Values.controlPlane.service.port }}"
+              value: {{ include "kubehero.controlPlaneURL" . | quote }}
+            - name: CONTROL_PLANE_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ include "kubehero.controlPlaneSecret" . }}, key: service-token }
+            {{- with .Values.advisor.model }}
+            - name: KUBEHERO_ADVISOR_MODEL
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.advisor.anthropic.existingSecret }}
             # Enables the LLM brain. When the secret is absent the
             # advisor runs its deterministic rules brain instead.
@@ -57,6 +64,9 @@ spec:
                   name: {{ .Values.advisor.anthropic.existingSecret }}
                   key: {{ .Values.advisor.anthropic.secretKey | default "api-key" }}
             {{- end }}
+            {{- with .Values.advisor.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8083
@@ -64,13 +74,16 @@ spec:
             httpGet: { path: /readyz, port: http }
           livenessProbe:
             httpGet: { path: /healthz, port: http }
+          securityContext: {{- include "kubehero.containerSecurityContext" . | nindent 12 }}
           resources: {{- toYaml .Values.advisor.resources | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "kubehero.fullname" . }}-advisor
-  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  labels:
+    {{- include "kubehero.labels" . | nindent 4 }}
+    app.kubernetes.io/component: advisor
 spec:
   selector:
     app.kubernetes.io/name: {{ .Chart.Name }}

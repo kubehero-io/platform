@@ -9,25 +9,41 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: probe
-      image: curlimages/curl:8.10.1
+      image: curlimages/curl:8.16.0
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      env:
+        - name: TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "kubehero.controlPlaneSecret" . }}
+              key: admin-token
       command: ["sh", "-c"]
       args:
         - |
           set -e
-          echo "▸ /healthz"
-          curl -sSf "http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}/healthz" || exit 1
-          echo "▸ /readyz"
-          curl -sSf "http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}/readyz" || exit 1
-          echo "▸ /metrics"
-          curl -sSf "http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}/metrics" | grep -q kubehero_up || exit 1
-          echo "▸ Connect HealthCheck"
-          R=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Connect-Protocol-Version: 1" \
-            -d '{}' \
-            "http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}/kubehero.v1.ControlPlaneService/HealthCheck")
-          echo "$R" | grep -q '"status"' || { echo "unexpected response: $R"; exit 1; }
+          CP="http://{{ include "kubehero.fullname" . }}-control-plane:{{ .Values.controlPlane.service.port }}"
+          echo "▸ /healthz";  curl -sSf "$CP/healthz"
+          echo "▸ /readyz";   curl -sSf "$CP/readyz"
+          echo "▸ /metrics";  curl -sSf "$CP/metrics" | grep -q kubehero_up
+          echo "▸ WhoAmI (admin token)"
+          R=$(curl -sS -X POST -H "Content-Type: application/json" -H "Connect-Protocol-Version: 1" \
+                -H "Authorization: Bearer $TOKEN" -d '{}' "$CP/kubehero.v1.ControlPlaneService/WhoAmI")
+          echo "$R" | grep -q '"role":"admin"' || { echo "unexpected: $R"; exit 1; }
+          {{- if .Values.controlPlane.auth.requireAuth }}
+          echo "▸ anonymous call is rejected"
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Content-Type: application/json" \
+                  -H "Connect-Protocol-Version: 1" -d '{}' "$CP/kubehero.v1.ControlPlaneService/ListClusters")
+          [ "$CODE" = "401" ] || { echo "expected 401 without a token, got $CODE"; exit 1; }
+          {{- end }}
           echo "✓ all checks passed"
 {{- end }}

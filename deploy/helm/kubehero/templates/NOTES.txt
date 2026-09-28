@@ -1,74 +1,89 @@
 {{ "" }}
-KubeHero v{{ .Chart.AppVersion }} installed.
+KubeHero v{{ .Chart.AppVersion }} is installing.
 Release: {{ .Release.Name }} · namespace: {{ .Release.Namespace }}
+{{- $fullname := include "kubehero.fullname" . }}
 
-Components installed:
+Components:
 {{- if .Values.controlPlane.enabled }}
-  ✓ control-plane    (Connect-RPC on :{{ .Values.controlPlane.service.port }})
+  ✓ control-plane    Connect-RPC + OpenCost / Loki / OTLP / Pyroscope-compatible APIs on :{{ .Values.controlPlane.service.port }}
 {{- end }}
 {{- if .Values.collector.enabled }}
-  ✓ collector        (DaemonSet, scrape on :{{ .Values.collector.service.port }})
+  ✓ collector        DaemonSet: cost{{ if .Values.collector.logs.enabled }} · logs{{ end }}{{ if .Values.collector.profiling.scrape }} · pprof{{ end }}{{ if .Values.collector.ebpf.enabled }} · eBPF network + CPU profiles{{ end }}
 {{- end }}
 {{- if .Values.operator.enabled }}
-  ✓ operator         (reconciles BudgetPolicy / CeilingPolicy / RightsizingPolicy)
+  ✓ operator         BudgetPolicy / CeilingPolicy / RightsizingPolicy (human-armed)
 {{- end }}
 {{- if .Values.pricingEngine.enabled }}
-  ✓ pricing-engine   (CronJob {{ .Values.pricingEngine.schedule }})
+  ✓ pricing-engine   live AWS / GCP / Azure price lists
+{{- end }}
+{{- if .Values.advisor.enabled }}
+  ✓ advisor          briefings + "Ask KubeHero" investigations ({{ if .Values.advisor.anthropic.existingSecret }}Claude brain{{ else }}rules brain — nothing leaves the cluster{{ end }})
 {{- end }}
 {{- if .Values.dashboard.enabled }}
-  ✓ dashboard        (UI on :{{ .Values.dashboard.service.port }})
+  ✓ dashboard        UI on :{{ .Values.dashboard.service.port }}
+{{- end }}
+{{- if .Values.postgresql.embedded }}
+  ✓ postgres         embedded (single replica) — use a managed Postgres in production
+{{- end }}
+{{- if .Values.clickhouse.embedded }}
+  ✓ clickhouse       embedded (single replica) — use a managed ClickHouse in production
 {{- end }}
 
 NEXT STEPS
 
-1. Watch pods come up:
+1. Watch everything come up (the control plane waits for its stores):
    kubectl -n {{ .Release.Namespace }} get pods -w
+
+{{- if and .Values.controlPlane.enabled (not .Values.controlPlane.existingSecret) }}
+
+2. Get your admin token (dashboard sign-in, CLI, API):
+   kubectl -n {{ .Release.Namespace }} get secret {{ $fullname }}-control-plane \
+     -o jsonpath='{.data.admin-token}' | base64 -d; echo
+{{- end }}
 
 {{- if .Values.dashboard.enabled }}
 
-2. Open the dashboard:
-   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kubehero.fullname" . }}-dashboard {{ .Values.dashboard.service.port }}:{{ .Values.dashboard.service.port }}
+3. Open the dashboard and sign in with that token:
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $fullname }}-dashboard {{ .Values.dashboard.service.port }}:{{ .Values.dashboard.service.port }}
    open http://localhost:{{ .Values.dashboard.service.port }}
 {{- end }}
 
-3. Apply your first policy (samples in config/samples/):
-   kubectl apply -f https://raw.githubusercontent.com/kubehero/kubehero-platform/main/config/samples/budget-prod-monthly.yaml
-   kubehero cap --arm --policy prod-monthly-ceiling
+4. Use the CLI (brew install kubehero-io/tap/kubehero, or the release binary):
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $fullname }}-control-plane {{ .Values.controlPlane.service.port }}:{{ .Values.controlPlane.service.port }}
+   export KUBEHERO_URL=http://localhost:{{ .Values.controlPlane.service.port }} KUBEHERO_TOKEN=<admin token>
+   kubehero cost allocation --aggregate namespace --window 7d
+   kubehero logs '{namespace="default"} |= "error"' --since 1h
+   kubehero ask "what changed in spend this week?"
+
+5. Apply your first guarded policy (samples: https://github.com/kubehero-io/platform/tree/main/config/samples):
+   kubectl apply -f https://raw.githubusercontent.com/kubehero-io/platform/main/config/samples/rightsizing-dev.yaml
 
 {{- if and .Values.prometheus.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") }}
 
-4. Prometheus is scraping us. Check Grafana for the "{{ .Values.grafana.folder }}" folder.
-{{- else }}
-
-4. Install kube-prometheus-stack alongside us to get the chargeback dashboards:
-   helm install kps prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
+6. Prometheus is scraping KubeHero; Grafana dashboards land in the "{{ .Values.grafana.folder }}" folder.
+   Grafana can also query KubeHero logs as a Loki datasource: {{ include "kubehero.controlPlaneURL" . }} (see docs/compatibility).
 {{- end }}
 
-{{- if eq .Values.postgresql.embedded false }}
-{{- if and (eq .Values.postgresql.external.host "") (eq .Values.controlPlane.enabled true) }}
+{{- if and .Values.controlPlane.enabled (not .Values.postgresql.embedded) (not .Values.postgresql.external.existingSecret) }}
 
-⚠️  postgresql.external.host is empty AND postgresql.embedded=false.
-   The control-plane is running in stub mode (no persistence).
-   Set CONTROL_PLANE will only return demo data until you provision Postgres.
+⚠️  No Postgres configured (postgresql.embedded=false and no external.existingSecret):
+   clusters, policies, audit log and alert rules are not persisted.
 {{- end }}
+{{- if and .Values.controlPlane.enabled (not .Values.clickhouse.embedded) (not .Values.clickhouse.external.existingSecret) }}
+
+⚠️  No ClickHouse configured (clickhouse.embedded=false and no external.existingSecret):
+   cost, logs, profiles and flows are not stored — pages show labelled demo data{{ if eq (toString .Values.controlPlane.demoMode) "false" }} (disabled: KUBEHERO_DEMO_MODE=false → those RPCs fail){{ end }}.
 {{- end }}
+{{- if and .Values.collector.enabled .Values.collector.ebpf.enabled }}
 
-{{- if or .Values.postgresql.embedded .Values.clickhouse.embedded .Values.cache.embedded .Values.auth.dex.embedded .Values.security.trivy.embedded .Values.security.tetragon.embedded .Values.secrets.externalSecrets.embedded .Values.prometheus.embedded }}
-
-📦 SUBCHARTS
-   You enabled at least one `<component>.embedded: true`. Make sure
-   you ran `helm dep update` against this chart before installing —
-   otherwise the subchart resources will be missing. CI does this
-   automatically on release; local installs need it once after
-   pulling the chart.
+ℹ️  eBPF telemetry needs Linux ≥ 5.8 with cgroup v2 (default on current AKS / GKE / EKS images).
+   On nodes without it the collector logs one line and keeps collecting everything else.
 {{- end }}
 
 DOCS
-   https://kubehero.io/docs                       — full reference
-   https://kubehero.io/docs/quickstart            — 5-min walk-through
-   https://kubehero.io/docs/integrations/clouds   — AWS / GCP / Azure setup
-   https://kubehero.io/docs/troubleshooting       — failure modes + fixes
+   https://kubehero.io/docs                  — full reference
+   https://kubehero.io/docs/quickstart       — 5-minute walk-through
+   https://kubehero.io/docs/compatibility    — Grafana / Loki / OpenCost / Pyroscope / OTel
+   https://kubehero.io/docs/troubleshooting  — failure modes + fixes
 
-SUPPORT
-   GitHub: https://github.com/kubehero-io/platform/issues
-   Email:  hello@kubehero.io
+   Issues: https://github.com/kubehero-io/platform/issues
