@@ -172,7 +172,13 @@ func (c *ControlPlane) ListClusters(
 			}
 		}
 	}
-	if len(all) == 0 {
+	if c.CH != nil {
+		// Live node counts (distinct nodes reporting node_cost_1s in the
+		// last 15m) replace registration-time counts, and clusters that
+		// report without being registered are listed too. With
+		// ClickHouse wired the list is live data only — never fixtures.
+		all = c.liveClusters(ctx, all)
+	} else if len(all) == 0 {
 		if c.DemoFixturesDisabled {
 			if c.Clusters == nil {
 				return nil, errDemoDisabled("ListClusters")
@@ -467,10 +473,27 @@ func nonEmpty(v, def string) string {
 	return v
 }
 
+// ListWasteRecommendations ranks workloads by what percentile-based
+// rightsizing would recover ($/mo, 7-day window). Live when ClickHouse
+// is wired; demo fixtures otherwise.
 func (c *ControlPlane) ListWasteRecommendations(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[kuberov1.ListWasteRecommendationsRequest],
 ) (*connect.Response[kuberov1.ListWasteRecommendationsResponse], error) {
+	if c.CH != nil {
+		limit := int(req.Msg.GetLimit())
+		if limit <= 0 {
+			limit = 50
+		}
+		if limit > 500 {
+			limit = 500
+		}
+		recs, err := c.liveWaste(ctx, strings.TrimSpace(req.Msg.GetClusterId()), limit)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("waste recommendations: %w", err))
+		}
+		return connect.NewResponse(&kuberov1.ListWasteRecommendationsResponse{Recommendations: recs}), nil
+	}
 	if c.DemoFixturesDisabled {
 		return nil, errDemoDisabled("ListWasteRecommendations")
 	}
@@ -485,7 +508,7 @@ func (c *ControlPlane) ListWasteRecommendations(
 // (matched on cluster + namespace + name) plus a small audit history
 // scoped to that workload.
 func (c *ControlPlane) GetWorkload(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[kuberov1.GetWorkloadRequest],
 ) (*connect.Response[kuberov1.GetWorkloadResponse], error) {
 	cluster := strings.TrimSpace(req.Msg.GetCluster())
@@ -494,6 +517,15 @@ func (c *ControlPlane) GetWorkload(
 	if cluster == "" || namespace == "" || name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			errors.New("cluster, namespace and name are all required"))
+	}
+	if c.CH != nil {
+		// Live: the workload's rightsizing rec (unset when nothing is
+		// recoverable) + its audit history from Postgres, if wired.
+		rec, history, err := c.liveWorkload(ctx, cluster, namespace, name)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get workload: %w", err))
+		}
+		return connect.NewResponse(&kuberov1.GetWorkloadResponse{Recommendation: rec, History: history}), nil
 	}
 	if c.DemoFixturesDisabled {
 		return nil, errDemoDisabled("GetWorkload")
@@ -512,10 +544,19 @@ func (c *ControlPlane) GetWorkload(
 	}), nil
 }
 
+// ListPolicies lists the Budget/Ceiling policies mirrored into Postgres
+// with their monthly ceiling and month-to-date spend % (ClickHouse).
 func (c *ControlPlane) ListPolicies(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[kuberov1.ListPoliciesRequest],
 ) (*connect.Response[kuberov1.ListPoliciesResponse], error) {
+	if lister, ok := c.Policies.(store.PolicyLister); ok {
+		policies, err := c.livePolicies(ctx, lister, strings.TrimSpace(req.Msg.GetClusterId()), req.Msg.GetKind())
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list policies: %w", err))
+		}
+		return connect.NewResponse(&kuberov1.ListPoliciesResponse{Policies: policies}), nil
+	}
 	if c.DemoFixturesDisabled {
 		return nil, errDemoDisabled("ListPolicies")
 	}
@@ -669,37 +710,52 @@ func (c *ControlPlane) IngestPodCost(
 // dollars rather than abstract resources, so the operator can decide
 // whether a $1.8k/mo capacity bump unblocks $6.1k/mo of blocked work
 // (yes) or $200/mo of blocked work (probably no).
+//
+// Live (ClickHouse): workloads with pods reported unschedulable in the
+// last 30 minutes that haven't started since, priced with the cheapest
+// node type seen in the cluster that fits one pod.
 func (c *ControlPlane) ListCapacityDemands(
-	_ context.Context,
+	ctx context.Context,
 	req *connect.Request[kuberov1.ListCapacityDemandsRequest],
 ) (*connect.Response[kuberov1.ListCapacityDemandsResponse], error) {
-	if c.DemoFixturesDisabled {
-		return nil, errDemoDisabled("ListCapacityDemands")
-	}
-	all := demoCapacityDemands()
-	if cluster := req.Msg.GetClusterId(); cluster != "" {
-		filtered := all[:0]
-		for _, d := range all {
-			if d.GetCluster() == cluster {
-				filtered = append(filtered, d)
-			}
+	cluster := strings.TrimSpace(req.Msg.GetClusterId())
+	var all []*kuberov1.CapacityDemand
+	switch {
+	case c.CH != nil:
+		live, err := c.liveCapacity(ctx, cluster)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("capacity demands: %w", err))
 		}
-		all = filtered
+		all = live
+	case c.DemoFixturesDisabled:
+		return nil, errDemoDisabled("ListCapacityDemands")
+	default:
+		all = demoCapacityDemands()
+		if cluster != "" {
+			filtered := all[:0]
+			for _, d := range all {
+				if d.GetCluster() == cluster {
+					filtered = append(filtered, d)
+				}
+			}
+			all = filtered
+		}
 	}
-	limit := int(req.Msg.GetLimit())
-	if limit > 0 && int32(len(all)) > int32(limit) {
-		all = all[:limit]
-	}
+	// Totals cover every demand, not just the returned page.
 	var pods int32
 	var blocked float64
 	for _, d := range all {
 		pods += d.GetPendingPods()
 		blocked += d.GetBlockedCostUsdMonth()
 	}
+	limit := int(req.Msg.GetLimit())
+	if limit > 0 && int32(len(all)) > int32(limit) {
+		all = all[:limit]
+	}
 	return connect.NewResponse(&kuberov1.ListCapacityDemandsResponse{
-		Demands:               all,
-		TotalPendingPods:      pods,
-		TotalBlockedUsdMonth:  blocked,
+		Demands:              all,
+		TotalPendingPods:     pods,
+		TotalBlockedUsdMonth: blocked,
 	}), nil
 }
 
@@ -741,6 +797,11 @@ func (c *ControlPlane) ListAnomalies(
 		for _, h := range hits {
 			all = append(all, spendAnomalyToProto(h, threshold))
 		}
+		if c.CH != nil {
+			// OOM-kill bursts ("capacity") and error-log spikes ("logs")
+			// join the spend cards, ranked together by $ exposure.
+			all = sortByImpact(append(all, c.signalAnomalies(ctx, window, threshold)...))
+		}
 	case c.DemoFixturesDisabled:
 		return nil, errDemoDisabled("ListAnomalies")
 	default:
@@ -757,10 +818,27 @@ func (c *ControlPlane) ListAnomalies(
 	}), nil
 }
 
+// GetTeamSpend is chargeback per team / cost center. Live (ClickHouse):
+// allocated compute + network spend over the window scaled to a 30-day
+// month and split by cloud, recoverable $ from rightsizing, and idle
+// GPU $ where GPU utilisation is reported.
 func (c *ControlPlane) GetTeamSpend(
-	_ context.Context,
-	_ *connect.Request[kuberov1.GetTeamSpendRequest],
+	ctx context.Context,
+	req *connect.Request[kuberov1.GetTeamSpendRequest],
 ) (*connect.Response[kuberov1.GetTeamSpendResponse], error) {
+	if err := requireFleet(ctx); err != nil {
+		return nil, err
+	}
+	if c.CH != nil {
+		resp, err := c.liveTeamSpend(ctx, req.Msg.GetWindow())
+		if err != nil {
+			if isInvalid(err) {
+				return nil, connect.NewError(connect.CodeInvalidArgument, err)
+			}
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("team spend: %w", err))
+		}
+		return connect.NewResponse(resp), nil
+	}
 	if c.DemoFixturesDisabled {
 		return nil, errDemoDisabled("GetTeamSpend")
 	}
