@@ -330,8 +330,17 @@ func TestEngineAgainstClickHouse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got.Patterns) == 0 || fmt.Sprint(got.Patterns) != fmt.Sprint(want.Patterns) || got.LinesAnalyzed != want.LinesAnalyzed {
-			t.Fatalf("patterns differ:\n got %+v\nwant %+v", got.Patterns, want.Patterns)
+		// The sample line depends on the order of equal-timestamp lines,
+		// which ClickHouse does not fix; everything else must match.
+		strip := func(ps []PatternOut) string {
+			var b strings.Builder
+			for _, p := range ps {
+				fmt.Fprintf(&b, "%s|%d|%s|%.6f|%v\n", p.Pattern, p.Count, p.Level, p.SharePct, p.Trend)
+			}
+			return b.String()
+		}
+		if len(got.Patterns) == 0 || strip(got.Patterns) != strip(want.Patterns) || got.LinesAnalyzed != want.LinesAnalyzed {
+			t.Fatalf("patterns differ:\n got %s\nwant %s", strip(got.Patterns), strip(want.Patterns))
 		}
 		names, err := f.ch.LabelNames(ctx, "", "", f.now.Add(-2*time.Hour), f.now)
 		if err != nil {

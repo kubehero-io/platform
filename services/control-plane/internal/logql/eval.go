@@ -271,6 +271,9 @@ func (ev *evaluator) evalRange(ctx context.Context, r *RangeAggExpr, keep []stri
 	if len(buckets) > MaxSeries {
 		return nil, ErrTooManySeries
 	}
+	// Stores return series in arbitrary order (ClickHouse GROUP BY);
+	// fix one so ties (topk) resolve the same way everywhere.
+	sort.Slice(buckets, func(i, j int) bool { return labelsKey(buckets[i].Labels) < labelsKey(buckets[j].Labels) })
 	secs := float64(r.Range) / 1e9
 	out := &matrix{}
 	if r.Op == RangeAbsent {
