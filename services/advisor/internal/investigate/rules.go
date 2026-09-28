@@ -740,14 +740,9 @@ func (r *rulesRun) answer() *kuberov1.InvestigateResponse {
 	for _, a := range actions {
 		a.Status = brain.StatusProposed
 	}
+	// Proposals travel in actions[] (rendered as action cards with their
+	// manifests), so the markdown doesn't repeat them.
 	actions = brain.ValidateActions(actions)
-	if len(actions) > 0 {
-		b.WriteString("\n### Proposed actions\n\n")
-		b.WriteString("Proposals only — manifests apply through the operator's human-arm flow.\n\n")
-		for _, a := range actions {
-			fmt.Fprintf(&b, "1. **%s** (%s, risk %s) — %s\n", a.Title, a.Kind, a.Risk, a.Rationale)
-		}
-	}
 
 	summary := fmt.Sprintf("I looked into %s.", spokenSubject(r.subj))
 	if len(spoken) == 0 {
