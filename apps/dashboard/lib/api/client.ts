@@ -127,8 +127,11 @@ export type WhoAmIResponse = {
 };
 
 /** Resolves the principal behind a credential — used by the token sign-in. */
-export function whoAmI(opts: CallOptions): Promise<RpcResult<WhoAmIResponse>> {
-  return callUnary<WhoAmIResponse>("cp", SERVICE, "WhoAmI", {}, { timeoutMs: 5_000, onExpired: "return", ...opts });
+export async function whoAmI(opts: CallOptions): Promise<RpcResult<WhoAmIResponse>> {
+  const res = await callUnary<WhoAmIResponse>("cp", SERVICE, "WhoAmI", {}, { timeoutMs: 5_000, onExpired: "return", ...opts });
+  // proto3 JSON leaves false booleans out: a control plane that accepts
+  // anonymous callers sends no authRequired at all.
+  return res.ok ? { ok: true, data: { ...res.data, authRequired: res.data.authRequired === true } } : res;
 }
 
 // ─── ArmPolicy (admin) ───────────────────────────────────────────────────

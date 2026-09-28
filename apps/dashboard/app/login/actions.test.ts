@@ -136,6 +136,15 @@ describe("token sign-in", () => {
     expect(s.token).toBeUndefined();
   });
 
+  it("allows tokenless sign-in when the open control plane omits authRequired (proto3 default)", async () => {
+    // What a real control plane sends: protojson drops false booleans.
+    stubWhoAmI((auth) =>
+      auth ? { status: 401, body: { code: "unauthenticated" } } : { status: 200, body: { subject: "anonymous", role: "admin" } },
+    );
+    expect(await redirectOf(signInAnonymous(form({ next: "/logs" })))).toBe("/logs");
+    expect(verifySession(jar.get("kh_session")!.value)).toMatchObject({ mode: "token", subject: "anonymous" });
+  });
+
   it("refuses tokenless sign-in when the control plane requires auth", async () => {
     stubWhoAmI(() => ({ status: 401, body: { code: "unauthenticated", message: "missing Authorization header" } }));
     expect(await redirectOf(signInAnonymous(form({})))).toMatch(/error=auth_required/);
