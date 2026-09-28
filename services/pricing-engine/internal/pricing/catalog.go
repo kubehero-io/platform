@@ -125,6 +125,16 @@ func (c *Catalog) Quote(ctx context.Context, cloud Cloud, sku, region, lifecycle
 	return c.do(ctx, key, false)
 }
 
+// Warm lets cloud's live source preload region when it implements
+// Warmer (a no-op otherwise). The Refresher calls it before refreshing
+// the region's keys.
+func (c *Catalog) Warm(ctx context.Context, cloud Cloud, region string) error {
+	if w, ok := c.live[cloud].(Warmer); ok {
+		return w.Warm(ctx, region)
+	}
+	return nil
+}
+
 // Refresh forcibly re-resolves key, bypassing the freshness check but
 // keeping the previous entry available as a stale fallback while the
 // provider is consulted. Used by the background Refresher.
@@ -184,9 +194,14 @@ func (c *Catalog) resolve(ctx context.Context, key QuoteKey) (Quote, error) {
 		}
 		liveErr = err
 		if !errors.Is(err, ErrUnimplemented) && !errors.Is(err, ErrNotFound) {
-			c.log.Warn("live pricing source failed, using fallbacks",
-				"cloud", key.Cloud, "sku", key.SKU, "region", key.Region,
-				"lifecycle", key.Lifecycle, "err", err)
+			if errors.Is(err, ErrWarming) {
+				c.log.Info("live pricing source still loading, using fallbacks",
+					"cloud", key.Cloud, "sku", key.SKU, "region", key.Region)
+			} else {
+				c.log.Warn("live pricing source failed, using fallbacks",
+					"cloud", key.Cloud, "sku", key.SKU, "region", key.Region,
+					"lifecycle", key.Lifecycle, "err", err)
+			}
 			// A real provider price that merely expired beats the
 			// hand-maintained static number.
 			c.mu.Lock()

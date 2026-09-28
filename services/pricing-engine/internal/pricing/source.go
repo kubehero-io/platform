@@ -29,3 +29,11 @@ type Source interface {
 	Name() Cloud
 	Quote(ctx context.Context, sku, region, lifecycle string) (Quote, error)
 }
+
+// Warmer is implemented by live sources that load a whole region at
+// once (AWS's offer files). The Refresher warms each region before it
+// re-resolves that region's keys, so the download happens in the
+// background rather than on a request.
+type Warmer interface {
+	Warm(ctx context.Context, region string) error
+}

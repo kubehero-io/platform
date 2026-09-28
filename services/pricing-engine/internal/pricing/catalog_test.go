@@ -360,7 +360,7 @@ func TestCatalogWithFakeAWS(t *testing.T) {
 	if q.PricePerHour != 0.099 {
 		t.Fatalf("price %v want live 0.099 (static is 0.096)", q.PricePerHour)
 	}
-	// Second quote: cache, not another 50MB index download.
+	// Second quote: cache, not another offer-file download.
 	if _, err := c.Quote(context.Background(), CloudAWS, "m5.large", "us-east-1", "on-demand"); err != nil {
 		t.Fatal(err)
 	}

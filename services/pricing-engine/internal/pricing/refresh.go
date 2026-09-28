@@ -59,6 +59,20 @@ func (r *Refresher) next() time.Duration {
 }
 
 func (r *Refresher) refresh(ctx context.Context, log *slog.Logger) {
+	// Sources that load a region at once (AWS) download it here, in the
+	// background, instead of on the first request that needs it.
+	warmed := map[QuoteKey]bool{}
+	for _, key := range r.Targets {
+		region := QuoteKey{Cloud: key.Cloud, Region: key.Region}
+		if warmed[region] || ctx.Err() != nil {
+			continue
+		}
+		warmed[region] = true
+		if err := r.Catalog.Warm(ctx, key.Cloud, key.Region); err != nil {
+			log.Warn("pricing warm-up failed", "cloud", key.Cloud, "region", key.Region, "err", err)
+		}
+	}
+
 	var ok, failed int
 	for _, key := range r.Targets {
 		if ctx.Err() != nil {
