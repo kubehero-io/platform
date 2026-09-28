@@ -6,6 +6,11 @@
 
 FROM golang:1.26.5-alpine AS build
 WORKDIR /src
+# The generated Connect clients come from packages/proto via a `replace`
+# in go.mod (build context = repo root), so the proto module travels with
+# the CLI sources. GOWORK=off keeps the image independent of go.work.
+ENV GOWORK=off
+COPY packages/proto/ packages/proto/
 COPY cli/kubehero/go.mod cli/kubehero/go.sum* cli/kubehero/
 RUN cd cli/kubehero && go mod download
 
