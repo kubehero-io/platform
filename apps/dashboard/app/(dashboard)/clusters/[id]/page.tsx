@@ -25,6 +25,7 @@ import { combineSources } from "@/lib/api/source";
 import { formatCores, formatPct, formatUsd } from "@/lib/chart/scale";
 import { DAY } from "@/lib/time-range";
 import { logqlSelector, logsHref } from "@/lib/url";
+import { requestNow } from "@/lib/request-time";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export default async function ClusterPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const { cluster: c, source } = await getCluster(id);
   if (!c) notFound();
-  const now = Date.now();
+  const now = requestNow();
   const [day, week, eff, recs, alerts, network] = await Promise.all([
     getAllocation({ window: "24h", aggregate: "cluster", includeIdle: true, filters: { cluster: c.id } }),
     getAllocation({ window: "7d", aggregate: "namespace", filters: { cluster: c.id } }),

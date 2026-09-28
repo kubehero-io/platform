@@ -26,7 +26,10 @@ export function LiveTail({ query, height = 560 }: { query: string; height?: numb
   const [dropped, setDropped] = useState(0);
   const [rate, setRate] = useState(0);
   const [attempt, setAttempt] = useState(0);
+  // Lines held while paused: the ref is the buffer, `buffered` its size
+  // for rendering.
   const pending = useRef<LogLine[]>([]);
+  const [buffered, setBuffered] = useState(0);
   const pausedRef = useRef(false);
   const recent = useRef<{ t: number; n: number }[]>([]);
 
@@ -64,6 +67,7 @@ export function LiveTail({ query, height = 560 }: { query: string; height?: numb
               if (d.dropped) setDropped((x) => x + d.dropped!);
               if (pausedRef.current) {
                 pending.current = pending.current.concat(d.lines).slice(-MAX_BUFFER);
+                setBuffered(pending.current.length);
               } else {
                 append(d.lines);
               }
@@ -110,6 +114,7 @@ export function LiveTail({ query, height = 560 }: { query: string; height?: numb
     if (!next && pending.current.length > 0) {
       append(pending.current);
       pending.current = [];
+      setBuffered(0);
     }
   };
 
@@ -120,7 +125,7 @@ export function LiveTail({ query, height = 560 }: { query: string; height?: numb
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-line)] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em]">
         <span className="inline-flex items-center gap-1.5" style={{ color: tone }} role="status" aria-live="polite">
           <span className={`h-1.5 w-1.5 rounded-full ${status === "live" && !paused ? "animate-pulse" : ""}`} style={{ background: tone }} aria-hidden />
-          {status === "live" ? (paused ? `paused · ${pending.current.length} buffered` : "live") : status}
+          {status === "live" ? (paused ? `paused · ${buffered} buffered` : "live") : status}
         </span>
         <span className="text-[var(--color-fg-faint)]">{rate.toFixed(1)} lines/s</span>
         <span className="text-[var(--color-fg-faint)]">

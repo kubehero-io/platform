@@ -18,12 +18,15 @@ export function NavStatusProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await fetch("/api/nav", { cache: "no-store" });
       // An expired token is redirected through /api/auth/expired → /login.
+      // Full-page replace, not router.push: it drops the client router
+      // cache of the signed-in user's pages and leaves no dead history
+      // entry behind.
       if (res.redirected && new URL(res.url).pathname === "/login") {
-        window.location.href = res.url;
+        window.location.replace(res.url);
         return;
       }
       if (res.status === 401) {
-        window.location.href = "/login?reason=expired";
+        window.location.replace("/login?reason=expired");
         return;
       }
       if (res.ok) setStatus((await res.json()) as NavStatus);

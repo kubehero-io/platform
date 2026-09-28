@@ -53,6 +53,10 @@ export function LogList({
   const sp = useSearchParams();
   const [, startNav] = useTransition();
 
+  // TanStack Virtual hands back fresh functions each render, so React
+  // Compiler skips this component (we don't run the compiler; noted so
+  // the warning is a known, reviewed one).
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => parentRef.current,
@@ -186,12 +190,12 @@ const Row = memo(function Row({
       id={`line-${line.id}`}
       role="option"
       aria-selected={active}
-      aria-expanded={expanded}
       className={`border-b border-[var(--color-line)] ${active ? "bg-[var(--color-bg-sunken)]/70" : ""} ${expanded ? "bg-[var(--color-bg-sunken)]/50" : ""}`}
     >
       <button
         type="button"
         tabIndex={-1}
+        aria-expanded={expanded}
         onClick={onToggle}
         className="flex w-full items-start gap-2.5 px-3 py-[3px] text-left font-mono text-[12px] leading-[20px] hover:bg-[var(--color-bg-sunken)]/60"
       >

@@ -23,6 +23,7 @@ import { formatProfileValue } from "@/lib/profiles/map";
 import { parseSort, sortRows } from "@/lib/table-sort";
 import { DAY, resolveRange } from "@/lib/time-range";
 import { flatParams, hrefWith, param, type SearchParamsRecord } from "@/lib/url";
+import { requestNow } from "@/lib/request-time";
 
 export const metadata = { title: "Profiles · KubeHero" };
 export const dynamic = "force-dynamic";
@@ -161,7 +162,7 @@ export default async function ProfilesPage({ searchParams }: { searchParams: Pro
                   )}
                   {selected.lastSeenMs > 0 && (
                     <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">
-                      last sample {formatAgo(Date.now() - selected.lastSeenMs)} ago
+                      last sample {formatAgo(requestNow() - selected.lastSeenMs)} ago
                     </span>
                   )}
                 </div>

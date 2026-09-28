@@ -11,7 +11,6 @@ import { ArrowUpRight, BellOff, BellRing, MessageCircleQuestion, Pencil, Plus, S
 import { Topbar } from "@/components/topbar";
 import { DataSourceBadge } from "@/components/data-source-badge";
 import { PageHeader } from "@/components/ui/page-header";
-import { Panel } from "@/components/ui/panel";
 import { UrlTabs } from "@/components/ui/url-tabs";
 import { UrlDrawer } from "@/components/ui/drawer";
 import { Chip, severityTone } from "@/components/ui/chip";
@@ -29,6 +28,7 @@ import { canAdmin } from "@/lib/roles";
 import { getSessionView } from "@/lib/session";
 import { formatAgo, formatCompact } from "@/lib/chart/scale";
 import { flatParams, hrefWith, param, type SearchParamsRecord } from "@/lib/url";
+import { requestNow } from "@/lib/request-time";
 
 export const metadata = { title: "Alerts · KubeHero" };
 export const dynamic = "force-dynamic";
@@ -58,7 +58,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const firing = byState("firing");
   const pending = byState("pending");
   const resolved = byState("resolved");
-  const now = Date.now();
+  const now = requestNow();
 
   const editing: AlertRule | undefined = ruleParam && ruleParam !== "new" ? rules.data.find((r) => r.id === ruleParam) : undefined;
   const silenceFor: Alert | undefined = silenceParam && silenceParam !== "new" ? all.find((a) => a.id === silenceParam) : undefined;

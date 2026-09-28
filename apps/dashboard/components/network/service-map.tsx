@@ -42,6 +42,7 @@ export function ServiceMap({ nodes, edges, cluster }: { nodes: MapNode[]; edges:
   const [hoverNode, setHoverNode] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   const toLocal = (clientX: number, clientY: number) => {
     const r = svgRef.current?.getBoundingClientRect();
@@ -106,18 +107,25 @@ export function ServiceMap({ nodes, edges, cluster }: { nodes: MapNode[]; edges:
           if ((e.target as Element).closest("[data-node]")) return;
           const p = toLocal(e.clientX, e.clientY);
           drag.current = { x: p.x, y: p.y, vx: view.x, vy: view.y };
+          setDragging(true);
         }}
         onMouseMove={(e) => {
-          if (!drag.current) return;
+          // Captured now: the updater may run after mouseup cleared the ref.
+          const d = drag.current;
+          if (!d) return;
           const p = toLocal(e.clientX, e.clientY);
-          setView((v) => ({ ...v, x: drag.current!.vx + (p.x - drag.current!.x), y: drag.current!.vy + (p.y - drag.current!.y) }));
+          setView((v) => ({ ...v, x: d.vx + (p.x - d.x), y: d.vy + (p.y - d.y) }));
         }}
-        onMouseUp={() => (drag.current = null)}
+        onMouseUp={() => {
+          drag.current = null;
+          setDragging(false);
+        }}
         onMouseLeave={() => {
           drag.current = null;
+          setDragging(false);
           setHoverEdge(null);
         }}
-        style={{ cursor: drag.current ? "grabbing" : "grab" }}
+        style={{ cursor: dragging ? "grabbing" : "grab" }}
       >
         <defs>
           {(["internal", "cross-zone", "egress"] as const).map((c) => (

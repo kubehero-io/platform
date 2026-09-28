@@ -35,6 +35,7 @@ import { formatProfileValue } from "@/lib/profiles/map";
 import { DAY, HOUR, MINUTE } from "@/lib/time-range";
 import { logqlSelector, logsHref, workloadHref } from "@/lib/url";
 import type { AuditEntry } from "@/lib/api/audit";
+import { requestNow } from "@/lib/request-time";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export default async function WorkloadPage({ params }: { params: Params }) {
   const name = nameParts.join("/");
   if (![cluster, namespace, name].every((x) => NAME_RE.test(x))) notFound();
 
-  const now = Date.now();
+  const now = requestNow();
   const hub = workloadHref(cluster, namespace, name);
   const selector = logqlSelector({ cluster, namespace, workload: name });
   const errSelector = `${selector.slice(0, -1)}, level=~"error|fatal|warn"}`;

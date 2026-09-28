@@ -112,35 +112,35 @@ export function TimeRangeSelector({ config = DEFAULT_RANGE }: { config?: RangeCo
   return (
     <div className="relative flex items-center gap-1">
       <div
-        role="radiogroup"
-        aria-label="time range"
         className={`inline-flex items-center gap-0.5 rounded-sm border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] p-0.5 font-mono text-[10px] uppercase tracking-[0.14em] ${pending ? "opacity-70" : ""}`}
       >
-        {config.options.map((opt) => {
-          const active = current === opt;
-          return (
-            <button
-              key={opt}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => setWindow(opt)}
-              disabled={pending}
-              className="px-2 py-0.5 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-cool)] disabled:opacity-60"
-              style={{
-                background: active ? "var(--color-fg)" : "transparent",
-                color: active ? "var(--color-bg)" : "var(--color-fg-dim)",
-              }}
-            >
-              {opt}
-            </button>
-          );
-        })}
+        <div role="radiogroup" aria-label="time range" className="inline-flex items-center gap-0.5">
+          {config.options.map((opt) => {
+            const active = current === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setWindow(opt)}
+                disabled={pending}
+                className="px-2 py-0.5 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-cool)] disabled:opacity-60"
+                style={{
+                  background: active ? "var(--color-fg)" : "transparent",
+                  color: active ? "var(--color-bg)" : "var(--color-fg-dim)",
+                }}
+              >
+                {opt}
+              </button>
+            );
+          })}
+        </div>
+        {/* Opens a dialog, so a plain button rather than a radio. */}
         {config.custom && (
           <button
             type="button"
-            role="radio"
-            aria-checked={current === "custom"}
+            aria-label={current === "custom" ? "Custom range (active)" : "Custom range"}
             aria-haspopup="dialog"
             aria-expanded={open}
             onClick={openCustom}

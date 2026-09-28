@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
+import { readLocalStorageJSON, useLocalStorageJSON, writeLocalStorage } from "@/lib/use-local-storage";
 
 /* Small client-only store. Persists per-org via localStorage so a
    reload keeps the demo state. Swap for React Query + real API later. */
@@ -60,30 +54,30 @@ function nowStr() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+function validate(v: unknown): State | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Partial<State>;
+  return {
+    applied: o.applied && typeof o.applied === "object" ? o.applied : {},
+    armed: o.armed && typeof o.armed === "object" ? { ...defaults.armed, ...o.armed } : defaults.armed,
+    events: Array.isArray(o.events) ? o.events.slice(0, 50) : [],
+  };
+}
+
+// Functional update against the current stored value (not a render's
+// snapshot), so rapid successive actions never overwrite each other.
+function update(fn: (s: State) => State) {
+  writeLocalStorage(KEY, JSON.stringify(fn(readLocalStorageJSON(KEY, defaults, validate))));
+}
+
 export function AppStateProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [state, setState] = useState<State>(defaults);
-
-  // load
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) setState({ ...defaults, ...JSON.parse(raw) });
-    } catch {
-      /* ignore */
-    }
-  }, []);
-  // save
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-    } catch {
-      /* ignore quota etc */
-    }
-  }, [state]);
+  // Persisted per browser (demo interactions only — nothing here reaches
+  // a control plane).
+  const [state] = useLocalStorageJSON<State>(KEY, defaults, validate);
 
   const apply = useCallback(
     (workload: string, savingsK: number, cluster: string) => {
@@ -96,7 +90,7 @@ export function AppStateProvider({
         savingsK,
         auditId: "aud-" + String(50000 + Math.floor(Math.random() * 9999)),
       };
-      setState((s) => ({
+      update((s) => ({
         ...s,
         applied: { ...s.applied, [workload]: true },
         events: [ev, ...s.events].slice(0, 50),
@@ -113,7 +107,7 @@ export function AppStateProvider({
       workload,
       auditId: "aud-" + String(50000 + Math.floor(Math.random() * 9999)),
     };
-    setState((s) => ({
+    update((s) => ({
       ...s,
       applied: { ...s.applied, [workload]: false },
       events: [ev, ...s.events].slice(0, 50),
@@ -128,7 +122,7 @@ export function AppStateProvider({
       policy,
       auditId: "aud-" + String(50000 + Math.floor(Math.random() * 9999)),
     };
-    setState((s) => ({
+    update((s) => ({
       ...s,
       armed: { ...s.armed, [policy]: true },
       events: [ev, ...s.events].slice(0, 50),
@@ -143,7 +137,7 @@ export function AppStateProvider({
       policy,
       auditId: "aud-" + String(50000 + Math.floor(Math.random() * 9999)),
     };
-    setState((s) => ({
+    update((s) => ({
       ...s,
       armed: { ...s.armed, [policy]: false },
       events: [ev, ...s.events].slice(0, 50),

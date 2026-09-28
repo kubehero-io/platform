@@ -8,6 +8,7 @@
 // localStorage so an investigation survives a reload.
 
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { readLocalStorageJSON, useLocalStorageJSON, writeLocalStorage } from "@/lib/use-local-storage";
 import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -46,25 +47,31 @@ type Entry = {
   error: string | null;
 };
 
-function loadHistory(): Entry[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]") as unknown;
-    return Array.isArray(v) ? (v as Entry[]).filter((e) => e && typeof e.question === "string").slice(0, HISTORY_MAX) : [];
-  } catch {
-    return [];
-  }
+const NO_HISTORY: Entry[] = [];
+
+// Browser storage is user-editable: keep only entries whose shape the
+// view can render.
+function validateHistory(v: unknown): Entry[] | null {
+  if (!Array.isArray(v)) return null;
+  return (v as Partial<Entry>[])
+    .filter(
+      (e): e is Entry =>
+        !!e &&
+        typeof e === "object" &&
+        typeof e.id === "string" &&
+        typeof e.question === "string" &&
+        typeof e.askedAt === "number" &&
+        Array.isArray(e.steps) &&
+        Array.isArray(e.notes),
+    )
+    .slice(0, HISTORY_MAX);
 }
 
-function saveHistory(xs: Entry[]) {
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(xs.slice(0, HISTORY_MAX)));
-  } catch {
-    // Quota: drop the oldest half and retry once.
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(xs.slice(0, Math.floor(HISTORY_MAX / 2))));
-    } catch {
-      /* give up quietly */
-    }
+function updateHistory(fn: (xs: Entry[]) => Entry[]) {
+  const next = fn(readLocalStorageJSON(HISTORY_KEY, NO_HISTORY, validateHistory)).slice(0, HISTORY_MAX);
+  // Quota: drop the oldest half and retry once, then give up quietly.
+  if (!writeLocalStorage(HISTORY_KEY, JSON.stringify(next))) {
+    writeLocalStorage(HISTORY_KEY, JSON.stringify(next.slice(0, Math.floor(HISTORY_MAX / 2))));
   }
 }
 
@@ -84,15 +91,12 @@ export function AskConsole({ initialQuestion = "", context = "" }: { initialQues
   const [windowSel, setWindowSel] = useState<"1h" | "24h" | "7d">("24h");
   const [current, setCurrent] = useState<Entry | null>(null);
   const [running, setRunning] = useState(false);
-  const [history, setHistory] = useState<Entry[]>([]);
+  const [history] = useLocalStorageJSON(HISTORY_KEY, NO_HISTORY, validateHistory);
   const ctl = useRef<AbortController | null>(null);
   const autoRan = useRef(false);
   const reduce = useReducedMotion();
 
-  useEffect(() => {
-    setHistory(loadHistory());
-    return () => ctl.current?.abort();
-  }, []);
+  useEffect(() => () => ctl.current?.abort(), []);
 
   const ask = useCallback(
     async (q: string) => {
@@ -141,11 +145,8 @@ export function AskConsole({ initialQuestion = "", context = "" }: { initialQues
       } finally {
         setRunning(false);
         if (live.result || live.error) {
-          setHistory((h) => {
-            const next = [live, ...h.filter((x) => x.question !== live.question)].slice(0, HISTORY_MAX);
-            saveHistory(next);
-            return next;
-          });
+          const done = live;
+          updateHistory((h) => [done, ...h.filter((x) => x.question !== done.question)]);
         }
       }
     },
@@ -371,10 +372,7 @@ export function AskConsole({ initialQuestion = "", context = "" }: { initialQues
           {history.length > 0 && (
             <button
               type="button"
-              onClick={() => {
-                setHistory([]);
-                saveHistory([]);
-              }}
+              onClick={() => writeLocalStorage(HISTORY_KEY, null)}
               aria-label="clear history"
               className="text-[var(--color-fg-faint)] hover:text-[var(--color-fg)]"
             >

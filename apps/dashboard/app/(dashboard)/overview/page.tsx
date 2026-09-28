@@ -41,6 +41,7 @@ import { normalizeLevel } from "@/lib/chart/palette";
 import { formatAgo, formatCompact, formatPct, formatUsd } from "@/lib/chart/scale";
 import { costWindowRange, HOUR, MINUTE } from "@/lib/time-range";
 import { logsHref, workloadHref } from "@/lib/url";
+import { requestNow } from "@/lib/request-time";
 
 export const metadata = { title: "Overview · KubeHero" };
 export const dynamic = "force-dynamic";
@@ -60,7 +61,7 @@ type Change = {
 };
 
 export default async function OverviewPage() {
-  const now = Date.now();
+  const now = requestNow();
   const lastHour = { startMs: now - HOUR, endMs: now };
   const [total, byNs, eff, alerts, volume, network, anomalies, capacity, recs, policies] = await Promise.all([
     getCostTimeseries({ window: "30d", groupBy: "" }),
