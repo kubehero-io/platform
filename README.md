@@ -30,11 +30,11 @@ It keeps what you already run: Prometheus scrapes it, Grafana reads its logs as 
 helm install kubehero oci://ghcr.io/kubehero-io/charts/kubehero -n kubehero-system --create-namespace
 
 # 2. your admin token
-kubectl -n kubehero-system get secret kubehero-kubehero-control-plane \
+kubectl -n kubehero-system get secret kubehero-control-plane \
   -o jsonpath='{.data.admin-token}' | base64 -d; echo
 
 # 3. the dashboard (sign in with the token)
-kubectl -n kubehero-system port-forward svc/kubehero-kubehero-dashboard 3001:3001
+kubectl -n kubehero-system port-forward svc/kubehero-dashboard 3001:3001
 ```
 
 No cluster handy? `docker compose up --build -d` runs the whole stack locally with a synthetic three-cluster fleet streamed through the real ingest APIs, then open http://localhost:3001.

@@ -1,9 +1,17 @@
 {{/* Full resource name. */}}
+{{/* Full resource name: "<release>-kubehero", or just "<release>" when the
+     release name already contains the chart name (release "kubehero" →
+     "kubehero-control-plane", not "kubehero-kubehero-control-plane"). */}}
 {{- define "kubehero.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
-{{- printf "%s-%s" .Release.Name (.Values.nameOverride | default .Chart.Name) | trunc 63 | trimSuffix "-" -}}
+{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

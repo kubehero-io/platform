@@ -85,8 +85,8 @@ kubectl -n shop rollout status deploy/frontend deploy/checkout deploy/payments -
 ok "shop running"
 
 # ─── 5. API checks ───────────────────────────────────────────────────────
-TOKEN=$(kubectl -n "$NS" get secret kubehero-kubehero-control-plane -o jsonpath='{.data.admin-token}' | base64 -d)
-kubectl -n "$NS" port-forward svc/kubehero-kubehero-control-plane "$PORT:8080" >/dev/null 2>&1 &
+TOKEN=$(kubectl -n "$NS" get secret kubehero-control-plane -o jsonpath='{.data.admin-token}' | base64 -d)
+kubectl -n "$NS" port-forward svc/kubehero-control-plane "$PORT:8080" >/dev/null 2>&1 &
 PF=$!
 trap 'kill $PF 2>/dev/null || true; [ -n "${KEEP:-}" ] || [ -n "${FAILED:-}" ] || kind delete cluster --name "$CLUSTER" >/dev/null 2>&1' EXIT
 sleep 3
@@ -123,9 +123,9 @@ eventually "container logs are queryable with LogQL"      300 has_logs
 eventually "LogQL metric query over error lines"          300 has_errors
 eventually "rightsizing has recommendations for shop"     420 has_usage
 eventually "profiles collected for shop services"         420 has_profiles
-if kubectl -n "$NS" logs ds/kubehero-kubehero-collector | grep -q '"ebpf'; then
+if kubectl -n "$NS" logs ds/kubehero-collector | grep -q '"ebpf'; then
   eventually "eBPF service map has shop edges"            300 has_flows || true
 fi
 
 ok "end-to-end checks passed"
-note "dashboard: kubectl -n $NS port-forward svc/kubehero-kubehero-dashboard 3001:3001 (sign in with the admin token)"
+note "dashboard: kubectl -n $NS port-forward svc/kubehero-dashboard 3001:3001 (sign in with the admin token)"
