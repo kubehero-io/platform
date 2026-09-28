@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/collector .
 
 # ─── runtime ───────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/collector /usr/bin/collector
 EXPOSE 8081
 USER 65532

@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/r
     cd infra/demo/generator && GOOS=linux GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/generator .
 
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/generator /usr/bin/generator
 USER 65532
 ENTRYPOINT ["/usr/bin/generator"]

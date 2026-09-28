@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w -X github.com/kubehero-io/platform/cli/kubehero/cmd.Version=${VERSION}" -o /out/kubehero .
 
 # ─── runtime ───────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/kubehero /usr/bin/kubehero
 USER 65532
 ENTRYPOINT ["/usr/bin/kubehero"]

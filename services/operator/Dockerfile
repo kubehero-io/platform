@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w" -o /out/manager ./cmd
 
 # ─── runtime ───────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 WORKDIR /
 COPY --from=build /out/manager .
 USER 65532:65532

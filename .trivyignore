@@ -1,12 +1,9 @@
 # Base-image OS CVEs fixed upstream in Debian but not yet present in a
 # pinned distroless base (no apt in distroless, so we can't patch
-# in-Dockerfile — they clear when Google rebuilds the base). Written for
-# the debian12 bases; the dashboard now runs on distroless nodejs24.
-# Re-evaluate / remove on each base bump.
-
-# libssl3 / openssl — all fixed in 3.0.19-1~deb12u2, pending the distroless base
-CVE-2026-31789
-CVE-2026-28387
-CVE-2026-28388
-CVE-2026-28389
-CVE-2026-28390
+# in-Dockerfile — they clear when Google rebuilds the base). List them
+# here with the package and fixed version, and remove them on each base
+# bump.
+#
+# Every image runs on distroless debian13 (static / nodejs24), which
+# scans clean of fixed HIGH/CRITICAL CVEs as of 2026-09-28: nothing to
+# ignore. (The libssl3 entries for the debian12 bases are gone with them.)

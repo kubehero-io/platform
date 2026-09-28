@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w" -o /out/pricing-engine .
 
 # ─── runtime ───────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/pricing-engine /usr/bin/pricing-engine
 EXPOSE 8082
 USER 65532

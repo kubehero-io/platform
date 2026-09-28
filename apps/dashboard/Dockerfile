@@ -31,12 +31,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm -F @kubehero/dashboard build
 
 # ─── runtime ───────────────────────────────────────────────────────────────
-# distroless/nodejs24-debian12 instead of node:24-alpine cuts the image
+# distroless/nodejs24-debian13 instead of node:24-alpine cuts the image
 # ~40% and removes the shell + busybox + apk surface. The Next.js
 # standalone bundle is just a server.js + node_modules slice, which
 # distroless runs directly. The `nonroot` tag ships uid/gid 65532
 # baked in so we don't need our own adduser shim.
-FROM gcr.io/distroless/nodejs24-debian12:nonroot AS runtime
+FROM gcr.io/distroless/nodejs24-debian13:nonroot AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

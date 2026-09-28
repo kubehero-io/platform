@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags="-s -w -X github.com/kubehero-io/platform/services/control-plane/internal/rpc.Version=${VERSION}" -o /out/control-plane .
 
 # ─── runtime ───────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build /out/control-plane /usr/bin/control-plane
 EXPOSE 8080
 USER 65532
