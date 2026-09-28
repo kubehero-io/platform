@@ -5,7 +5,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AppendAuditEntryRequest, AppendAuditEntryResponse, ArmPolicyRequest, ArmPolicyResponse, GetBurnRateRequest, GetBurnRateResponse, GetTeamSpendRequest, GetTeamSpendResponse, GetWorkloadRequest, GetWorkloadResponse, HealthCheckRequest, HealthCheckResponse, IngestPodCostRequest, IngestPodCostResponse, ListAnomaliesRequest, ListAnomaliesResponse, ListAuditLogRequest, ListAuditLogResponse, ListCapacityDemandsRequest, ListCapacityDemandsResponse, ListClustersRequest, ListClustersResponse, ListPoliciesRequest, ListPoliciesResponse, ListVulnerabilitiesRequest, ListVulnerabilitiesResponse, ListWasteRecommendationsRequest, ListWasteRecommendationsResponse, RegisterClusterRequest, RegisterClusterResponse } from "./control_pb.js";
+import { AppendAuditEntryRequest, AppendAuditEntryResponse, ArmPolicyRequest, ArmPolicyResponse, GetBurnRateRequest, GetBurnRateResponse, GetTeamSpendRequest, GetTeamSpendResponse, GetWorkloadRequest, GetWorkloadResponse, HealthCheckRequest, HealthCheckResponse, IngestPodCostRequest, IngestPodCostResponse, ListAnomaliesRequest, ListAnomaliesResponse, ListAuditLogRequest, ListAuditLogResponse, ListCapacityDemandsRequest, ListCapacityDemandsResponse, ListClustersRequest, ListClustersResponse, ListPoliciesRequest, ListPoliciesResponse, ListVulnerabilitiesRequest, ListVulnerabilitiesResponse, ListWasteRecommendationsRequest, ListWasteRecommendationsResponse, RegisterClusterRequest, RegisterClusterResponse, WhoAmIRequest, WhoAmIResponse } from "./control_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -23,6 +23,20 @@ export const ControlPlaneService = {
       name: "HealthCheck",
       I: HealthCheckRequest,
       O: HealthCheckResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * WhoAmI echoes the resolved caller: who the presented credential is,
+     * its role, and (for cluster enrollment tokens) the cluster. The
+     * dashboard's token login and `kubehero auth whoami` use it to check
+     * a credential without side effects.
+     *
+     * @generated from rpc kubehero.v1.ControlPlaneService.WhoAmI
+     */
+    whoAmI: {
+      name: "WhoAmI",
+      I: WhoAmIRequest,
+      O: WhoAmIResponse,
       kind: MethodKind.Unary,
     },
     /**

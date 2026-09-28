@@ -38,6 +38,9 @@ const (
 	// ControlPlaneServiceHealthCheckProcedure is the fully-qualified name of the ControlPlaneService's
 	// HealthCheck RPC.
 	ControlPlaneServiceHealthCheckProcedure = "/kubehero.v1.ControlPlaneService/HealthCheck"
+	// ControlPlaneServiceWhoAmIProcedure is the fully-qualified name of the ControlPlaneService's
+	// WhoAmI RPC.
+	ControlPlaneServiceWhoAmIProcedure = "/kubehero.v1.ControlPlaneService/WhoAmI"
 	// ControlPlaneServiceListClustersProcedure is the fully-qualified name of the ControlPlaneService's
 	// ListClusters RPC.
 	ControlPlaneServiceListClustersProcedure = "/kubehero.v1.ControlPlaneService/ListClusters"
@@ -86,6 +89,11 @@ const (
 type ControlPlaneServiceClient interface {
 	// Liveness + version probe.
 	HealthCheck(context.Context, *connect.Request[v1.HealthCheckRequest]) (*connect.Response[v1.HealthCheckResponse], error)
+	// WhoAmI echoes the resolved caller: who the presented credential is,
+	// its role, and (for cluster enrollment tokens) the cluster. The
+	// dashboard's token login and `kubehero auth whoami` use it to check
+	// a credential without side effects.
+	WhoAmI(context.Context, *connect.Request[v1.WhoAmIRequest]) (*connect.Response[v1.WhoAmIResponse], error)
 	// Fleet view.
 	ListClusters(context.Context, *connect.Request[v1.ListClustersRequest]) (*connect.Response[v1.ListClustersResponse], error)
 	// Register a new cluster. Server generates a UUID + a 32-byte enrollment
@@ -152,6 +160,12 @@ func NewControlPlaneServiceClient(httpClient connect.HTTPClient, baseURL string,
 			httpClient,
 			baseURL+ControlPlaneServiceHealthCheckProcedure,
 			connect.WithSchema(controlPlaneServiceMethods.ByName("HealthCheck")),
+			connect.WithClientOptions(opts...),
+		),
+		whoAmI: connect.NewClient[v1.WhoAmIRequest, v1.WhoAmIResponse](
+			httpClient,
+			baseURL+ControlPlaneServiceWhoAmIProcedure,
+			connect.WithSchema(controlPlaneServiceMethods.ByName("WhoAmI")),
 			connect.WithClientOptions(opts...),
 		),
 		listClusters: connect.NewClient[v1.ListClustersRequest, v1.ListClustersResponse](
@@ -244,6 +258,7 @@ func NewControlPlaneServiceClient(httpClient connect.HTTPClient, baseURL string,
 // controlPlaneServiceClient implements ControlPlaneServiceClient.
 type controlPlaneServiceClient struct {
 	healthCheck              *connect.Client[v1.HealthCheckRequest, v1.HealthCheckResponse]
+	whoAmI                   *connect.Client[v1.WhoAmIRequest, v1.WhoAmIResponse]
 	listClusters             *connect.Client[v1.ListClustersRequest, v1.ListClustersResponse]
 	registerCluster          *connect.Client[v1.RegisterClusterRequest, v1.RegisterClusterResponse]
 	listAuditLog             *connect.Client[v1.ListAuditLogRequest, v1.ListAuditLogResponse]
@@ -263,6 +278,11 @@ type controlPlaneServiceClient struct {
 // HealthCheck calls kubehero.v1.ControlPlaneService.HealthCheck.
 func (c *controlPlaneServiceClient) HealthCheck(ctx context.Context, req *connect.Request[v1.HealthCheckRequest]) (*connect.Response[v1.HealthCheckResponse], error) {
 	return c.healthCheck.CallUnary(ctx, req)
+}
+
+// WhoAmI calls kubehero.v1.ControlPlaneService.WhoAmI.
+func (c *controlPlaneServiceClient) WhoAmI(ctx context.Context, req *connect.Request[v1.WhoAmIRequest]) (*connect.Response[v1.WhoAmIResponse], error) {
+	return c.whoAmI.CallUnary(ctx, req)
 }
 
 // ListClusters calls kubehero.v1.ControlPlaneService.ListClusters.
@@ -339,6 +359,11 @@ func (c *controlPlaneServiceClient) IngestPodCost(ctx context.Context, req *conn
 type ControlPlaneServiceHandler interface {
 	// Liveness + version probe.
 	HealthCheck(context.Context, *connect.Request[v1.HealthCheckRequest]) (*connect.Response[v1.HealthCheckResponse], error)
+	// WhoAmI echoes the resolved caller: who the presented credential is,
+	// its role, and (for cluster enrollment tokens) the cluster. The
+	// dashboard's token login and `kubehero auth whoami` use it to check
+	// a credential without side effects.
+	WhoAmI(context.Context, *connect.Request[v1.WhoAmIRequest]) (*connect.Response[v1.WhoAmIResponse], error)
 	// Fleet view.
 	ListClusters(context.Context, *connect.Request[v1.ListClustersRequest]) (*connect.Response[v1.ListClustersResponse], error)
 	// Register a new cluster. Server generates a UUID + a 32-byte enrollment
@@ -401,6 +426,12 @@ func NewControlPlaneServiceHandler(svc ControlPlaneServiceHandler, opts ...conne
 		ControlPlaneServiceHealthCheckProcedure,
 		svc.HealthCheck,
 		connect.WithSchema(controlPlaneServiceMethods.ByName("HealthCheck")),
+		connect.WithHandlerOptions(opts...),
+	)
+	controlPlaneServiceWhoAmIHandler := connect.NewUnaryHandler(
+		ControlPlaneServiceWhoAmIProcedure,
+		svc.WhoAmI,
+		connect.WithSchema(controlPlaneServiceMethods.ByName("WhoAmI")),
 		connect.WithHandlerOptions(opts...),
 	)
 	controlPlaneServiceListClustersHandler := connect.NewUnaryHandler(
@@ -491,6 +522,8 @@ func NewControlPlaneServiceHandler(svc ControlPlaneServiceHandler, opts ...conne
 		switch r.URL.Path {
 		case ControlPlaneServiceHealthCheckProcedure:
 			controlPlaneServiceHealthCheckHandler.ServeHTTP(w, r)
+		case ControlPlaneServiceWhoAmIProcedure:
+			controlPlaneServiceWhoAmIHandler.ServeHTTP(w, r)
 		case ControlPlaneServiceListClustersProcedure:
 			controlPlaneServiceListClustersHandler.ServeHTTP(w, r)
 		case ControlPlaneServiceRegisterClusterProcedure:
@@ -530,6 +563,10 @@ type UnimplementedControlPlaneServiceHandler struct{}
 
 func (UnimplementedControlPlaneServiceHandler) HealthCheck(context.Context, *connect.Request[v1.HealthCheckRequest]) (*connect.Response[v1.HealthCheckResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kubehero.v1.ControlPlaneService.HealthCheck is not implemented"))
+}
+
+func (UnimplementedControlPlaneServiceHandler) WhoAmI(context.Context, *connect.Request[v1.WhoAmIRequest]) (*connect.Response[v1.WhoAmIResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kubehero.v1.ControlPlaneService.WhoAmI is not implemented"))
 }
 
 func (UnimplementedControlPlaneServiceHandler) ListClusters(context.Context, *connect.Request[v1.ListClustersRequest]) (*connect.Response[v1.ListClustersResponse], error) {

@@ -240,6 +240,7 @@ func serve(parent context.Context, addr string) error {
 		// 1h TTL with auto-refresh on kid miss handles key rotation.
 		authCfg.JWKS = auth.NewJWKSCache(authCfg.OIDCIssuer)
 	}
+	rpcOpts.AuthRequired = !authCfg.AllowAnonymous
 	interceptors := connect.WithInterceptors(auth.NewInterceptor(authCfg))
 	path, handler := kuberov1connect.NewControlPlaneServiceHandler(rpc.New(rpcOpts), interceptors)
 	mux.Handle(path, handler)
