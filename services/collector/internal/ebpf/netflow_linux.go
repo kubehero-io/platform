@@ -140,13 +140,13 @@ func (nf *netflow) run(ctx context.Context) {
 	for {
 		select {
 		case <-t.C:
-			nf.flush(ctx)
+			guard(nf.log, "netflow", func() { nf.flush(ctx) })
 		case <-ctx.Done():
 			// Stop counting, then ship the final partial window with a
 			// deadline of its own (ctx is already cancelled).
 			nf.detach()
 			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalFlushTimeout)
-			nf.flush(fctx)
+			guard(nf.log, "netflow", func() { nf.flush(fctx) })
 			cancel()
 			nf.closeObjects()
 			nf.log.Info("ebpf netflow detached")

@@ -173,11 +173,11 @@ func (p *profiler) run(ctx context.Context) {
 	for {
 		select {
 		case <-t.C:
-			p.flush(ctx)
+			guard(p.log, "profiler", func() { p.flush(ctx) })
 		case <-ctx.Done():
 			p.detach()
 			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalFlushTimeout)
-			p.flush(fctx)
+			guard(p.log, "profiler", func() { p.flush(fctx) })
 			cancel()
 			_ = p.objs.Close()
 			p.log.Info("ebpf profiler detached")
@@ -232,11 +232,15 @@ func (p *profiler) flush(ctx context.Context) {
 			"kept", len(keys), "dropped", capped)
 	}
 
+	// Clear the idle stack map even if symbolization below fails: stale
+	// buckets would make the next window's new stacks collide.
+	defer func() {
+		if err := clearStackMap(stacks); err != nil {
+			counters.drainErrors.Add(1)
+			p.log.Warn("ebpf profiler: clearing stack map failed", "err", err)
+		}
+	}()
 	profiles := p.build(keys, vals, stacks, start, end.Sub(start))
-	if err := clearStackMap(stacks); err != nil {
-		counters.drainErrors.Add(1)
-		p.log.Warn("ebpf profiler: clearing stack map failed", "err", err)
-	}
 
 	emitted := 0
 	for _, batch := range batchProfiles(profiles, profileEmitSamples) {

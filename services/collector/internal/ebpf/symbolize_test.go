@@ -165,6 +165,24 @@ func TestSymbolizerRefusesUnsafeFiles(t *testing.T) {
 	}
 }
 
+// A JIT process that writes no perf map, and a JIT address in a
+// process whose maps are unreadable: unknown frames, never a panic.
+func TestSymbolizerJITWithoutPerfMap(t *testing.T) {
+	fp := newFakeProc(t)
+	fp.write("5/maps", "7f0000000000-7f0000010000 rwxp 00000000 00:00 0 \n")
+	s := newSymbolizer(fp.root, discardLog)
+	for drain := 0; drain < 2; drain++ { // second drain hits the negative cache
+		s.beginDrain()
+		if got := s.userFrames(5, []uint64{0x7f0000000100, 0x7f0000000200}); !slices.Equal(got, []string{unknownFrame, unknownFrame}) {
+			t.Fatalf("drain %d: %q", drain, got)
+		}
+	}
+	var nilTable *symTable
+	if _, ok := nilTable.lookup(1); ok || nilTable.len() != 0 {
+		t.Error("nil table must find nothing")
+	}
+}
+
 func mustRead(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

@@ -37,7 +37,12 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 EOF
 )"
-tag="kubehero-bpf-builder:$(printf '%s' "${dockerfile}" | shasum -a 256 | cut -c1-12)"
+if command -v sha256sum >/dev/null 2>&1; then
+	sha256() { sha256sum; }
+else
+	sha256() { shasum -a 256; }
+fi
+tag="kubehero-bpf-builder:$(printf '%s' "${dockerfile}" | sha256 | cut -c1-12)"
 if ! docker image inspect "${tag}" >/dev/null 2>&1; then
 	echo "gen.sh: building ${tag}" >&2
 	printf '%s\n' "${dockerfile}" | docker build -q -t "${tag}" - >/dev/null

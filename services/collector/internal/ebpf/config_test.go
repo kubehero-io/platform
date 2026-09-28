@@ -116,3 +116,16 @@ func TestStatsAndDeltas(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardRecovers(t *testing.T) {
+	before := Stats().DrainErrors
+	ran := false
+	guard(discardLog, "test", func() { ran = true })
+	guard(discardLog, "test", func() { panic("boom") })
+	if !ran {
+		t.Fatal("guard must run fn")
+	}
+	if d := Stats().DrainErrors - before; d != 1 {
+		t.Fatalf("a recovered panic must count one drain error, got %d", d)
+	}
+}

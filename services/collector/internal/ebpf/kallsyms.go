@@ -34,8 +34,12 @@ type symTable struct {
 // table was built would resolve to whatever symbol sits last below it.
 const maxUnsizedSpan = 1 << 20
 
-// lookup returns the symbol containing addr.
+// lookup returns the symbol containing addr. A nil table (a binary or
+// process without symbols) finds nothing.
 func (t *symTable) lookup(addr uint64) (string, bool) {
+	if t == nil {
+		return "", false
+	}
 	n := len(t.addrs)
 	i := sort.Search(n, func(i int) bool { return t.addrs[i] > addr }) - 1
 	if i < 0 {
@@ -51,7 +55,12 @@ func (t *symTable) lookup(addr uint64) (string, bool) {
 	return t.blob[t.offs[i]:t.offs[i+1]], true
 }
 
-func (t *symTable) len() int { return len(t.addrs) }
+func (t *symTable) len() int {
+	if t == nil {
+		return 0
+	}
+	return len(t.addrs)
+}
 
 // symbol is a builder-side entry; rank breaks ties between aliases at the
 // same address (lower wins).

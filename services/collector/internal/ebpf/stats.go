@@ -3,7 +3,12 @@
 
 package ebpf
 
-import "sync/atomic"
+import (
+	"fmt"
+	"log/slog"
+	"runtime/debug"
+	"sync/atomic"
+)
 
 // Counters is a snapshot of the kernel telemetry counters for the
 // collector's /metrics endpoint. Counts are cumulative for the life of
@@ -93,4 +98,18 @@ func (d *deltaCounter) delta(total uint64) uint64 {
 	n := total - d.last
 	d.last = total
 	return n
+}
+
+// guard runs one drain. The drains parse untrusted input (binaries from
+// every container, procfs), so a bug there must cost one window of
+// telemetry, not the node agent: panics are logged with their stack and
+// counted as drain errors.
+func guard(log *slog.Logger, what string, fn func()) {
+	defer func() {
+		if p := recover(); p != nil {
+			counters.drainErrors.Add(1)
+			log.Error("ebpf: drain panicked; window dropped", "drain", what, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+		}
+	}()
+	fn()
 }
