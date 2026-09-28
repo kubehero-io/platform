@@ -9,9 +9,9 @@ import (
 )
 
 // Demo returns a realistic-looking set of series demonstrating the
-// chargeback labels. Used until eBPF probes populate real values.
-// The shape exactly matches what production emits — only the numbers
-// are synthetic.
+// chargeback labels (serve --demo, for dashboards without a cluster).
+// The shape matches what the cost scanner emits — only the numbers are
+// synthetic, and every series carries source="demo".
 func Demo() []Series {
 	now := float64(time.Now().Unix())
 	teams := []string{"ml-inference", "retrieval", "data", "edge", "platform"}
@@ -47,6 +47,8 @@ func Demo() []Series {
 				"cloud":       p.cloud,
 				"region":      p.region,
 				"cluster":     p.cloud + "-" + p.region,
+				// Synthetic data is always labelled as such.
+				"source": "demo",
 			}
 			if p.gpuKind != "" {
 				labels["gpu_kind"] = p.gpuKind

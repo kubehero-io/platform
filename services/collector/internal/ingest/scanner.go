@@ -1,440 +1,522 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) KubeHero contributors
 
-// Package ingest is the collector's data plane. It scans the Kubernetes
-// API for running Pods every `interval`, attributes a cost per Pod from
-// max(resource requests, measured usage) × the node's hourly rate, and
-// ships the batch to the control-plane via Connect-RPC.
+// Package ingest is the collector's cost pipeline. Every scan (5s by
+// default) it prices the running pods on THIS node and the node itself,
+// and hands one IngestPodCostRequest to the ship queue.
 //
 // Architectural notes:
 //
-//   - Measured utilisation comes from the kubelet Summary API, fetched
-//     through the API-server node proxy (see internal/kubeletstats).
-//     One summary call per node per scan. When a node's stats are
-//     unavailable (RBAC, Windows kubelet) we degrade to a pure
-//     request-based estimate for that node's pods — never crash.
-//     eBPF probes will later sharpen the same numbers in-place.
+//   - Node locality is the correctness rule. The collector runs as a
+//     DaemonSet; each instance reports only the pods bound to its own
+//     node (a spec.nodeName-scoped informer, see internal/kube) and
+//     fetches only its own kubelet summary. A collector that reported
+//     every pod would make an N-node cluster report N× its real cost.
+//     Only when NODE_NAME is unset (local development against a
+//     kubeconfig) does one scanner price every node — main.go warns
+//     loudly, because that mode double-counts if run as a DaemonSet.
 //
-//   - We call `Pods("").List()` per scan rather than a long-running
-//     informer. Cost is proportional to number of pods, not change
-//     rate; for a 5s tick on a 200-pod cluster this is one HTTP round
-//     trip every 5s, well under the kube-apiserver's load budget.
+//   - A pod's billable share is max(requests, measured usage) per
+//     dimension (packages/cost-model.UtilizationBlend): requests floor
+//     the bill because the scheduler reserved that capacity, measured
+//     usage above requests bills burstable overage. When the kubelet
+//     summary is unavailable we degrade to requests — never crash.
 //
-//   - Node SKU is read from a node annotation set by the cloud's
-//     node-bootstrap script. We fall back to the node's instance-type
-//     label (well-known per cloud) when the annotation is missing.
+//   - The $ math is packages/cost-model, split CPU / RAM / GPU, so the
+//     collector, control plane and CLI price a pod identically. The
+//     node's hourly price comes from the kubehero.io/node-hourly-usd
+//     annotation, else the pricing engine (1h cache), else an estimate
+//     (see pricing.go), and is recorded with its source.
 //
-//   - The $/sec math itself is packages/cost-model — the scanner only
-//     adapts kube objects into that package's inputs so the collector,
-//     control-plane and CLI all price a pod identically.
-
+//   - Recoverable cost is the priced unused reservation:
+//     (requested − measured, floored at 0) per dimension through the
+//     same CPU/RAM rates, i.e. what rightsizing requests down to observed
+//     usage would free. It is only emitted with a measurement; GPUs are
+//     excluded without accelerator utilisation telemetry.
+//
+//   - Spend accounting is rate × interval: each sample carries the wall
+//     seconds since that pod's previous sample (first sample: the scan
+//     interval, or less for a pod that started within it), so a slow or
+//     stalled scan neither loses nor double-counts time. Intervals are
+//     capped at maxInterval to keep a clock jump or a long process
+//     freeze from inventing spend.
+//
+//   - Idle cost is the node's price minus what its pods were billed,
+//     floored at 0 — the denominator the control plane shares out.
 package ingest
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
+	"hash/fnv"
 	"log/slog"
-	"net/http"
-	"strings"
+	"math"
+	"sort"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/apimachinery/pkg/types"
 
 	costmodel "github.com/kubehero-io/platform/packages/cost-model"
+	kuberov1 "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1"
+	"github.com/kubehero-io/platform/services/collector/internal/kube"
 	"github.com/kubehero-io/platform/services/collector/internal/kubeletstats"
+	"github.com/kubehero-io/platform/services/collector/internal/metrics"
 )
 
-// Config carries every knob the scanner needs. Populated from env in
-// main.go.
-type Config struct {
-	// ControlPlaneURL is the cp's HTTP base. Empty disables emit.
-	ControlPlaneURL string
-	// Token is the bearer the cp accepts (member+ role).
-	Token string
-	// ClusterID — typically a slug like "eks-use1-prod" — gets stamped
-	// on every sample so the cp knows which cluster owns the row.
-	ClusterID string
-	// Interval between scans. Defaults to 5s; faster than that
-	// thrashes the apiserver, slower drops accuracy under bursty
-	// scaling.
-	Interval time.Duration
-	// Logger is taken from the parent process.
-	Logger *slog.Logger
+const (
+	// maxInterval bounds how much wall time one sample may claim.
+	maxInterval = 5 * time.Minute
+	// labelResend re-sends a pod's labels even when unchanged, so
+	// pod_metadata stays fresh (it has a TTL) and a batch lost during an
+	// outage doesn't lose a pod's labels for its whole life.
+	labelResend = 6 * time.Hour
+	// maxLabels bounds the labels map per sample.
+	maxLabels = 64
+)
+
+// Inventory is what the scanner reads from the kube cache.
+type Inventory interface {
+	Pods() []*corev1.Pod
+	Node(name string) *corev1.Node
+	Nodes() []*corev1.Node
 }
 
-// Run blocks until ctx is cancelled. Each tick: list pods, attribute
-// cost, ship a batch.
-func Run(ctx context.Context, cfg Config) error {
-	log := cfg.Logger
-	if log == nil {
-		log = slog.Default()
-	}
+// Owners resolves pods to workloads.
+type Owners interface {
+	Resolve(ctx context.Context, p *corev1.Pod) kube.Workload
+}
+
+// Config carries the scanner's knobs.
+type Config struct {
+	ClusterID string
+	// NodeName scopes the scan to one node; "" prices every node (dev).
+	NodeName string
+	// Interval between scans. Defaults to 5s.
+	Interval time.Duration
+	Logger   *slog.Logger
+}
+
+// Scanner prices pods and nodes.
+type Scanner struct {
+	cfg    Config
+	inv    Inventory
+	owners Owners
+	stats  kubeletstats.Provider
+	pricer *Pricer
+	emit   func(*kuberov1.IngestPodCostRequest)
+	log    *slog.Logger
+
+	lastPod     map[string]time.Time // pod UID → last sample
+	lastNode    map[string]time.Time // node name → last sample
+	labelsSent  map[types.UID]labelState
+	warnedNodes map[string]bool
+
+	series atomic.Pointer[[]metrics.Series]
+}
+
+type labelState struct {
+	hash   uint64
+	sentAt time.Time
+}
+
+// New builds a Scanner. emit receives one request per scan (nil: the
+// scan result is only logged — a collector without a control plane).
+func New(cfg Config, inv Inventory, owners Owners, stats kubeletstats.Provider, pricer *Pricer, emit func(*kuberov1.IngestPodCostRequest)) *Scanner {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Second
 	}
-	if cfg.ClusterID == "" {
-		log.Warn("CLUSTER_ID unset — samples will be dropped server-side")
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
 	}
-
-	k8s, err := kubeClient()
-	if err != nil {
-		return fmt.Errorf("kube client: %w", err)
+	if pricer == nil {
+		pricer = NewPricer(nil, cfg.Logger)
 	}
+	return &Scanner{
+		cfg: cfg, inv: inv, owners: owners, stats: stats, pricer: pricer, emit: emit,
+		log:         cfg.Logger,
+		lastPod:     map[string]time.Time{},
+		lastNode:    map[string]time.Time{},
+		labelsSent:  map[types.UID]labelState{},
+		warnedNodes: map[string]bool{},
+	}
+}
 
-	httpc := &http.Client{Timeout: 8 * time.Second}
-	st := newScanState(kubeletstats.New(k8s))
-
-	tick := time.NewTicker(cfg.Interval)
-	defer tick.Stop()
-
-	// Run immediately + at every tick.
-	scan(ctx, log, k8s, httpc, cfg, st)
+// Run scans immediately and then every interval until ctx ends.
+func (s *Scanner) Run(ctx context.Context) {
+	t := time.NewTicker(s.cfg.Interval)
+	defer t.Stop()
 	for {
+		s.tick(ctx)
 		select {
 		case <-ctx.Done():
-			return nil
-		case <-tick.C:
-			scan(ctx, log, k8s, httpc, cfg, st)
+			return
+		case <-t.C:
 		}
 	}
 }
 
-// scanState carries the pieces that persist across ticks: the kubelet
-// stats provider and the per-node "already warned" set that keeps a
-// permanently broken node (RBAC gap, Windows kubelet) from spamming a
-// warn line every 5 seconds.
-type scanState struct {
-	usage       kubeletstats.Provider
-	warnedNodes map[string]bool
-}
-
-func newScanState(usage kubeletstats.Provider) *scanState {
-	return &scanState{usage: usage, warnedNodes: map[string]bool{}}
-}
-
-// usageForNodes fetches measured pod utilisation, one summary call per
-// node per scan. A failing node logs a warn once, then degrades that
-// node's pods to request-based estimation until stats recover — this
-// path must never take the DaemonSet down.
-func (st *scanState) usageForNodes(ctx context.Context, log *slog.Logger, nodes []string) map[string]map[kubeletstats.PodKey]kubeletstats.Usage {
-	out := make(map[string]map[kubeletstats.PodKey]kubeletstats.Usage, len(nodes))
-	for _, node := range nodes {
-		u, err := st.usage.PodUsage(ctx, node)
-		if err != nil {
-			if !st.warnedNodes[node] {
-				st.warnedNodes[node] = true
-				log.Warn("kubelet stats unavailable — falling back to request-based cost", "node", node, "err", err)
-			}
-			continue
-		}
-		if st.warnedNodes[node] {
-			delete(st.warnedNodes, node)
-			log.Info("kubelet stats recovered", "node", node)
-		}
-		out[node] = u
-	}
-	return out
-}
-
-func scan(ctx context.Context, log *slog.Logger, k8s *kubernetes.Clientset, httpc *http.Client, cfg Config, st *scanState) {
-	// One round-trip listing every pod across every namespace. The
-	// apiserver caches this; we're light on it.
-	pods, err := k8s.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		log.Warn("pod list failed", "err", err)
+func (s *Scanner) tick(ctx context.Context) {
+	start := time.Now()
+	req := s.Scan(ctx, start)
+	metrics.ScanDuration.With("cost").Set(time.Since(start).Seconds())
+	if req == nil {
 		return
 	}
-	if len(pods.Items) == 0 {
+	if s.emit == nil {
+		s.log.Debug("cost scan complete (no control plane wired)", "pods", len(req.Samples), "nodes", len(req.Nodes))
 		return
 	}
-
-	// Pre-fetch nodes once per scan and index by name — every Pod
-	// needs its node's labels for SKU + region + nodepool attribution.
-	nodeIndex := map[string]*corev1.Node{}
-	if nodes, err := k8s.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); err == nil {
-		for i := range nodes.Items {
-			nodeIndex[nodes.Items[i].Name] = &nodes.Items[i]
-		}
-	}
-
-	// One kubelet summary per node hosting a running pod — measured
-	// usage sharpens the bill; missing stats degrade per-node.
-	nodeSet := map[string]bool{}
-	for i := range pods.Items {
-		p := &pods.Items[i]
-		if p.Status.Phase == corev1.PodRunning && p.Spec.NodeName != "" {
-			nodeSet[p.Spec.NodeName] = true
-		}
-	}
-	nodeNames := make([]string, 0, len(nodeSet))
-	for n := range nodeSet {
-		nodeNames = append(nodeNames, n)
-	}
-	usageByNode := st.usageForNodes(ctx, log, nodeNames)
-
-	now := time.Now().UnixMilli()
-	samples := make([]map[string]any, 0, len(pods.Items))
-	for i := range pods.Items {
-		p := &pods.Items[i]
-		if p.Status.Phase != corev1.PodRunning {
-			continue
-		}
-		var measured costmodel.PodShare
-		measuredOK := false
-		if u, ok := usageByNode[p.Spec.NodeName][kubeletstats.PodKey{Namespace: p.Namespace, Name: p.Name}]; ok {
-			measured = costmodel.PodShare{CPUMillis: u.CPUMillicores, MemBytes: u.MemoryWorkingSetBytes}
-			measuredOK = true
-		}
-		s := attributePod(p, nodeIndex[p.Spec.NodeName], measured, measuredOK)
-		s["tsUnixMs"] = now
-		s["cluster"] = cfg.ClusterID
-		samples = append(samples, s)
-	}
-	if len(samples) == 0 {
-		return
-	}
-
-	if cfg.ControlPlaneURL == "" {
-		// Local dev / kind-demo without a control plane — log the
-		// count so operators can see ingest is firing without a sink.
-		log.Info("scan complete (no cp wired)", "samples", len(samples))
-		return
-	}
-
-	if err := emit(ctx, httpc, cfg, samples); err != nil {
-		log.Warn("emit failed", "err", err, "samples", len(samples))
-		return
-	}
-	log.Info("ingested", "samples", len(samples))
+	s.emit(req)
 }
 
-// attributePod computes a per-second cost via packages/cost-model. The
-// billable share is max(requests, measured usage) per dimension —
-// requests floor the bill because the scheduler reserved that capacity,
-// measured usage above requests bills burstable overage. When kubelet
-// stats were unavailable for the node (measuredOK=false) we fall back
-// to a pure request-based estimate.
-//
-// NOTE(wire): PodCostSample has no usage fields yet, and buf isn't
-// available here to add them, so measured usage only shapes costUsdSec;
-// cpuMillicores/memBytes stay the request snapshot and the wire format
-// is unchanged. When the proto grows cpu_usage_cores/memory_usage_bytes
-// the measured numbers should be emitted alongside.
-func attributePod(p *corev1.Pod, n *corev1.Node, measured costmodel.PodShare, measuredOK bool) map[string]any {
-	cpuMilli, memBytes := podRequests(p)
-	requested := costmodel.PodShare{CPUMillis: int64(cpuMilli), MemBytes: int64(memBytes)}
-	billable := requested
-	if measuredOK {
-		billable = costmodel.UtilizationBlend(requested, measured)
-	}
-	costSec := costmodel.PodCostPerSecond(nodePrice(n), billable)
-
-	team := p.Labels["kubehero.io/team"]
-	if team == "" {
-		team = p.Namespace
-	}
-	cc := p.Labels["kubehero.io/cost-center"]
-
-	out := map[string]any{
-		"namespace":     p.Namespace,
-		"pod":           p.Name,
-		"team":          team,
-		"costCenter":    cc,
-		"node":          p.Spec.NodeName,
-		"cpuMillicores": cpuMilli,
-		"memBytes":      memBytes,
-		"costUsdSec":    costSec,
-	}
-	if n != nil {
-		out["nodepool"] = nodepoolOf(n)
-		out["region"] = n.Labels["topology.kubernetes.io/region"]
-		out["sku"] = nodeSKU(n)
-		out["lifecycle"] = nodeLifecycle(n)
-	}
-	return out
-}
-
-// nodePrice adapts a corev1.Node into the cost-model's input. A nil or
-// allocatable-less node yields the zero NodePrice, which cost-model
-// prices at $0 — honest for a pod we can't place on priced hardware.
-func nodePrice(n *corev1.Node) costmodel.NodePrice {
-	if n == nil {
-		return costmodel.NodePrice{}
-	}
-	return costmodel.NodePrice{
-		PerHourUSD: nodeHourlyUSD(n),
-		CPUMillis:  n.Status.Allocatable.Cpu().MilliValue(),
-		MemBytes:   n.Status.Allocatable.Memory().Value(),
-	}
-}
-
-func podRequests(p *corev1.Pod) (uint32, uint64) {
-	var cpu, mem int64
-	for _, c := range p.Spec.Containers {
-		if v, ok := c.Resources.Requests[corev1.ResourceCPU]; ok {
-			cpu += v.MilliValue()
-		}
-		if v, ok := c.Resources.Requests[corev1.ResourceMemory]; ok {
-			mem += v.Value()
-		}
-	}
-	if cpu < 0 {
-		cpu = 0
-	}
-	if mem < 0 {
-		mem = 0
-	}
-	return uint32(cpu), uint64(mem)
-}
-
-// nodeHourlyUSD reads the per-node hourly price from a kubehero
-// annotation set during cluster registration, or falls back to a
-// rough estimate scaled to the node's allocatable. Real production
-// replaces this with a price lookup against the pricing-engine.
-func nodeHourlyUSD(n *corev1.Node) float64 {
-	if n == nil {
-		return 0.10 // safe-but-cheap fallback
-	}
-	if a, ok := n.Annotations["kubehero.io/node-hourly-usd"]; ok {
-		if v, err := parseFloat(a); err == nil && v > 0 {
-			return v
-		}
-	}
-	cores := nodeAllocatableCPU(n)
-	gib := nodeAllocatableMemGiB(n)
-	if cores < 1 {
-		cores = 1
-	}
-	if gib < 1 {
-		gib = 1
-	}
-	// Rough $0.04/core/hr + $0.005/GiB/hr — close to AWS m5 family.
-	return float64(cores)*0.04 + float64(gib)*0.005
-}
-
-func nodeAllocatableCPU(n *corev1.Node) float32 {
-	if n == nil {
-		return 0
-	}
-	q, ok := n.Status.Allocatable[corev1.ResourceCPU]
-	if !ok {
-		return 0
-	}
-	return float32(q.MilliValue()) / 1000
-}
-
-func nodeAllocatableMemGiB(n *corev1.Node) float32 {
-	if n == nil {
-		return 0
-	}
-	q, ok := n.Status.Allocatable[corev1.ResourceMemory]
-	if !ok {
-		return 0
-	}
-	return float32(q.Value()) / float32(1024*1024*1024)
-}
-
-// nodepoolOf reads the cloud-vendor-specific nodepool label, falling
-// back to our canonical kubehero.io/nodepool label.
-func nodepoolOf(n *corev1.Node) string {
-	if n == nil {
-		return ""
-	}
-	for _, k := range []string{
-		"kubehero.io/nodepool",
-		"eks.amazonaws.com/nodegroup",
-		"cloud.google.com/gke-nodepool",
-		"agentpool",
-		"karpenter.sh/nodepool",
-	} {
-		if v := n.Labels[k]; v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func nodeSKU(n *corev1.Node) string {
-	if n == nil {
-		return ""
-	}
-	if v := n.Labels["node.kubernetes.io/instance-type"]; v != "" {
-		return v
-	}
-	return n.Labels["beta.kubernetes.io/instance-type"]
-}
-
-func nodeLifecycle(n *corev1.Node) string {
-	if n == nil {
-		return "on-demand"
-	}
-	if v := n.Labels["karpenter.sh/capacity-type"]; v != "" {
-		return v
-	}
-	if v := n.Labels["eks.amazonaws.com/capacityType"]; v != "" {
-		return strings.ToLower(v)
-	}
-	if v := n.Labels["cloud.google.com/gke-spot"]; v == "true" {
-		return "spot"
-	}
-	return "on-demand"
-}
-
-func parseFloat(s string) (float64, error) {
-	var v float64
-	_, err := fmt.Sscanf(s, "%f", &v)
-	return v, err
-}
-
-// emit POSTs the batch to /kubehero.v1.ControlPlaneService/IngestPodCost.
-// Plain HTTP+JSON wire — Connect-RPC accepts that natively, and we
-// don't pull the generated Connect-Go stubs into the collector to
-// keep the binary lean.
-func emit(ctx context.Context, httpc *http.Client, cfg Config, samples []map[string]any) error {
-	body, _ := json.Marshal(map[string]any{
-		"clusterId": cfg.ClusterID,
-		"samples":   samples,
-	})
-	url := strings.TrimRight(cfg.ControlPlaneURL, "/") +
-		"/kubehero.v1.ControlPlaneService/IngestPodCost"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Connect-Protocol-Version", "1")
-	if cfg.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.Token)
-	}
-	resp, err := httpc.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("http %d", resp.StatusCode)
+// Series returns the chargeback series of the last scan for /metrics.
+func (s *Scanner) Series() []metrics.Series {
+	if p := s.series.Load(); p != nil {
+		return *p
 	}
 	return nil
 }
 
-// kubeClient picks in-cluster config first (the DaemonSet path), then
-// falls back to KUBECONFIG (local dev). This is the canonical
-// client-go pattern.
-func kubeClient() (*kubernetes.Clientset, error) {
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		// Fall back to KUBECONFIG / ~/.kube/config for local dev.
-		cfg, err = clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
-		if err != nil {
-			return nil, err
+// Scan prices one tick. It returns nil when there is nothing to report
+// (e.g. the node object isn't cached yet).
+func (s *Scanner) Scan(ctx context.Context, now time.Time) *kuberov1.IngestPodCostRequest {
+	byNode := map[string][]*corev1.Pod{}
+	for _, p := range s.inv.Pods() {
+		if p.Status.Phase != corev1.PodRunning || p.Spec.NodeName == "" {
+			continue
+		}
+		// Defence in depth: the informer is node-scoped, but a pod is
+		// only ever priced by the collector on its own node.
+		if s.cfg.NodeName != "" && p.Spec.NodeName != s.cfg.NodeName {
+			continue
+		}
+		byNode[p.Spec.NodeName] = append(byNode[p.Spec.NodeName], p)
+	}
+
+	var nodes []*corev1.Node
+	if s.cfg.NodeName != "" {
+		n := s.inv.Node(s.cfg.NodeName)
+		if n == nil {
+			metrics.ScanErrors.With("cost", "node_unknown").Inc()
+			s.warnNode(s.cfg.NodeName, "node object not in cache yet — skipping cost scan", nil)
+			return nil
+		}
+		nodes = []*corev1.Node{n}
+	} else {
+		nodes = s.inv.Nodes()
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
+
+	req := &kuberov1.IngestPodCostRequest{ClusterId: s.cfg.ClusterID}
+	var series []metrics.Series
+	seen := make(map[types.UID]bool, len(s.lastPod))
+	seenNodes := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		pods := byNode[n.Name]
+		sort.Slice(pods, func(i, j int) bool {
+			if pods[i].Namespace != pods[j].Namespace {
+				return pods[i].Namespace < pods[j].Namespace
+			}
+			return pods[i].Name < pods[j].Name
+		})
+		summary := s.summary(ctx, n.Name)
+		perHour, source := s.pricer.Price(ctx, n)
+		np := costmodel.NodePrice{
+			PerHourUSD: perHour,
+			CPUMillis:  kube.AllocatableCPUMillis(n),
+			MemBytes:   kube.AllocatableMemBytes(n),
+			GPUs:       kube.NodeGPUs(n),
+		}
+		pl := placementOf(n)
+
+		var sumCost float64
+		var reqCPU, reqMem int64
+		for _, p := range pods {
+			seen[p.UID] = true
+			sample, requested := s.podSample(ctx, now, p, np, pl, summary)
+			sumCost += sample.CostUsdSec
+			reqCPU += requested.CPUMillis
+			reqMem += requested.MemBytes
+			req.Samples = append(req.Samples, sample)
+			series = append(series, podSeries(s.cfg.ClusterID, sample)...)
+		}
+
+		seenNodes[n.Name] = true
+		ns := &kuberov1.NodeCostSample{
+			Node:                     n.Name,
+			TsUnixMs:                 now.UnixMilli(),
+			Nodepool:                 pl.nodepool,
+			Region:                   pl.region,
+			Zone:                     pl.zone,
+			Sku:                      pl.sku,
+			Lifecycle:                pl.lifecycle,
+			Cloud:                    pl.cloud,
+			PricePerHour:             perHour,
+			CpuAllocatableMillicores: clampU32(np.CPUMillis),
+			MemAllocatableBytes:      clampU64(np.MemBytes),
+			CpuRequestedMillicores:   clampU32(reqCPU),
+			MemRequestedBytes:        clampU64(reqMem),
+			GpuCount:                 clampU32(np.GPUs),
+			GpuKind:                  pl.gpuKind,
+			CostUsdSec:               costmodel.HourlyToPerSecond(perHour),
+			PriceSource:              source,
+			IntervalSec:              float32(s.interval(s.lastNode, n.Name, now, time.Time{}).Seconds()),
+		}
+		if summary != nil {
+			if summary.Node.HasCPU {
+				ns.CpuUsedMillicores = clampU32(summary.Node.CPUMillicores)
+			}
+			if summary.Node.HasMemory {
+				ns.MemUsedBytes = clampU64(summary.Node.MemoryWorkingSetBytes)
+			}
+		}
+		ns.IdleUsdSec = math.Max(0, ns.CostUsdSec-sumCost)
+		req.Nodes = append(req.Nodes, ns)
+		series = append(series, nodeSeries(s.cfg.ClusterID, ns))
+	}
+
+	// Forget pods and nodes that are gone so state stays bounded by
+	// what the node actually runs.
+	for uid := range s.lastPod {
+		if !seen[types.UID(uid)] {
+			delete(s.lastPod, uid)
+			delete(s.labelsSent, types.UID(uid))
 		}
 	}
-	cfg.UserAgent = "kubehero-collector/0.1"
-	return kubernetes.NewForConfig(cfg)
+	for name := range s.lastNode {
+		if !seenNodes[name] {
+			delete(s.lastNode, name)
+		}
+	}
+	metrics.PodsObserved.With().Set(float64(len(req.Samples)))
+	s.series.Store(&series)
+	if len(req.Samples) == 0 && len(req.Nodes) == 0 {
+		return nil
+	}
+	return req
+}
+
+// summary fetches the node's kubelet stats. A failing node logs a warn
+// once, then its pods degrade to request-based cost until stats
+// recover — this path must never take the DaemonSet down.
+func (s *Scanner) summary(ctx context.Context, node string) *kubeletstats.Summary {
+	if s.stats == nil {
+		return nil
+	}
+	sum, err := s.stats.Summary(ctx, node)
+	if err != nil {
+		metrics.ScanErrors.With("cost", "kubelet_stats").Inc()
+		s.warnNode(node, "kubelet stats unavailable — falling back to request-based cost", err)
+		return nil
+	}
+	if s.warnedNodes[node] {
+		delete(s.warnedNodes, node)
+		s.log.Info("kubelet stats recovered", "node", node)
+	}
+	return sum
+}
+
+func (s *Scanner) warnNode(node, msg string, err error) {
+	if s.warnedNodes[node] {
+		return
+	}
+	s.warnedNodes[node] = true
+	if err != nil {
+		s.log.Warn(msg, "node", node, "err", err)
+	} else {
+		s.log.Warn(msg, "node", node)
+	}
+}
+
+type placement struct {
+	nodepool, region, zone, sku, lifecycle, cloud, gpuKind string
+}
+
+func placementOf(n *corev1.Node) placement {
+	return placement{
+		nodepool:  kube.Nodepool(n),
+		region:    kube.Region(n),
+		zone:      kube.Zone(n),
+		sku:       kube.SKU(n),
+		lifecycle: kube.Lifecycle(n),
+		cloud:     kube.Cloud(n),
+		gpuKind:   kube.GPUKind(n),
+	}
+}
+
+func (s *Scanner) podSample(ctx context.Context, now time.Time, p *corev1.Pod, np costmodel.NodePrice, pl placement, sum *kubeletstats.Summary) (*kuberov1.PodCostSample, costmodel.PodShare) {
+	r := kube.PodRequests(p)
+	requested := costmodel.PodShare{CPUMillis: r.CPUMillis, MemBytes: r.MemBytes, GPUs: r.GPUs}
+
+	var measured costmodel.PodShare
+	measuredOK := false
+	if sum != nil {
+		if ps, ok := sum.Pods[kubeletstats.PodKey{Namespace: p.Namespace, Name: p.Name}]; ok && (ps.UID == "" || ps.UID == string(p.UID)) {
+			measured = costmodel.PodShare{CPUMillis: ps.Usage.CPUMillicores, MemBytes: ps.Usage.MemoryWorkingSetBytes}
+			measuredOK = true
+		}
+	}
+	billable := requested
+	if measuredOK {
+		billable = costmodel.UtilizationBlend(requested, measured)
+	}
+	cpuH, ramH, gpuH := costmodel.PodCostBreakdown(np, billable)
+	cpuS, ramS, gpuS := costmodel.HourlyToPerSecond(cpuH), costmodel.HourlyToPerSecond(ramH), costmodel.HourlyToPerSecond(gpuH)
+	cost := cpuS + ramS + gpuS
+
+	var recoverable float64
+	if measuredOK {
+		uc, ur, _ := costmodel.PodCostBreakdown(np, costmodel.UnusedShare(requested, measured))
+		recoverable = math.Min(costmodel.HourlyToPerSecond(uc+ur), cost)
+	}
+
+	var start time.Time
+	if p.Status.StartTime != nil {
+		start = p.Status.StartTime.Time
+	}
+	w := kube.Workload{Name: p.Name, Kind: "Pod"}
+	if s.owners != nil {
+		w = s.owners.Resolve(ctx, p)
+	}
+	sample := &kuberov1.PodCostSample{
+		Cluster:            s.cfg.ClusterID,
+		Namespace:          p.Namespace,
+		Pod:                p.Name,
+		TsUnixMs:           now.UnixMilli(),
+		Team:               kube.Team(p),
+		CostCenter:         kube.CostCenter(p),
+		Nodepool:           pl.nodepool,
+		Node:               p.Spec.NodeName,
+		Region:             pl.region,
+		Sku:                pl.sku,
+		Lifecycle:          pl.lifecycle,
+		CpuMillicores:      clampU32(requested.CPUMillis),
+		MemBytes:           clampU64(requested.MemBytes),
+		CostUsdSec:         cost,
+		RecoverableUsdSec:  recoverable,
+		CpuCostUsdSec:      cpuS,
+		RamCostUsdSec:      ramS,
+		GpuCostUsdSec:      gpuS,
+		Workload:           w.Name,
+		WorkloadKind:       w.Kind,
+		Zone:               pl.zone,
+		Cloud:              pl.cloud,
+		GpuCount:           clampU32(requested.GPUs),
+		IntervalSec:        float32(s.interval(s.lastPod, string(p.UID), now, start).Seconds()),
+		CpuUsageMillicores: clampU32(measured.CPUMillis),
+		MemUsageBytes:      clampU64(measured.MemBytes),
+	}
+	if requested.GPUs > 0 {
+		sample.GpuKind = pl.gpuKind
+	}
+	sample.Labels = s.labelsToSend(p, now)
+	return sample, requested
+}
+
+// interval returns the wall time a sample for key covers and records
+// now as key's last sample. started, when set, caps a first sample at
+// the time since the pod started.
+func (s *Scanner) interval(last map[string]time.Time, key string, now, started time.Time) time.Duration {
+	d := s.cfg.Interval
+	if prev, ok := last[key]; ok {
+		d = now.Sub(prev)
+	} else if !started.IsZero() && now.After(started) && now.Sub(started) < d {
+		// A pod that started mid-interval only accrues since it started.
+		d = now.Sub(started)
+	}
+	last[key] = now
+	if d < 0 {
+		d = 0
+	}
+	return min(d, maxInterval)
+}
+
+// labelsToSend returns the pod's labels on first sight, when they
+// change, and every labelResend; nil otherwise.
+func (s *Scanner) labelsToSend(p *corev1.Pod, now time.Time) map[string]string {
+	if len(p.Labels) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(p.Labels))
+	for k := range p.Labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > maxLabels {
+		keys = keys[:maxLabels]
+	}
+	h := fnv.New64a()
+	for _, k := range keys {
+		_, _ = h.Write([]byte(k))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(p.Labels[k]))
+		_, _ = h.Write([]byte{0})
+	}
+	sum := h.Sum64()
+	prev, ok := s.labelsSent[p.UID]
+	if ok && prev.hash == sum && now.Sub(prev.sentAt) < labelResend {
+		return nil
+	}
+	s.labelsSent[p.UID] = labelState{hash: sum, sentAt: now}
+	out := make(map[string]string, len(keys))
+	for _, k := range keys {
+		out[k] = p.Labels[k]
+	}
+	return out
+}
+
+func clampU32(v int64) uint32 {
+	if v <= 0 {
+		return 0
+	}
+	if v > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(v)
+}
+
+func clampU64(v int64) uint64 {
+	if v <= 0 {
+		return 0
+	}
+	return uint64(v)
+}
+
+// ── /metrics chargeback series ────────────────────────────────────────
+
+func podSeries(cluster string, s *kuberov1.PodCostSample) []metrics.Series {
+	labels := map[string]string{
+		"namespace":   s.Namespace,
+		"pod":         s.Pod,
+		"team":        s.Team,
+		"cost_center": s.CostCenter,
+		"nodepool":    s.Nodepool,
+		"cloud":       s.Cloud,
+		"region":      s.Region,
+		"cluster":     cluster,
+		"workload":    s.Workload,
+	}
+	if s.GpuKind != "" {
+		labels["gpu_kind"] = s.GpuKind
+	}
+	return []metrics.Series{
+		{Name: "kubehero_pod_cost_usd_per_second", Labels: labels, Value: s.CostUsdSec},
+		{Name: "kubehero_pod_recoverable_usd_per_second", Labels: labels, Value: s.RecoverableUsdSec},
+		{Name: "kubehero_pod_cpu_millicores", Labels: labels, Value: float64(s.CpuUsageMillicores)},
+		{Name: "kubehero_pod_memory_bytes", Labels: labels, Value: float64(s.MemUsageBytes)},
+	}
+}
+
+func nodeSeries(cluster string, n *kuberov1.NodeCostSample) metrics.Series {
+	return metrics.Series{Name: "kubehero_node_cost_usd_per_hour", Labels: map[string]string{
+		"node":         n.Node,
+		"nodepool":     n.Nodepool,
+		"cloud":        n.Cloud,
+		"region":       n.Region,
+		"sku":          n.Sku,
+		"lifecycle":    n.Lifecycle,
+		"price_source": n.PriceSource,
+		"cluster":      cluster,
+	}, Value: n.PricePerHour}
 }
