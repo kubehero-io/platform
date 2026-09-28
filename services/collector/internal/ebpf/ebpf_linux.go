@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cilium/ebpf/rlimit"
@@ -27,6 +28,10 @@ const (
 	flowEmitBatch      = 2000
 	profileEmitSamples = 20000
 )
+
+// loops tracks the drain goroutines so tests can wait for detach and
+// the final flush after cancelling ctx.
+var loops sync.WaitGroup
 
 func start(ctx context.Context, cfg Config) error {
 	cfg, err := cfg.normalize()

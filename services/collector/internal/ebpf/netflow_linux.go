@@ -98,6 +98,7 @@ func startNetflow(ctx context.Context, cfg Config, log *slog.Logger) (err error)
 	log.Info("ebpf netflow attached",
 		"cgroup_root", cfg.CgroupRoot, "flow_map_entries", entries,
 		"retransmits", nf.rt != nil, "flush_interval", cfg.FlushInterval)
+	loops.Add(1)
 	go nf.run(ctx)
 	return nil
 }
@@ -138,6 +139,7 @@ func (nf *netflow) startRetransmits() error {
 }
 
 func (nf *netflow) run(ctx context.Context) {
+	defer loops.Done()
 	t := time.NewTicker(nf.cfg.FlushInterval)
 	defer t.Stop()
 	for {

@@ -121,6 +121,7 @@ func startProfiler(ctx context.Context, cfg Config, log *slog.Logger) (err error
 	p.windowStart = time.Now()
 	counters.profilerAttached.Store(true)
 	log.Info("ebpf profiler attached", "cpus", len(p.events), "hz", cfg.ProfileHz, "flush_interval", cfg.FlushInterval)
+	loops.Add(1)
 	go p.run(ctx)
 	return nil
 }
@@ -166,6 +167,7 @@ func openCPUSampler(cpu, hz int, prog *cebpf.Program) (*cpuEvent, error) {
 }
 
 func (p *profiler) run(ctx context.Context) {
+	defer loops.Done()
 	t := time.NewTicker(p.cfg.FlushInterval)
 	defer t.Stop()
 	for {
