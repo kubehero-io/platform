@@ -170,3 +170,16 @@ func TestRunEmits(t *testing.T) {
 		t.Fatal("sampler did not emit")
 	}
 }
+
+func TestStaticPodStatsJoinByConfigHash(t *testing.T) {
+	sum := testSummary()
+	ps := sum.Pods[kubeletstats.PodKey{Namespace: "shop", Name: "checkout-abc"}]
+	ps.UID = "confighash0123"
+	sum.Pods[kubeletstats.PodKey{Namespace: "shop", Name: "checkout-abc"}] = ps
+	p := testPod("node-a")
+	p.Annotations = map[string]string{kube.AnnotationConfigHash: "confighash0123"}
+	s := New(Config{NodeName: "node-a"}, (&inv{}).setPods(p), owners{}, &stats{sum: map[string]*kubeletstats.Summary{"node-a": sum}}, nil)
+	if req := s.Sample(context.Background(), time.Now()); len(req.GetUsage()) != 2 {
+		t.Fatalf("static pod usage rows = %d", len(req.GetUsage()))
+	}
+}

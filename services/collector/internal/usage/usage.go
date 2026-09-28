@@ -118,7 +118,7 @@ func (s *Sampler) Sample(ctx context.Context, now time.Time) *kuberov1.IngestUsa
 		node := s.inv.Node(nodeName)
 		for _, p := range byNode[nodeName] {
 			ps, ok := sum.Pods[kubeletstats.PodKey{Namespace: p.Namespace, Name: p.Name}]
-			if !ok || (ps.UID != "" && ps.UID != string(p.UID)) {
+			if !ok || (ps.UID != "" && !kube.MatchesUID(p, ps.UID)) {
 				continue
 			}
 			req.Usage = append(req.Usage, s.podRows(ctx, now, p, node, ps)...)

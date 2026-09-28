@@ -69,6 +69,29 @@ var (
 		"type", "outcome")
 
 	EBPFStatus = Default.NewGaugeVec("kubehero_collector_ebpf_enabled",
-		"1 when eBPF programs are attached for the given subsystem.",
+		"1 when eBPF programs were requested and ebpf.Start succeeded for the given subsystem.",
 		"subsystem")
+	EBPFAttached = Default.NewGaugeVec("kubehero_collector_ebpf_attached",
+		"1 while the given eBPF program is attached (from ebpf.Stats()).",
+		"program")
+	EBPFCounters = Default.NewCounterVec("kubehero_collector_ebpf_total",
+		"Cumulative eBPF pipeline counters from ebpf.Stats(): flows_emitted, samples_drained, drain_errors, map_full_events, ….",
+		"counter")
 )
+
+// PublishEBPF copies a snapshot of the ebpf package's cumulative
+// counters into the registry; call it on every scrape. Keys become label
+// values, so pass the fixed field names of ebpf.Counters only.
+func PublishEBPF(attached map[string]bool, counters map[string]uint64) {
+	for k, v := range attached {
+		g := EBPFAttached.With(k)
+		if v {
+			g.Set(1)
+		} else {
+			g.Set(0)
+		}
+	}
+	for k, v := range counters {
+		EBPFCounters.With(k).Set(float64(v))
+	}
+}

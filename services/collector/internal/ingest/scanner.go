@@ -352,7 +352,9 @@ func (s *Scanner) podSample(ctx context.Context, now time.Time, p *corev1.Pod, n
 	var measured costmodel.PodShare
 	measuredOK := false
 	if sum != nil {
-		if ps, ok := sum.Pods[kubeletstats.PodKey{Namespace: p.Namespace, Name: p.Name}]; ok && (ps.UID == "" || ps.UID == string(p.UID)) {
+		// The UID check rejects stats of a previous pod with the same
+		// name; static pods are reported under their config hash.
+		if ps, ok := sum.Pods[kubeletstats.PodKey{Namespace: p.Namespace, Name: p.Name}]; ok && (ps.UID == "" || kube.MatchesUID(p, ps.UID)) {
 			measured = costmodel.PodShare{CPUMillis: ps.Usage.CPUMillicores, MemBytes: ps.Usage.MemoryWorkingSetBytes}
 			measuredOK = true
 		}

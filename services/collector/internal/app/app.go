@@ -464,10 +464,7 @@ func (a *App) startEBPF(ctx context.Context, wg *sync.WaitGroup, owners *kube.Ow
 	if ec.Profiler {
 		metrics.EBPFStatus.With("profiler").Set(1)
 	}
-	// TODO(integration): publish ebpf.Stats() (flows/profiles emitted,
-	// drain errors, map-full events) as kubehero_collector_ebpf_* once
-	// the kernel side (feat/ebpf) lands; the stub on this branch has no
-	// Stats().
+	// ebpf.Stats() is published on scrape — see serveMetrics.
 	a.goLoop(ctx, wg, func(ctx context.Context) {
 		<-ctx.Done()
 		ecancel()
@@ -547,6 +544,16 @@ func (a *App) serveMetrics(w http.ResponseWriter, _ *http.Request) {
 		series = append(series, metrics.Demo()...)
 	}
 	metrics.WriteAll(w, series)
+	// TODO(integration): once feat/ebpf (which adds ebpf.Stats) is merged,
+	// publish its counters here, before the registry is written:
+	//
+	//	st := ebpf.Stats()
+	//	metrics.PublishEBPF(
+	//		map[string]bool{"netflow": st.NetflowAttached, "retransmits": st.RetransmitsAttached, "profiler": st.ProfilerAttached},
+	//		map[string]uint64{"flows_emitted": st.FlowsEmitted, "flow_entries_drained": st.FlowEntriesDrained,
+	//			"profiles_emitted": st.ProfilesEmitted, "samples_drained": st.SamplesDrained,
+	//			"samples_unattributed": st.SamplesUnattributed, "stacks_capped": st.StacksCapped,
+	//			"stacks_lost": st.StacksLost, "drain_errors": st.DrainErrors, "map_full_events": st.MapFullEvents})
 	metrics.Default.Write(w)
 }
 

@@ -123,7 +123,7 @@ func NewLocalCache(client kubernetes.Interface, nodeName string, log *slog.Logge
 		return nil, err
 	}
 	if err := c.pods.AddIndexers(cache.Indexers{
-		indexUID:         func(obj any) ([]string, error) { return []string{string(obj.(*corev1.Pod).UID)}, nil },
+		indexUID:         podUIDs,
 		indexContainerID: containerIDs,
 	}); err != nil {
 		return nil, err
@@ -166,8 +166,9 @@ func (c *LocalCache) Pods() []*corev1.Pod {
 	return out
 }
 
-// PodByUID finds a live pod — or one deleted in the last few minutes,
-// so log lines flushed after a pod is gone still get their labels.
+// PodByUID finds a live pod by API UID or static-pod config hash — or
+// one deleted in the last few minutes, so log lines flushed after a pod
+// is gone still get their labels.
 func (c *LocalCache) PodByUID(uid string) (*corev1.Pod, bool) {
 	if objs, err := c.pods.GetIndexer().ByIndex(indexUID, uid); err == nil && len(objs) > 0 {
 		if p, ok := objs[0].(*corev1.Pod); ok {
@@ -263,6 +264,31 @@ func (c *LocalCache) onPodDelete(obj any) {
 		}
 	}
 	c.tombstones[p.UID] = tombstone{pod: p, expires: now.Add(tombstoneTTL)}
+}
+
+// AnnotationConfigHash is set on mirror pods of static pods. The kubelet
+// names the static pod's cgroup and /var/log/pods directory after this
+// hash, not after the mirror pod's API UID.
+const AnnotationConfigHash = "kubernetes.io/config.hash"
+
+// podUIDs indexes a pod under its API UID and, for static pods, the
+// config hash the node-level artefacts use.
+func podUIDs(obj any) ([]string, error) {
+	p, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil, nil
+	}
+	keys := []string{string(p.UID)}
+	if h := p.Annotations[AnnotationConfigHash]; h != "" && h != string(p.UID) {
+		keys = append(keys, h)
+	}
+	return keys, nil
+}
+
+// MatchesUID reports whether uid (from a cgroup path or log directory)
+// identifies p: its API UID or, for a static pod, its config hash.
+func MatchesUID(p *corev1.Pod, uid string) bool {
+	return uid == string(p.UID) || (uid != "" && p.Annotations[AnnotationConfigHash] == uid)
 }
 
 func containerIDs(obj any) ([]string, error) {

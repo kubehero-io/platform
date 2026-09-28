@@ -359,3 +359,25 @@ func TestResolverInformers(t *testing.T) {
 	}
 	eventually(t, "new pod indexed", func() bool { return r.LookupIP(mustAddr("10.244.2.8")).GetKind() == "pod" })
 }
+
+// Static pods: the kubelet names cgroups and /var/log/pods directories
+// after the config hash, not the mirror pod's API UID.
+func TestStaticPodResolvesByConfigHash(t *testing.T) {
+	mirror := localPod("kube-proxy-node-a", "mirror-uid", "containerd://cafe01")
+	mirror.Annotations[AnnotationConfigHash] = "0123456789abcdef0123456789abcdef"
+	mirror.OwnerReferences = ctrl("Node", "node-a")
+	cs := fake.NewSimpleClientset(mirror, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}})
+	lc, cancel := startLocal(t, cs, "node-a")
+	defer cancel()
+	if p, ok := lc.PodByUID("0123456789abcdef0123456789abcdef"); !ok || p.Name != "kube-proxy-node-a" {
+		t.Fatalf("PodByUID(config hash) = %v, %v", p, ok)
+	}
+	r, _ := NewResolver(nil, lc, NewOwnerResolver(nil, nil))
+	ref, ok := r.LookupContainer("0123456789abcdef0123456789abcdef", "cafe01")
+	if !ok || ref.GetContainer() != "app" || ref.GetWorkload() != "kube-proxy" {
+		t.Fatalf("static pod container lookup = %+v, %v", ref, ok)
+	}
+	if ref, ok := r.LookupContainer("0123456789abcdef0123456789abcdef", ""); !ok || ref.GetPod() != "kube-proxy-node-a" {
+		t.Fatalf("static pod-level cgroup lookup = %+v, %v", ref, ok)
+	}
+}

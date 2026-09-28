@@ -201,7 +201,7 @@ func (r *Resolver) LookupContainer(podUID, containerID string) (*kuberov1.PodRef
 	podUID = strings.ReplaceAll(podUID, "_", "-")
 	containerID = StripRuntimePrefix(containerID)
 	if containerID != "" {
-		if p, name, ok := r.local.PodByContainerID(containerID); ok && (podUID == "" || string(p.UID) == podUID) {
+		if p, name, ok := r.local.PodByContainerID(containerID); ok && (podUID == "" || MatchesUID(p, podUID)) {
 			ref := PodRefFor(p, r.local.Node(p.Spec.NodeName), r.owners.Peek(p))
 			ref.Container = name
 			return ref, true
