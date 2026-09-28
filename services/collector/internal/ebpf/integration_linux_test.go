@@ -361,6 +361,102 @@ func TestNetflowLoopbackUDPAndIPv6(t *testing.T) {
 	}
 }
 
+// sendUDPWithOption sends n datagrams of size bytes from a socket that
+// carries a sticky IP-level option (level/opt/val) to a local receiver
+// on addr, returning the receiver's port.
+func sendUDPWithOption(t *testing.T, network, addr string, level, opt int, val []byte, n, size int) int {
+	t.Helper()
+	srv, err := net.ListenPacket(network, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, _, err := srv.ReadFrom(buf); err != nil {
+				return
+			}
+		}
+	}()
+	c, err := net.Dial(network, srv.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	raw, err := c.(*net.UDPConn).SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var serr error
+	if err := raw.Control(func(fd uintptr) {
+		serr = syscall.SetsockoptString(int(fd), level, opt, string(val))
+	}); err != nil || serr != nil {
+		t.Fatalf("setsockopt(%d, %d): %v %v", level, opt, err, serr)
+	}
+	for i := 0; i < n; i++ {
+		if _, err := c.Write(make([]byte, size)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return srv.LocalAddr().(*net.UDPAddr).Port
+}
+
+// TestNetflowHeaderParsing drives the BPF parser through headers longer
+// than the minimum: IPv4 options (IHL 6) and an IPv6 destination options
+// extension header. Ports must still be found, and byte counts must
+// include exactly those extra header bytes.
+func TestNetflowHeaderParsing(t *testing.T) {
+	requireRoot(t)
+	s := &sink{keep: func(f *kuberov1.Flow) bool { return f.Protocol == "udp" }}
+	stop := startTelemetry(t, Config{
+		Netflow: true, IncludeLoopback: true, FlushInterval: time.Second,
+		Resolver: newFakeResolver(), EmitFlows: s.emitFlows,
+	})
+	const n, size = 10, 200
+
+	// NOP, NOP, NOP, EOL: four bytes of options -> 24-byte IPv4 header.
+	v4Port := sendUDPWithOption(t, "udp4", "127.0.0.1:0", syscall.IPPROTO_IP, syscall.IP_OPTIONS, []byte{1, 1, 1, 0}, n, size)
+	wantV4 := uint64(n * (size + 8 + 24))
+
+	// Destination options header: next header (filled in by the kernel),
+	// length 0 (8 bytes in all), one PadN option covering the other 6.
+	v6 := true
+	v6Port := 0
+	if l, err := net.ListenPacket("udp6", "[::1]:0"); err != nil {
+		v6 = false
+		t.Logf("IPv6 loopback unavailable (%v); skipping the extension-header half", err)
+	} else {
+		_ = l.Close()
+		const ipv6DstOpts = 59 // IPV6_DSTOPTS, include/uapi/linux/in6.h
+		v6Port = sendUDPWithOption(t, "udp6", "[::1]:0", syscall.IPPROTO_IPV6, ipv6DstOpts, []byte{0, 0, 1, 4, 0, 0, 0, 0}, n, size)
+	}
+	wantV6 := uint64(n * (size + 8 + 40 + 8))
+
+	check := func() (v4b, v6b uint64) {
+		fs := s.snapshotFlows()
+		v4b, _, _, _ = sumFlows(fs, "127.0.0.1", "127.0.0.1", int32(v4Port), "udp", "egress")
+		v6b, _, _, _ = sumFlows(fs, "::1", "::1", int32(v6Port), "udp", "egress")
+		return v4b, v6b
+	}
+	waitFor(t, 10*time.Second, "UDP rows with their ports", func() bool {
+		v4b, v6b := check()
+		return v4b >= wantV4 && (!v6 || v6b >= wantV6)
+	})
+	stop()
+	v4b, v6b := check()
+	t.Logf("IPv4 with options: %d bytes on port %d (want %d); IPv6 with dest opts: %d bytes on port %d (want %d, tested %v)",
+		v4b, v4Port, wantV4, v6b, v6Port, wantV6, v6)
+	if v4b != wantV4 || (v6 && v6b != wantV6) {
+		t.Errorf("byte counts off: v4 %d want %d, v6 %d want %d", v4b, wantV4, v6b, wantV6)
+	}
+	for _, f := range s.snapshotFlows() {
+		if (f.Src.Ip == "127.0.0.1" || f.Src.Ip == "::1") && f.Port == 0 {
+			t.Errorf("loopback UDP row without a port (header walk failed): %+v", f)
+		}
+	}
+}
+
 // TestNetflowRetransmits provokes SYN retransmits: a listener with a
 // full accept queue silently drops new SYNs, and the client's kernel
 // retransmits them after the 1s initial RTO.
