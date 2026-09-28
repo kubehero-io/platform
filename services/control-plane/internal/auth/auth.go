@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 )
@@ -39,12 +40,13 @@ import (
 // engine consults it in the RBAC check; see Require.
 //
 // Hierarchy (lowest to highest):
-//   anonymous — no credentials presented (dev open-mode only)
-//   viewer    — read every list/get RPC; cannot mutate
-//   member    — viewer + create/update own resources (default for SSO users)
-//   auditor   — viewer + ListAuditLog at any scope + export rights
-//   admin     — member + RegisterCluster + policy arming
-//   owner     — admin + org/IdP config + role grants
+//
+//	anonymous — no credentials presented (dev open-mode only)
+//	viewer    — read every list/get RPC; cannot mutate
+//	member    — viewer + create/update own resources (default for SSO users)
+//	auditor   — viewer + ListAuditLog at any scope + export rights
+//	admin     — member + RegisterCluster + policy arming
+//	owner     — admin + org/IdP config + role grants
 //
 // Role checks use atLeast() with these as ordered ranks. Auditor's
 // rank sits alongside member rather than above so a compliance
@@ -71,6 +73,17 @@ type Principal struct {
 	Role   Role     // resolved role after group mapping
 	Email  string   // OIDC only
 	Groups []string // raw groups claim from the IdP (e.g. ["kubehero-admins", "ml-team"])
+	// ClusterID is set when the caller authenticated with a per-cluster
+	// enrollment token (collector / operator of that cluster). Ingest
+	// handlers attribute rows to it when the request names no cluster.
+	ClusterID string
+}
+
+// ClusterTokenVerifier checks per-cluster enrollment tokens minted by
+// RegisterCluster (the store keeps only their SHA-256 hash). ok=false
+// means "not a cluster token"; err means the lookup itself failed.
+type ClusterTokenVerifier interface {
+	VerifyClusterToken(ctx context.Context, token string) (clusterID string, ok bool, err error)
 }
 
 // PrincipalFromContext returns the resolved caller, or an anonymous
@@ -120,6 +133,10 @@ type Config struct {
 	// authenticated user. This is fail-closed at the role level even
 	// when auth itself succeeds.
 	GroupRoles map[string]Role
+	// ClusterTokens verifies RegisterCluster enrollment tokens; callers
+	// presenting one get RoleMember scoped to that cluster. nil =
+	// disabled (static API keys / OIDC only).
+	ClusterTokens ClusterTokenVerifier
 	// AllowAnonymous: when both APIKeys and OIDCIssuer are empty,
 	// requests succeed with role=anonymous. Set false in production
 	// to fail-closed.
@@ -208,6 +225,7 @@ func NewInterceptor(cfg Config) connect.UnaryInterceptorFunc {
 		}
 	}
 	keys := indexKeys(cfg.APIKeys)
+	clusterCache := newTokenCache(60*time.Second, 10*time.Second, 4096)
 
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
@@ -234,6 +252,27 @@ func NewInterceptor(cfg Config) connect.UnaryInterceptorFunc {
 			// API-key path first (cheaper than fetching JWKS).
 			if p, ok := keys[token]; ok {
 				return next(context.WithValue(ctx, principalKey{}, p), req)
+			}
+
+			// Per-cluster enrollment tokens (collectors + operators of
+			// registered clusters). Cached briefly — every node ingests
+			// every few seconds — including negative results so a bad
+			// token can't hammer the store.
+			if cfg.ClusterTokens != nil && !looksLikeJWT(token) {
+				id, ok, cached := clusterCache.get(token)
+				if !cached {
+					var err error
+					id, ok, err = cfg.ClusterTokens.VerifyClusterToken(ctx, token)
+					if err != nil {
+						return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("verify cluster token: %w", err))
+					}
+					clusterCache.put(token, id, ok)
+				}
+				if ok {
+					return next(context.WithValue(ctx, principalKey{}, Principal{
+						Sub: "cluster:" + id, Role: RoleMember, ClusterID: id,
+					}), req)
+				}
 			}
 
 			// OIDC path. When JWKS is wired we verify the signature
@@ -319,10 +358,16 @@ func splitKey(e string) (string, Role) {
 		token := strings.TrimSpace(e[:i])
 		role := strings.ToLower(strings.TrimSpace(e[i+1:]))
 		switch role {
+		case "owner":
+			return token, RoleOwner
 		case "admin":
 			return token, RoleAdmin
+		case "auditor":
+			return token, RoleAuditor
 		case "member":
 			return token, RoleMember
+		case "viewer":
+			return token, RoleViewer
 		}
 		// Unknown suffix — treat the whole string as a token + member.
 	}

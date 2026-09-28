@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file kubehero/v1/control.proto.
  */
 export const file_kubehero_v1_control: GenFile = /*@__PURE__*/
-  fileDesc("ChlrdWJlaGVyby92MS9jb250cm9sLnByb3RvEgtrdWJlaGVyby52MSIUChJIZWFsdGhDaGVja1JlcXVlc3QiNgoTSGVhbHRoQ2hlY2tSZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHdmVyc2lvbhgCIAEoCSI8ChNMaXN0Q2x1c3RlcnNSZXF1ZXN0EhEKCXBhZ2Vfc2l6ZRgBIAEoBRISCgpwYWdlX3Rva2VuGAIgASgJIlEKB0NsdXN0ZXISCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRINCgVjbG91ZBgDIAEoCRIOCgZyZWdpb24YBCABKAkSDQoFbm9kZXMYBSABKAUiVwoUTGlzdENsdXN0ZXJzUmVzcG9uc2USJgoIY2x1c3RlcnMYASADKAsyFC5rdWJlaGVyby52MS5DbHVzdGVyEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCSJgChZSZWdpc3RlckNsdXN0ZXJSZXF1ZXN0EgwKBG5hbWUYASABKAkSDQoFY2xvdWQYAiABKAkSDgoGcmVnaW9uGAMgASgJEgwKBHNsdWcYBCABKAkSCwoDb3JnGAUgASgJImUKF1JlZ2lzdGVyQ2x1c3RlclJlc3BvbnNlEiUKB2NsdXN0ZXIYASABKAsyFC5rdWJlaGVyby52MS5DbHVzdGVyEg0KBXRva2VuGAIgASgJEhQKDGhlbG1faW5zdGFsbBgDIAEoCSJJChNMaXN0QXVkaXRMb2dSZXF1ZXN0EhIKCmNsdXN0ZXJfaWQYASABKAkSDQoFbGltaXQYAiABKAUSDwoHb3V0Y29tZRgDIAEoCSKAAQoKQXVkaXRFbnRyeRIKCgJpZBgBIAEoCRIKCgJhdBgCIAEoCRIOCgZwb2xpY3kYAyABKAkSDgoGYWN0aW9uGAQgASgJEg8KB2NsdXN0ZXIYBSABKAkSDwoHb3V0Y29tZRgGIAEoCRIYChBlZmZlY3RfdXNkX21vbnRoGAcgASgBIkAKFExpc3RBdWRpdExvZ1Jlc3BvbnNlEigKB2VudHJpZXMYASADKAsyFy5rdWJlaGVyby52MS5BdWRpdEVudHJ5ItgBChdBcHBlbmRBdWRpdEVudHJ5UmVxdWVzdBILCgNvcmcYASABKAkSEgoKY2x1c3Rlcl9pZBgCIAEoCRIRCglhY3Rvcl9zdWIYAyABKAkSEwoLYWN0b3JfZW1haWwYBCABKAkSDgoGYWN0aW9uGAUgASgJEhMKC3RhcmdldF9raW5kGAYgASgJEhMKC3RhcmdldF9uYW1lGAcgASgJEg8KB3BheWxvYWQYCCABKAwSDwoHb3V0Y29tZRgJIAEoCRIYChBlZmZlY3RfdXNkX21vbnRoGAogASgBIjIKGEFwcGVuZEF1ZGl0RW50cnlSZXNwb25zZRIKCgJpZBgBIAEoAxIKCgJhdBgCIAEoCSJoChJHZXRCdXJuUmF0ZVJlcXVlc3QSEgoKY2x1c3Rlcl9pZBgBIAEoCRIRCgluYW1lc3BhY2UYAiABKAkSDgoGd2luZG93GAMgASgJEhsKE21vbnRobHlfY2VpbGluZ191c2QYBCABKAEiUQoTR2V0QnVyblJhdGVSZXNwb25zZRIXCg9idXJuX3JhdGVfbWlsbGkYASABKAUSEQoJYXZhaWxhYmxlGAIgASgIEg4KBnNvdXJjZRgDIAEoCSJECh9MaXN0V2FzdGVSZWNvbW1lbmRhdGlvbnNSZXF1ZXN0EhIKCmNsdXN0ZXJfaWQYASABKAkSDQoFbGltaXQYAiABKAUiuQEKE1dhc3RlUmVjb21tZW5kYXRpb24SDAoEcmFuaxgBIAEoCRIQCgh3b3JrbG9hZBgCIAEoCRIRCgluYW1lc3BhY2UYAyABKAkSDwoHY2x1c3RlchgEIAEoCRINCgVjbG91ZBgFIAEoCRIOCgZzaWduYWwYBiABKAkSHQoVcmVjb3ZlcmFibGVfdXNkX21vbnRoGAcgASgBEg4KBmFjdGlvbhgIIAEoCRIQCghzZXZlcml0eRgJIAEoCSJdCiBMaXN0V2FzdGVSZWNvbW1lbmRhdGlvbnNSZXNwb25zZRI5Cg9yZWNvbW1lbmRhdGlvbnMYASADKAsyIC5rdWJlaGVyby52MS5XYXN0ZVJlY29tbWVuZGF0aW9uIkYKEkdldFdvcmtsb2FkUmVxdWVzdBIPCgdjbHVzdGVyGAEgASgJEhEKCW5hbWVzcGFjZRgCIAEoCRIMCgRuYW1lGAMgASgJInkKE0dldFdvcmtsb2FkUmVzcG9uc2USOAoOcmVjb21tZW5kYXRpb24YASABKAsyIC5rdWJlaGVyby52MS5XYXN0ZVJlY29tbWVuZGF0aW9uEigKB2hpc3RvcnkYAiADKAsyFy5rdWJlaGVyby52MS5BdWRpdEVudHJ5IjcKE0xpc3RQb2xpY2llc1JlcXVlc3QSEgoKY2x1c3Rlcl9pZBgBIAEoCRIMCgRraW5kGAIgASgJImoKBlBvbGljeRIMCgRuYW1lGAEgASgJEg0KBXNjb3BlGAIgASgJEhMKC2NlaWxpbmdfdXNkGAMgASgBEhEKCXNwZW50X3BjdBgEIAEoBRIMCgRraW5kGAUgASgJEg0KBWFybWVkGAYgASgIIj0KFExpc3RQb2xpY2llc1Jlc3BvbnNlEiUKCHBvbGljaWVzGAEgAygLMhMua3ViZWhlcm8udjEuUG9saWN5ImkKEEFybVBvbGljeVJlcXVlc3QSEgoKY2x1c3Rlcl9pZBgBIAEoCRITCgtwb2xpY3lfbmFtZRgCIAEoCRINCgVhcm1lZBgDIAEoCBINCgVhY3RvchgEIAEoCRIOCgZyZWFzb24YBSABKAkiZAoRQXJtUG9saWN5UmVzcG9uc2USEwoLcG9saWN5X25hbWUYASABKAkSDQoFYXJtZWQYAiABKAgSGQoRZWZmZWN0aXZlX2F0X3VuaXgYAyABKAMSEAoIYXVkaXRfaWQYBCABKAkiJQoTR2V0VGVhbVNwZW5kUmVxdWVzdBIOCgZ3aW5kb3cYASABKAkiyQEKCVRlYW1TcGVuZBIMCgR0ZWFtGAEgASgJEhMKC2Nvc3RfY2VudGVyGAIgASgJEhcKD3NwZW5kX3VzZF9tb250aBgDIAEoARIdChVyZWNvdmVyYWJsZV91c2RfbW9udGgYBCABKAESGgoSZ3B1X2lkbGVfdXNkX21vbnRoGAUgASgBEhUKDWF3c191c2RfbW9udGgYBiABKAESFQoNZ2NwX3VzZF9tb250aBgHIAEoARIXCg9henVyZV91c2RfbW9udGgYCCABKAEigQEKFEdldFRlYW1TcGVuZFJlc3BvbnNlEiUKBXRlYW1zGAEgAygLMhYua3ViZWhlcm8udjEuVGVhbVNwZW5kEh0KFWZsZWV0X3RvdGFsX3VzZF9tb250aBgCIAEoARIjChtmbGVldF9yZWNvdmVyYWJsZV91c2RfbW9udGgYAyABKAEiUQoaTGlzdFZ1bG5lcmFiaWxpdGllc1JlcXVlc3QSEgoKY2x1c3Rlcl9pZBgBIAEoCRIQCghzZXZlcml0eRgCIAEoCRINCgVsaW1pdBgDIAEoBSKEAgoNVnVsbmVyYWJpbGl0eRIKCgJpZBgBIAEoCRIQCghzZXZlcml0eRgCIAEoCRIQCgh3b3JrbG9hZBgDIAEoCRIRCgluYW1lc3BhY2UYBCABKAkSDwoHY2x1c3RlchgFIAEoCRINCgVpbWFnZRgGIAEoCRIUCgxwYWNrYWdlX25hbWUYByABKAkSGQoRaW5zdGFsbGVkX3ZlcnNpb24YCCABKAkSFQoNZml4ZWRfdmVyc2lvbhgJIAEoCRIMCgRjdnNzGAogASgBEhYKDmNvc3RfdXNkX21vbnRoGAsgASgBEg4KBnNvdXJjZRgMIAEoCRISCgpmaXJzdF9zZWVuGA0gASgJIqcBChtMaXN0VnVsbmVyYWJpbGl0aWVzUmVzcG9uc2USMwoPdnVsbmVyYWJpbGl0aWVzGAEgAygLMhoua3ViZWhlcm8udjEuVnVsbmVyYWJpbGl0eRIWCg5jcml0aWNhbF9jb3VudBgCIAEoBRISCgpoaWdoX2NvdW50GAMgASgFEhQKDG1lZGl1bV9jb3VudBgEIAEoBRIRCglsb3dfY291bnQYBSABKAUiRAoUTGlzdEFub21hbGllc1JlcXVlc3QSDQoFc2NvcGUYASABKAkSDgoGd2luZG93GAIgASgJEg0KBWxpbWl0GAMgASgFIrUBCgdBbm9tYWx5EgoKAmlkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFdGl0bGUYAyABKAkSDwoHc3ViamVjdBgEIAEoCRIOCgZkZXRhaWwYBSABKAkSEQoJZGVsdGFfcGN0GAYgASgBEhgKEGltcGFjdF91c2RfbW9udGgYByABKAESEAoIc2V2ZXJpdHkYCCABKAkSDgoGc291cmNlGAkgASgJEhEKCWxpbmtfcGF0aBgKIAEoCSJPChVMaXN0QW5vbWFsaWVzUmVzcG9uc2USJwoJYW5vbWFsaWVzGAEgAygLMhQua3ViZWhlcm8udjEuQW5vbWFseRINCgV0b3RhbBgCIAEoBSI/ChpMaXN0Q2FwYWNpdHlEZW1hbmRzUmVxdWVzdBISCgpjbHVzdGVyX2lkGAEgASgJEg0KBWxpbWl0GAIgASgFIrkCCg5DYXBhY2l0eURlbWFuZBIKCgJpZBgBIAEoCRIPCgdjbHVzdGVyGAIgASgJEhEKCW5hbWVzcGFjZRgDIAEoCRIQCgh3b3JrbG9hZBgEIAEoCRIUCgxwZW5kaW5nX3BvZHMYBSABKAUSFQoNcmVxdWVzdGVkX2NwdRgGIAEoCRIVCg1yZXF1ZXN0ZWRfbWVtGAcgASgJEhUKDXJlcXVlc3RlZF9ncHUYCCABKAkSGgoSb2xkZXN0X3BlbmRpbmdfYWdlGAkgASgJEhoKEnJlY29tbWVuZGVkX2FjdGlvbhgKIAEoCRIiChpyZWNvbW1lbmRlZF9jb3N0X3VzZF9tb250aBgLIAEoARIeChZibG9ja2VkX2Nvc3RfdXNkX21vbnRoGAwgASgBEg4KBnNvdXJjZRgNIAEoCSKIAQobTGlzdENhcGFjaXR5RGVtYW5kc1Jlc3BvbnNlEiwKB2RlbWFuZHMYASADKAsyGy5rdWJlaGVyby52MS5DYXBhY2l0eURlbWFuZBIaChJ0b3RhbF9wZW5kaW5nX3BvZHMYAiABKAUSHwoXdG90YWxfYmxvY2tlZF91c2RfbW9udGgYAyABKAEiqAUKDVBvZENvc3RTYW1wbGUSDwoHY2x1c3RlchgBIAEoCRIRCgluYW1lc3BhY2UYAiABKAkSCwoDcG9kGAMgASgJEhIKCnRzX3VuaXhfbXMYBCABKAMSDAoEdGVhbRgFIAEoCRITCgtjb3N0X2NlbnRlchgGIAEoCRIQCghub2RlcG9vbBgHIAEoCRIMCgRub2RlGAggASgJEg4KBnJlZ2lvbhgJIAEoCRILCgNza3UYCiABKAkSEQoJbGlmZWN5Y2xlGAsgASgJEhAKCGdwdV9raW5kGAwgASgJEhYKDmNwdV9taWxsaWNvcmVzGA0gASgNEhEKCW1lbV9ieXRlcxgOIAEoBBIUCgxncHVfdXRpbF9wY3QYDyABKAISFAoMY29zdF91c2Rfc2VjGBAgASgBEhsKE3JlY292ZXJhYmxlX3VzZF9zZWMYESABKAESHAoUY3B1X3VzYWdlX21pbGxpY29yZXMYEiABKA0SFwoPbWVtX3VzYWdlX2J5dGVzGBMgASgEEhgKEGNwdV9jb3N0X3VzZF9zZWMYFCABKAESGAoQcmFtX2Nvc3RfdXNkX3NlYxgVIAEoARIYChBncHVfY29zdF91c2Rfc2VjGBYgASgBEhAKCHdvcmtsb2FkGBcgASgJEhUKDXdvcmtsb2FkX2tpbmQYGCABKAkSDAoEem9uZRgZIAEoCRINCgVjbG91ZBgaIAEoCRIRCglncHVfY291bnQYGyABKA0SFAoMaW50ZXJ2YWxfc2VjGBwgASgCEjYKBmxhYmVscxgdIAMoCzImLmt1YmVoZXJvLnYxLlBvZENvc3RTYW1wbGUuTGFiZWxzRW50cnkaLQoLTGFiZWxzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASLdAwoOTm9kZUNvc3RTYW1wbGUSDAoEbm9kZRgBIAEoCRISCgp0c191bml4X21zGAIgASgDEhAKCG5vZGVwb29sGAMgASgJEg4KBnJlZ2lvbhgEIAEoCRIMCgR6b25lGAUgASgJEgsKA3NrdRgGIAEoCRIRCglsaWZlY3ljbGUYByABKAkSDQoFY2xvdWQYCCABKAkSFgoOcHJpY2VfcGVyX2hvdXIYCSABKAESIgoaY3B1X2FsbG9jYXRhYmxlX21pbGxpY29yZXMYCiABKA0SHQoVbWVtX2FsbG9jYXRhYmxlX2J5dGVzGAsgASgEEiAKGGNwdV9yZXF1ZXN0ZWRfbWlsbGljb3JlcxgMIAEoDRIbChNtZW1fcmVxdWVzdGVkX2J5dGVzGA0gASgEEhsKE2NwdV91c2VkX21pbGxpY29yZXMYDiABKA0SFgoObWVtX3VzZWRfYnl0ZXMYDyABKAQSEQoJZ3B1X2NvdW50GBAgASgNEhAKCGdwdV9raW5kGBEgASgJEhQKDGNvc3RfdXNkX3NlYxgSIAEoARIUCgxpZGxlX3VzZF9zZWMYEyABKAESFAoMcHJpY2Vfc291cmNlGBQgASgJEhQKDGludGVydmFsX3NlYxgVIAEoAiKDAQoUSW5nZXN0UG9kQ29zdFJlcXVlc3QSEgoKY2x1c3Rlcl9pZBgBIAEoCRIrCgdzYW1wbGVzGAIgAygLMhoua3ViZWhlcm8udjEuUG9kQ29zdFNhbXBsZRIqCgVub2RlcxgDIAMoCzIbLmt1YmVoZXJvLnYxLk5vZGVDb3N0U2FtcGxlIjkKFUluZ2VzdFBvZENvc3RSZXNwb25zZRIPCgd3cml0dGVuGAEgASgFEg8KB2Ryb3BwZWQYAiABKAUyhQsKE0NvbnRyb2xQbGFuZVNlcnZpY2USUgoLSGVhbHRoQ2hlY2sSHy5rdWJlaGVyby52MS5IZWFsdGhDaGVja1JlcXVlc3QaIC5rdWJlaGVyby52MS5IZWFsdGhDaGVja1Jlc3BvbnNlIgASVQoMTGlzdENsdXN0ZXJzEiAua3ViZWhlcm8udjEuTGlzdENsdXN0ZXJzUmVxdWVzdBohLmt1YmVoZXJvLnYxLkxpc3RDbHVzdGVyc1Jlc3BvbnNlIgASXgoPUmVnaXN0ZXJDbHVzdGVyEiMua3ViZWhlcm8udjEuUmVnaXN0ZXJDbHVzdGVyUmVxdWVzdBokLmt1YmVoZXJvLnYxLlJlZ2lzdGVyQ2x1c3RlclJlc3BvbnNlIgASVQoMTGlzdEF1ZGl0TG9nEiAua3ViZWhlcm8udjEuTGlzdEF1ZGl0TG9nUmVxdWVzdBohLmt1YmVoZXJvLnYxLkxpc3RBdWRpdExvZ1Jlc3BvbnNlIgASYQoQQXBwZW5kQXVkaXRFbnRyeRIkLmt1YmVoZXJvLnYxLkFwcGVuZEF1ZGl0RW50cnlSZXF1ZXN0GiUua3ViZWhlcm8udjEuQXBwZW5kQXVkaXRFbnRyeVJlc3BvbnNlIgASUgoLR2V0QnVyblJhdGUSHy5rdWJlaGVyby52MS5HZXRCdXJuUmF0ZVJlcXVlc3QaIC5rdWJlaGVyby52MS5HZXRCdXJuUmF0ZVJlc3BvbnNlIgASeQoYTGlzdFdhc3RlUmVjb21tZW5kYXRpb25zEiwua3ViZWhlcm8udjEuTGlzdFdhc3RlUmVjb21tZW5kYXRpb25zUmVxdWVzdBotLmt1YmVoZXJvLnYxLkxpc3RXYXN0ZVJlY29tbWVuZGF0aW9uc1Jlc3BvbnNlIgASUgoLR2V0V29ya2xvYWQSHy5rdWJlaGVyby52MS5HZXRXb3JrbG9hZFJlcXVlc3QaIC5rdWJlaGVyby52MS5HZXRXb3JrbG9hZFJlc3BvbnNlIgASVQoMTGlzdFBvbGljaWVzEiAua3ViZWhlcm8udjEuTGlzdFBvbGljaWVzUmVxdWVzdBohLmt1YmVoZXJvLnYxLkxpc3RQb2xpY2llc1Jlc3BvbnNlIgASTAoJQXJtUG9saWN5Eh0ua3ViZWhlcm8udjEuQXJtUG9saWN5UmVxdWVzdBoeLmt1YmVoZXJvLnYxLkFybVBvbGljeVJlc3BvbnNlIgASVQoMR2V0VGVhbVNwZW5kEiAua3ViZWhlcm8udjEuR2V0VGVhbVNwZW5kUmVxdWVzdBohLmt1YmVoZXJvLnYxLkdldFRlYW1TcGVuZFJlc3BvbnNlIgASagoTTGlzdFZ1bG5lcmFiaWxpdGllcxInLmt1YmVoZXJvLnYxLkxpc3RWdWxuZXJhYmlsaXRpZXNSZXF1ZXN0Gigua3ViZWhlcm8udjEuTGlzdFZ1bG5lcmFiaWxpdGllc1Jlc3BvbnNlIgASWAoNTGlzdEFub21hbGllcxIhLmt1YmVoZXJvLnYxLkxpc3RBbm9tYWxpZXNSZXF1ZXN0GiIua3ViZWhlcm8udjEuTGlzdEFub21hbGllc1Jlc3BvbnNlIgASagoTTGlzdENhcGFjaXR5RGVtYW5kcxInLmt1YmVoZXJvLnYxLkxpc3RDYXBhY2l0eURlbWFuZHNSZXF1ZXN0Gigua3ViZWhlcm8udjEuTGlzdENhcGFjaXR5RGVtYW5kc1Jlc3BvbnNlIgASWAoNSW5nZXN0UG9kQ29zdBIhLmt1YmVoZXJvLnYxLkluZ2VzdFBvZENvc3RSZXF1ZXN0GiIua3ViZWhlcm8udjEuSW5nZXN0UG9kQ29zdFJlc3BvbnNlIgBCTFpKZ2l0aHViLmNvbS9rdWJlaGVyby1pby9wbGF0Zm9ybS9wYWNrYWdlcy9wcm90by9nZW4vZ28va3ViZWhlcm8vdjE7a3ViZXJvdjFiBnByb3RvMw");
+  fileDesc("ChlrdWJlaGVyby92MS9jb250cm9sLnByb3RvEgtrdWJlaGVyby52MSIUChJIZWFsdGhDaGVja1JlcXVlc3QiNgoTSGVhbHRoQ2hlY2tSZXNwb25zZRIOCgZzdGF0dXMYASABKAkSDwoHdmVyc2lvbhgCIAEoCSIPCg1XaG9BbUlSZXF1ZXN0InkKDldob0FtSVJlc3BvbnNlEg8KB3N1YmplY3QYASABKAkSDAoEcm9sZRgCIAEoCRINCgVlbWFpbBgDIAEoCRIOCgZncm91cHMYBCADKAkSEgoKY2x1c3Rlcl9pZBgFIAEoCRIVCg1hdXRoX3JlcXVpcmVkGAYgASgIIjwKE0xpc3RDbHVzdGVyc1JlcXVlc3QSEQoJcGFnZV9zaXplGAEgASgFEhIKCnBhZ2VfdG9rZW4YAiABKAkiUQoHQ2x1c3RlchIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEg0KBWNsb3VkGAMgASgJEg4KBnJlZ2lvbhgEIAEoCRINCgVub2RlcxgFIAEoBSJXChRMaXN0Q2x1c3RlcnNSZXNwb25zZRImCghjbHVzdGVycxgBIAMoCzIULmt1YmVoZXJvLnYxLkNsdXN0ZXISFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJImAKFlJlZ2lzdGVyQ2x1c3RlclJlcXVlc3QSDAoEbmFtZRgBIAEoCRINCgVjbG91ZBgCIAEoCRIOCgZyZWdpb24YAyABKAkSDAoEc2x1ZxgEIAEoCRILCgNvcmcYBSABKAkiZQoXUmVnaXN0ZXJDbHVzdGVyUmVzcG9uc2USJQoHY2x1c3RlchgBIAEoCzIULmt1YmVoZXJvLnYxLkNsdXN0ZXISDQoFdG9rZW4YAiABKAkSFAoMaGVsbV9pbnN0YWxsGAMgASgJIkkKE0xpc3RBdWRpdExvZ1JlcXVlc3QSEgoKY2x1c3Rlcl9pZBgBIAEoCRINCgVsaW1pdBgCIAEoBRIPCgdvdXRjb21lGAMgASgJIoABCgpBdWRpdEVudHJ5EgoKAmlkGAEgASgJEgoKAmF0GAIgASgJEg4KBnBvbGljeRgDIAEoCRIOCgZhY3Rpb24YBCABKAkSDwoHY2x1c3RlchgFIAEoCRIPCgdvdXRjb21lGAYgASgJEhgKEGVmZmVjdF91c2RfbW9udGgYByABKAEiQAoUTGlzdEF1ZGl0TG9nUmVzcG9uc2USKAoHZW50cmllcxgBIAMoCzIXLmt1YmVoZXJvLnYxLkF1ZGl0RW50cnki2AEKF0FwcGVuZEF1ZGl0RW50cnlSZXF1ZXN0EgsKA29yZxgBIAEoCRISCgpjbHVzdGVyX2lkGAIgASgJEhEKCWFjdG9yX3N1YhgDIAEoCRITCgthY3Rvcl9lbWFpbBgEIAEoCRIOCgZhY3Rpb24YBSABKAkSEwoLdGFyZ2V0X2tpbmQYBiABKAkSEwoLdGFyZ2V0X25hbWUYByABKAkSDwoHcGF5bG9hZBgIIAEoDBIPCgdvdXRjb21lGAkgASgJEhgKEGVmZmVjdF91c2RfbW9udGgYCiABKAEiMgoYQXBwZW5kQXVkaXRFbnRyeVJlc3BvbnNlEgoKAmlkGAEgASgDEgoKAmF0GAIgASgJImgKEkdldEJ1cm5SYXRlUmVxdWVzdBISCgpjbHVzdGVyX2lkGAEgASgJEhEKCW5hbWVzcGFjZRgCIAEoCRIOCgZ3aW5kb3cYAyABKAkSGwoTbW9udGhseV9jZWlsaW5nX3VzZBgEIAEoASJRChNHZXRCdXJuUmF0ZVJlc3BvbnNlEhcKD2J1cm5fcmF0ZV9taWxsaRgBIAEoBRIRCglhdmFpbGFibGUYAiABKAgSDgoGc291cmNlGAMgASgJIkQKH0xpc3RXYXN0ZVJlY29tbWVuZGF0aW9uc1JlcXVlc3QSEgoKY2x1c3Rlcl9pZBgBIAEoCRINCgVsaW1pdBgCIAEoBSK5AQoTV2FzdGVSZWNvbW1lbmRhdGlvbhIMCgRyYW5rGAEgASgJEhAKCHdvcmtsb2FkGAIgASgJEhEKCW5hbWVzcGFjZRgDIAEoCRIPCgdjbHVzdGVyGAQgASgJEg0KBWNsb3VkGAUgASgJEg4KBnNpZ25hbBgGIAEoCRIdChVyZWNvdmVyYWJsZV91c2RfbW9udGgYByABKAESDgoGYWN0aW9uGAggASgJEhAKCHNldmVyaXR5GAkgASgJIl0KIExpc3RXYXN0ZVJlY29tbWVuZGF0aW9uc1Jlc3BvbnNlEjkKD3JlY29tbWVuZGF0aW9ucxgBIAMoCzIgLmt1YmVoZXJvLnYxLldhc3RlUmVjb21tZW5kYXRpb24iRgoSR2V0V29ya2xvYWRSZXF1ZXN0Eg8KB2NsdXN0ZXIYASABKAkSEQoJbmFtZXNwYWNlGAIgASgJEgwKBG5hbWUYAyABKAkieQoTR2V0V29ya2xvYWRSZXNwb25zZRI4Cg5yZWNvbW1lbmRhdGlvbhgBIAEoCzIgLmt1YmVoZXJvLnYxLldhc3RlUmVjb21tZW5kYXRpb24SKAoHaGlzdG9yeRgCIAMoCzIXLmt1YmVoZXJvLnYxLkF1ZGl0RW50cnkiNwoTTGlzdFBvbGljaWVzUmVxdWVzdBISCgpjbHVzdGVyX2lkGAEgASgJEgwKBGtpbmQYAiABKAkiagoGUG9saWN5EgwKBG5hbWUYASABKAkSDQoFc2NvcGUYAiABKAkSEwoLY2VpbGluZ191c2QYAyABKAESEQoJc3BlbnRfcGN0GAQgASgFEgwKBGtpbmQYBSABKAkSDQoFYXJtZWQYBiABKAgiPQoUTGlzdFBvbGljaWVzUmVzcG9uc2USJQoIcG9saWNpZXMYASADKAsyEy5rdWJlaGVyby52MS5Qb2xpY3kiaQoQQXJtUG9saWN5UmVxdWVzdBISCgpjbHVzdGVyX2lkGAEgASgJEhMKC3BvbGljeV9uYW1lGAIgASgJEg0KBWFybWVkGAMgASgIEg0KBWFjdG9yGAQgASgJEg4KBnJlYXNvbhgFIAEoCSJkChFBcm1Qb2xpY3lSZXNwb25zZRITCgtwb2xpY3lfbmFtZRgBIAEoCRINCgVhcm1lZBgCIAEoCBIZChFlZmZlY3RpdmVfYXRfdW5peBgDIAEoAxIQCghhdWRpdF9pZBgEIAEoCSIlChNHZXRUZWFtU3BlbmRSZXF1ZXN0Eg4KBndpbmRvdxgBIAEoCSLJAQoJVGVhbVNwZW5kEgwKBHRlYW0YASABKAkSEwoLY29zdF9jZW50ZXIYAiABKAkSFwoPc3BlbmRfdXNkX21vbnRoGAMgASgBEh0KFXJlY292ZXJhYmxlX3VzZF9tb250aBgEIAEoARIaChJncHVfaWRsZV91c2RfbW9udGgYBSABKAESFQoNYXdzX3VzZF9tb250aBgGIAEoARIVCg1nY3BfdXNkX21vbnRoGAcgASgBEhcKD2F6dXJlX3VzZF9tb250aBgIIAEoASKBAQoUR2V0VGVhbVNwZW5kUmVzcG9uc2USJQoFdGVhbXMYASADKAsyFi5rdWJlaGVyby52MS5UZWFtU3BlbmQSHQoVZmxlZXRfdG90YWxfdXNkX21vbnRoGAIgASgBEiMKG2ZsZWV0X3JlY292ZXJhYmxlX3VzZF9tb250aBgDIAEoASJRChpMaXN0VnVsbmVyYWJpbGl0aWVzUmVxdWVzdBISCgpjbHVzdGVyX2lkGAEgASgJEhAKCHNldmVyaXR5GAIgASgJEg0KBWxpbWl0GAMgASgFIoQCCg1WdWxuZXJhYmlsaXR5EgoKAmlkGAEgASgJEhAKCHNldmVyaXR5GAIgASgJEhAKCHdvcmtsb2FkGAMgASgJEhEKCW5hbWVzcGFjZRgEIAEoCRIPCgdjbHVzdGVyGAUgASgJEg0KBWltYWdlGAYgASgJEhQKDHBhY2thZ2VfbmFtZRgHIAEoCRIZChFpbnN0YWxsZWRfdmVyc2lvbhgIIAEoCRIVCg1maXhlZF92ZXJzaW9uGAkgASgJEgwKBGN2c3MYCiABKAESFgoOY29zdF91c2RfbW9udGgYCyABKAESDgoGc291cmNlGAwgASgJEhIKCmZpcnN0X3NlZW4YDSABKAkipwEKG0xpc3RWdWxuZXJhYmlsaXRpZXNSZXNwb25zZRIzCg92dWxuZXJhYmlsaXRpZXMYASADKAsyGi5rdWJlaGVyby52MS5WdWxuZXJhYmlsaXR5EhYKDmNyaXRpY2FsX2NvdW50GAIgASgFEhIKCmhpZ2hfY291bnQYAyABKAUSFAoMbWVkaXVtX2NvdW50GAQgASgFEhEKCWxvd19jb3VudBgFIAEoBSJEChRMaXN0QW5vbWFsaWVzUmVxdWVzdBINCgVzY29wZRgBIAEoCRIOCgZ3aW5kb3cYAiABKAkSDQoFbGltaXQYAyABKAUitQEKB0Fub21hbHkSCgoCaWQYASABKAkSDAoEa2luZBgCIAEoCRINCgV0aXRsZRgDIAEoCRIPCgdzdWJqZWN0GAQgASgJEg4KBmRldGFpbBgFIAEoCRIRCglkZWx0YV9wY3QYBiABKAESGAoQaW1wYWN0X3VzZF9tb250aBgHIAEoARIQCghzZXZlcml0eRgIIAEoCRIOCgZzb3VyY2UYCSABKAkSEQoJbGlua19wYXRoGAogASgJIk8KFUxpc3RBbm9tYWxpZXNSZXNwb25zZRInCglhbm9tYWxpZXMYASADKAsyFC5rdWJlaGVyby52MS5Bbm9tYWx5Eg0KBXRvdGFsGAIgASgFIj8KGkxpc3RDYXBhY2l0eURlbWFuZHNSZXF1ZXN0EhIKCmNsdXN0ZXJfaWQYASABKAkSDQoFbGltaXQYAiABKAUiuQIKDkNhcGFjaXR5RGVtYW5kEgoKAmlkGAEgASgJEg8KB2NsdXN0ZXIYAiABKAkSEQoJbmFtZXNwYWNlGAMgASgJEhAKCHdvcmtsb2FkGAQgASgJEhQKDHBlbmRpbmdfcG9kcxgFIAEoBRIVCg1yZXF1ZXN0ZWRfY3B1GAYgASgJEhUKDXJlcXVlc3RlZF9tZW0YByABKAkSFQoNcmVxdWVzdGVkX2dwdRgIIAEoCRIaChJvbGRlc3RfcGVuZGluZ19hZ2UYCSABKAkSGgoScmVjb21tZW5kZWRfYWN0aW9uGAogASgJEiIKGnJlY29tbWVuZGVkX2Nvc3RfdXNkX21vbnRoGAsgASgBEh4KFmJsb2NrZWRfY29zdF91c2RfbW9udGgYDCABKAESDgoGc291cmNlGA0gASgJIogBChtMaXN0Q2FwYWNpdHlEZW1hbmRzUmVzcG9uc2USLAoHZGVtYW5kcxgBIAMoCzIbLmt1YmVoZXJvLnYxLkNhcGFjaXR5RGVtYW5kEhoKEnRvdGFsX3BlbmRpbmdfcG9kcxgCIAEoBRIfChd0b3RhbF9ibG9ja2VkX3VzZF9tb250aBgDIAEoASKoBQoNUG9kQ29zdFNhbXBsZRIPCgdjbHVzdGVyGAEgASgJEhEKCW5hbWVzcGFjZRgCIAEoCRILCgNwb2QYAyABKAkSEgoKdHNfdW5peF9tcxgEIAEoAxIMCgR0ZWFtGAUgASgJEhMKC2Nvc3RfY2VudGVyGAYgASgJEhAKCG5vZGVwb29sGAcgASgJEgwKBG5vZGUYCCABKAkSDgoGcmVnaW9uGAkgASgJEgsKA3NrdRgKIAEoCRIRCglsaWZlY3ljbGUYCyABKAkSEAoIZ3B1X2tpbmQYDCABKAkSFgoOY3B1X21pbGxpY29yZXMYDSABKA0SEQoJbWVtX2J5dGVzGA4gASgEEhQKDGdwdV91dGlsX3BjdBgPIAEoAhIUCgxjb3N0X3VzZF9zZWMYECABKAESGwoTcmVjb3ZlcmFibGVfdXNkX3NlYxgRIAEoARIcChRjcHVfdXNhZ2VfbWlsbGljb3JlcxgSIAEoDRIXCg9tZW1fdXNhZ2VfYnl0ZXMYEyABKAQSGAoQY3B1X2Nvc3RfdXNkX3NlYxgUIAEoARIYChByYW1fY29zdF91c2Rfc2VjGBUgASgBEhgKEGdwdV9jb3N0X3VzZF9zZWMYFiABKAESEAoId29ya2xvYWQYFyABKAkSFQoNd29ya2xvYWRfa2luZBgYIAEoCRIMCgR6b25lGBkgASgJEg0KBWNsb3VkGBogASgJEhEKCWdwdV9jb3VudBgbIAEoDRIUCgxpbnRlcnZhbF9zZWMYHCABKAISNgoGbGFiZWxzGB0gAygLMiYua3ViZWhlcm8udjEuUG9kQ29zdFNhbXBsZS5MYWJlbHNFbnRyeRotCgtMYWJlbHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIt0DCg5Ob2RlQ29zdFNhbXBsZRIMCgRub2RlGAEgASgJEhIKCnRzX3VuaXhfbXMYAiABKAMSEAoIbm9kZXBvb2wYAyABKAkSDgoGcmVnaW9uGAQgASgJEgwKBHpvbmUYBSABKAkSCwoDc2t1GAYgASgJEhEKCWxpZmVjeWNsZRgHIAEoCRINCgVjbG91ZBgIIAEoCRIWCg5wcmljZV9wZXJfaG91chgJIAEoARIiChpjcHVfYWxsb2NhdGFibGVfbWlsbGljb3JlcxgKIAEoDRIdChVtZW1fYWxsb2NhdGFibGVfYnl0ZXMYCyABKAQSIAoYY3B1X3JlcXVlc3RlZF9taWxsaWNvcmVzGAwgASgNEhsKE21lbV9yZXF1ZXN0ZWRfYnl0ZXMYDSABKAQSGwoTY3B1X3VzZWRfbWlsbGljb3JlcxgOIAEoDRIWCg5tZW1fdXNlZF9ieXRlcxgPIAEoBBIRCglncHVfY291bnQYECABKA0SEAoIZ3B1X2tpbmQYESABKAkSFAoMY29zdF91c2Rfc2VjGBIgASgBEhQKDGlkbGVfdXNkX3NlYxgTIAEoARIUCgxwcmljZV9zb3VyY2UYFCABKAkSFAoMaW50ZXJ2YWxfc2VjGBUgASgCIoMBChRJbmdlc3RQb2RDb3N0UmVxdWVzdBISCgpjbHVzdGVyX2lkGAEgASgJEisKB3NhbXBsZXMYAiADKAsyGi5rdWJlaGVyby52MS5Qb2RDb3N0U2FtcGxlEioKBW5vZGVzGAMgAygLMhsua3ViZWhlcm8udjEuTm9kZUNvc3RTYW1wbGUiOQoVSW5nZXN0UG9kQ29zdFJlc3BvbnNlEg8KB3dyaXR0ZW4YASABKAUSDwoHZHJvcHBlZBgCIAEoBTLKCwoTQ29udHJvbFBsYW5lU2VydmljZRJSCgtIZWFsdGhDaGVjaxIfLmt1YmVoZXJvLnYxLkhlYWx0aENoZWNrUmVxdWVzdBogLmt1YmVoZXJvLnYxLkhlYWx0aENoZWNrUmVzcG9uc2UiABJDCgZXaG9BbUkSGi5rdWJlaGVyby52MS5XaG9BbUlSZXF1ZXN0Ghsua3ViZWhlcm8udjEuV2hvQW1JUmVzcG9uc2UiABJVCgxMaXN0Q2x1c3RlcnMSIC5rdWJlaGVyby52MS5MaXN0Q2x1c3RlcnNSZXF1ZXN0GiEua3ViZWhlcm8udjEuTGlzdENsdXN0ZXJzUmVzcG9uc2UiABJeCg9SZWdpc3RlckNsdXN0ZXISIy5rdWJlaGVyby52MS5SZWdpc3RlckNsdXN0ZXJSZXF1ZXN0GiQua3ViZWhlcm8udjEuUmVnaXN0ZXJDbHVzdGVyUmVzcG9uc2UiABJVCgxMaXN0QXVkaXRMb2cSIC5rdWJlaGVyby52MS5MaXN0QXVkaXRMb2dSZXF1ZXN0GiEua3ViZWhlcm8udjEuTGlzdEF1ZGl0TG9nUmVzcG9uc2UiABJhChBBcHBlbmRBdWRpdEVudHJ5EiQua3ViZWhlcm8udjEuQXBwZW5kQXVkaXRFbnRyeVJlcXVlc3QaJS5rdWJlaGVyby52MS5BcHBlbmRBdWRpdEVudHJ5UmVzcG9uc2UiABJSCgtHZXRCdXJuUmF0ZRIfLmt1YmVoZXJvLnYxLkdldEJ1cm5SYXRlUmVxdWVzdBogLmt1YmVoZXJvLnYxLkdldEJ1cm5SYXRlUmVzcG9uc2UiABJ5ChhMaXN0V2FzdGVSZWNvbW1lbmRhdGlvbnMSLC5rdWJlaGVyby52MS5MaXN0V2FzdGVSZWNvbW1lbmRhdGlvbnNSZXF1ZXN0Gi0ua3ViZWhlcm8udjEuTGlzdFdhc3RlUmVjb21tZW5kYXRpb25zUmVzcG9uc2UiABJSCgtHZXRXb3JrbG9hZBIfLmt1YmVoZXJvLnYxLkdldFdvcmtsb2FkUmVxdWVzdBogLmt1YmVoZXJvLnYxLkdldFdvcmtsb2FkUmVzcG9uc2UiABJVCgxMaXN0UG9saWNpZXMSIC5rdWJlaGVyby52MS5MaXN0UG9saWNpZXNSZXF1ZXN0GiEua3ViZWhlcm8udjEuTGlzdFBvbGljaWVzUmVzcG9uc2UiABJMCglBcm1Qb2xpY3kSHS5rdWJlaGVyby52MS5Bcm1Qb2xpY3lSZXF1ZXN0Gh4ua3ViZWhlcm8udjEuQXJtUG9saWN5UmVzcG9uc2UiABJVCgxHZXRUZWFtU3BlbmQSIC5rdWJlaGVyby52MS5HZXRUZWFtU3BlbmRSZXF1ZXN0GiEua3ViZWhlcm8udjEuR2V0VGVhbVNwZW5kUmVzcG9uc2UiABJqChNMaXN0VnVsbmVyYWJpbGl0aWVzEicua3ViZWhlcm8udjEuTGlzdFZ1bG5lcmFiaWxpdGllc1JlcXVlc3QaKC5rdWJlaGVyby52MS5MaXN0VnVsbmVyYWJpbGl0aWVzUmVzcG9uc2UiABJYCg1MaXN0QW5vbWFsaWVzEiEua3ViZWhlcm8udjEuTGlzdEFub21hbGllc1JlcXVlc3QaIi5rdWJlaGVyby52MS5MaXN0QW5vbWFsaWVzUmVzcG9uc2UiABJqChNMaXN0Q2FwYWNpdHlEZW1hbmRzEicua3ViZWhlcm8udjEuTGlzdENhcGFjaXR5RGVtYW5kc1JlcXVlc3QaKC5rdWJlaGVyby52MS5MaXN0Q2FwYWNpdHlEZW1hbmRzUmVzcG9uc2UiABJYCg1Jbmdlc3RQb2RDb3N0EiEua3ViZWhlcm8udjEuSW5nZXN0UG9kQ29zdFJlcXVlc3QaIi5rdWJlaGVyby52MS5Jbmdlc3RQb2RDb3N0UmVzcG9uc2UiAEJMWkpnaXRodWIuY29tL2t1YmVoZXJvLWlvL3BsYXRmb3JtL3BhY2thZ2VzL3Byb3RvL2dlbi9nby9rdWJlaGVyby92MTtrdWJlcm92MWIGcHJvdG8z");
 
 /**
  * @generated from message kubehero.v1.HealthCheckRequest
@@ -50,6 +50,71 @@ export const HealthCheckResponseSchema: GenMessage<HealthCheckResponse> = /*@__P
   messageDesc(file_kubehero_v1_control, 1);
 
 /**
+ * @generated from message kubehero.v1.WhoAmIRequest
+ */
+export type WhoAmIRequest = Message<"kubehero.v1.WhoAmIRequest"> & {
+};
+
+/**
+ * Describes the message kubehero.v1.WhoAmIRequest.
+ * Use `create(WhoAmIRequestSchema)` to create a new message.
+ */
+export const WhoAmIRequestSchema: GenMessage<WhoAmIRequest> = /*@__PURE__*/
+  messageDesc(file_kubehero_v1_control, 2);
+
+/**
+ * @generated from message kubehero.v1.WhoAmIResponse
+ */
+export type WhoAmIResponse = Message<"kubehero.v1.WhoAmIResponse"> & {
+  /**
+   * "anonymous", "cluster:<id>", a key hash, or the OIDC sub
+   *
+   * @generated from field: string subject = 1;
+   */
+  subject: string;
+
+  /**
+   * anonymous | viewer | auditor | member | admin | owner
+   *
+   * @generated from field: string role = 2;
+   */
+  role: string;
+
+  /**
+   * OIDC only
+   *
+   * @generated from field: string email = 3;
+   */
+  email: string;
+
+  /**
+   * @generated from field: repeated string groups = 4;
+   */
+  groups: string[];
+
+  /**
+   * set for cluster enrollment tokens
+   *
+   * @generated from field: string cluster_id = 5;
+   */
+  clusterId: string;
+
+  /**
+   * false when the server accepts anonymous callers
+   *
+   * @generated from field: bool auth_required = 6;
+   */
+  authRequired: boolean;
+};
+
+/**
+ * Describes the message kubehero.v1.WhoAmIResponse.
+ * Use `create(WhoAmIResponseSchema)` to create a new message.
+ */
+export const WhoAmIResponseSchema: GenMessage<WhoAmIResponse> = /*@__PURE__*/
+  messageDesc(file_kubehero_v1_control, 3);
+
+/**
  * @generated from message kubehero.v1.ListClustersRequest
  */
 export type ListClustersRequest = Message<"kubehero.v1.ListClustersRequest"> & {
@@ -69,7 +134,7 @@ export type ListClustersRequest = Message<"kubehero.v1.ListClustersRequest"> & {
  * Use `create(ListClustersRequestSchema)` to create a new message.
  */
 export const ListClustersRequestSchema: GenMessage<ListClustersRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 2);
+  messageDesc(file_kubehero_v1_control, 4);
 
 /**
  * @generated from message kubehero.v1.Cluster
@@ -108,7 +173,7 @@ export type Cluster = Message<"kubehero.v1.Cluster"> & {
  * Use `create(ClusterSchema)` to create a new message.
  */
 export const ClusterSchema: GenMessage<Cluster> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 3);
+  messageDesc(file_kubehero_v1_control, 5);
 
 /**
  * @generated from message kubehero.v1.ListClustersResponse
@@ -130,7 +195,7 @@ export type ListClustersResponse = Message<"kubehero.v1.ListClustersResponse"> &
  * Use `create(ListClustersResponseSchema)` to create a new message.
  */
 export const ListClustersResponseSchema: GenMessage<ListClustersResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 4);
+  messageDesc(file_kubehero_v1_control, 6);
 
 /**
  * @generated from message kubehero.v1.RegisterClusterRequest
@@ -175,7 +240,7 @@ export type RegisterClusterRequest = Message<"kubehero.v1.RegisterClusterRequest
  * Use `create(RegisterClusterRequestSchema)` to create a new message.
  */
 export const RegisterClusterRequestSchema: GenMessage<RegisterClusterRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 5);
+  messageDesc(file_kubehero_v1_control, 7);
 
 /**
  * @generated from message kubehero.v1.RegisterClusterResponse
@@ -207,7 +272,7 @@ export type RegisterClusterResponse = Message<"kubehero.v1.RegisterClusterRespon
  * Use `create(RegisterClusterResponseSchema)` to create a new message.
  */
 export const RegisterClusterResponseSchema: GenMessage<RegisterClusterResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 6);
+  messageDesc(file_kubehero_v1_control, 8);
 
 /**
  * @generated from message kubehero.v1.ListAuditLogRequest
@@ -240,7 +305,7 @@ export type ListAuditLogRequest = Message<"kubehero.v1.ListAuditLogRequest"> & {
  * Use `create(ListAuditLogRequestSchema)` to create a new message.
  */
 export const ListAuditLogRequestSchema: GenMessage<ListAuditLogRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 7);
+  messageDesc(file_kubehero_v1_control, 9);
 
 /**
  * @generated from message kubehero.v1.AuditEntry
@@ -301,7 +366,7 @@ export type AuditEntry = Message<"kubehero.v1.AuditEntry"> & {
  * Use `create(AuditEntrySchema)` to create a new message.
  */
 export const AuditEntrySchema: GenMessage<AuditEntry> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 8);
+  messageDesc(file_kubehero_v1_control, 10);
 
 /**
  * @generated from message kubehero.v1.ListAuditLogResponse
@@ -318,7 +383,7 @@ export type ListAuditLogResponse = Message<"kubehero.v1.ListAuditLogResponse"> &
  * Use `create(ListAuditLogResponseSchema)` to create a new message.
  */
 export const ListAuditLogResponseSchema: GenMessage<ListAuditLogResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 9);
+  messageDesc(file_kubehero_v1_control, 11);
 
 /**
  * @generated from message kubehero.v1.AppendAuditEntryRequest
@@ -400,7 +465,7 @@ export type AppendAuditEntryRequest = Message<"kubehero.v1.AppendAuditEntryReque
  * Use `create(AppendAuditEntryRequestSchema)` to create a new message.
  */
 export const AppendAuditEntryRequestSchema: GenMessage<AppendAuditEntryRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 10);
+  messageDesc(file_kubehero_v1_control, 12);
 
 /**
  * @generated from message kubehero.v1.AppendAuditEntryResponse
@@ -424,7 +489,7 @@ export type AppendAuditEntryResponse = Message<"kubehero.v1.AppendAuditEntryResp
  * Use `create(AppendAuditEntryResponseSchema)` to create a new message.
  */
 export const AppendAuditEntryResponseSchema: GenMessage<AppendAuditEntryResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 11);
+  messageDesc(file_kubehero_v1_control, 13);
 
 /**
  * @generated from message kubehero.v1.GetBurnRateRequest
@@ -464,7 +529,7 @@ export type GetBurnRateRequest = Message<"kubehero.v1.GetBurnRateRequest"> & {
  * Use `create(GetBurnRateRequestSchema)` to create a new message.
  */
 export const GetBurnRateRequestSchema: GenMessage<GetBurnRateRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 12);
+  messageDesc(file_kubehero_v1_control, 14);
 
 /**
  * @generated from message kubehero.v1.GetBurnRateResponse
@@ -500,7 +565,7 @@ export type GetBurnRateResponse = Message<"kubehero.v1.GetBurnRateResponse"> & {
  * Use `create(GetBurnRateResponseSchema)` to create a new message.
  */
 export const GetBurnRateResponseSchema: GenMessage<GetBurnRateResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 13);
+  messageDesc(file_kubehero_v1_control, 15);
 
 /**
  * @generated from message kubehero.v1.ListWasteRecommendationsRequest
@@ -526,7 +591,7 @@ export type ListWasteRecommendationsRequest = Message<"kubehero.v1.ListWasteReco
  * Use `create(ListWasteRecommendationsRequestSchema)` to create a new message.
  */
 export const ListWasteRecommendationsRequestSchema: GenMessage<ListWasteRecommendationsRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 14);
+  messageDesc(file_kubehero_v1_control, 16);
 
 /**
  * @generated from message kubehero.v1.WasteRecommendation
@@ -595,7 +660,7 @@ export type WasteRecommendation = Message<"kubehero.v1.WasteRecommendation"> & {
  * Use `create(WasteRecommendationSchema)` to create a new message.
  */
 export const WasteRecommendationSchema: GenMessage<WasteRecommendation> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 15);
+  messageDesc(file_kubehero_v1_control, 17);
 
 /**
  * @generated from message kubehero.v1.ListWasteRecommendationsResponse
@@ -612,7 +677,7 @@ export type ListWasteRecommendationsResponse = Message<"kubehero.v1.ListWasteRec
  * Use `create(ListWasteRecommendationsResponseSchema)` to create a new message.
  */
 export const ListWasteRecommendationsResponseSchema: GenMessage<ListWasteRecommendationsResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 16);
+  messageDesc(file_kubehero_v1_control, 18);
 
 /**
  * @generated from message kubehero.v1.GetWorkloadRequest
@@ -639,7 +704,7 @@ export type GetWorkloadRequest = Message<"kubehero.v1.GetWorkloadRequest"> & {
  * Use `create(GetWorkloadRequestSchema)` to create a new message.
  */
 export const GetWorkloadRequestSchema: GenMessage<GetWorkloadRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 17);
+  messageDesc(file_kubehero_v1_control, 19);
 
 /**
  * @generated from message kubehero.v1.GetWorkloadResponse
@@ -665,7 +730,7 @@ export type GetWorkloadResponse = Message<"kubehero.v1.GetWorkloadResponse"> & {
  * Use `create(GetWorkloadResponseSchema)` to create a new message.
  */
 export const GetWorkloadResponseSchema: GenMessage<GetWorkloadResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 18);
+  messageDesc(file_kubehero_v1_control, 20);
 
 /**
  * @generated from message kubehero.v1.ListPoliciesRequest
@@ -691,7 +756,7 @@ export type ListPoliciesRequest = Message<"kubehero.v1.ListPoliciesRequest"> & {
  * Use `create(ListPoliciesRequestSchema)` to create a new message.
  */
 export const ListPoliciesRequestSchema: GenMessage<ListPoliciesRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 19);
+  messageDesc(file_kubehero_v1_control, 21);
 
 /**
  * @generated from message kubehero.v1.Policy
@@ -741,7 +806,7 @@ export type Policy = Message<"kubehero.v1.Policy"> & {
  * Use `create(PolicySchema)` to create a new message.
  */
 export const PolicySchema: GenMessage<Policy> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 20);
+  messageDesc(file_kubehero_v1_control, 22);
 
 /**
  * @generated from message kubehero.v1.ListPoliciesResponse
@@ -758,7 +823,7 @@ export type ListPoliciesResponse = Message<"kubehero.v1.ListPoliciesResponse"> &
  * Use `create(ListPoliciesResponseSchema)` to create a new message.
  */
 export const ListPoliciesResponseSchema: GenMessage<ListPoliciesResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 21);
+  messageDesc(file_kubehero_v1_control, 23);
 
 /**
  * @generated from message kubehero.v1.ArmPolicyRequest
@@ -805,7 +870,7 @@ export type ArmPolicyRequest = Message<"kubehero.v1.ArmPolicyRequest"> & {
  * Use `create(ArmPolicyRequestSchema)` to create a new message.
  */
 export const ArmPolicyRequestSchema: GenMessage<ArmPolicyRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 22);
+  messageDesc(file_kubehero_v1_control, 24);
 
 /**
  * @generated from message kubehero.v1.ArmPolicyResponse
@@ -842,7 +907,7 @@ export type ArmPolicyResponse = Message<"kubehero.v1.ArmPolicyResponse"> & {
  * Use `create(ArmPolicyResponseSchema)` to create a new message.
  */
 export const ArmPolicyResponseSchema: GenMessage<ArmPolicyResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 23);
+  messageDesc(file_kubehero_v1_control, 25);
 
 /**
  * @generated from message kubehero.v1.GetTeamSpendRequest
@@ -861,7 +926,7 @@ export type GetTeamSpendRequest = Message<"kubehero.v1.GetTeamSpendRequest"> & {
  * Use `create(GetTeamSpendRequestSchema)` to create a new message.
  */
 export const GetTeamSpendRequestSchema: GenMessage<GetTeamSpendRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 24);
+  messageDesc(file_kubehero_v1_control, 26);
 
 /**
  * @generated from message kubehero.v1.TeamSpend
@@ -913,7 +978,7 @@ export type TeamSpend = Message<"kubehero.v1.TeamSpend"> & {
  * Use `create(TeamSpendSchema)` to create a new message.
  */
 export const TeamSpendSchema: GenMessage<TeamSpend> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 25);
+  messageDesc(file_kubehero_v1_control, 27);
 
 /**
  * @generated from message kubehero.v1.GetTeamSpendResponse
@@ -940,7 +1005,7 @@ export type GetTeamSpendResponse = Message<"kubehero.v1.GetTeamSpendResponse"> &
  * Use `create(GetTeamSpendResponseSchema)` to create a new message.
  */
 export const GetTeamSpendResponseSchema: GenMessage<GetTeamSpendResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 26);
+  messageDesc(file_kubehero_v1_control, 28);
 
 /**
  * @generated from message kubehero.v1.ListVulnerabilitiesRequest
@@ -973,7 +1038,7 @@ export type ListVulnerabilitiesRequest = Message<"kubehero.v1.ListVulnerabilitie
  * Use `create(ListVulnerabilitiesRequestSchema)` to create a new message.
  */
 export const ListVulnerabilitiesRequestSchema: GenMessage<ListVulnerabilitiesRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 27);
+  messageDesc(file_kubehero_v1_control, 29);
 
 /**
  * @generated from message kubehero.v1.Vulnerability
@@ -1068,7 +1133,7 @@ export type Vulnerability = Message<"kubehero.v1.Vulnerability"> & {
  * Use `create(VulnerabilitySchema)` to create a new message.
  */
 export const VulnerabilitySchema: GenMessage<Vulnerability> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 28);
+  messageDesc(file_kubehero_v1_control, 30);
 
 /**
  * @generated from message kubehero.v1.ListVulnerabilitiesResponse
@@ -1107,7 +1172,7 @@ export type ListVulnerabilitiesResponse = Message<"kubehero.v1.ListVulnerabiliti
  * Use `create(ListVulnerabilitiesResponseSchema)` to create a new message.
  */
 export const ListVulnerabilitiesResponseSchema: GenMessage<ListVulnerabilitiesResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 29);
+  messageDesc(file_kubehero_v1_control, 31);
 
 /**
  * @generated from message kubehero.v1.ListAnomaliesRequest
@@ -1138,7 +1203,7 @@ export type ListAnomaliesRequest = Message<"kubehero.v1.ListAnomaliesRequest"> &
  * Use `create(ListAnomaliesRequestSchema)` to create a new message.
  */
 export const ListAnomaliesRequestSchema: GenMessage<ListAnomaliesRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 30);
+  messageDesc(file_kubehero_v1_control, 32);
 
 /**
  * @generated from message kubehero.v1.Anomaly
@@ -1222,7 +1287,7 @@ export type Anomaly = Message<"kubehero.v1.Anomaly"> & {
  * Use `create(AnomalySchema)` to create a new message.
  */
 export const AnomalySchema: GenMessage<Anomaly> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 31);
+  messageDesc(file_kubehero_v1_control, 33);
 
 /**
  * @generated from message kubehero.v1.ListAnomaliesResponse
@@ -1246,7 +1311,7 @@ export type ListAnomaliesResponse = Message<"kubehero.v1.ListAnomaliesResponse">
  * Use `create(ListAnomaliesResponseSchema)` to create a new message.
  */
 export const ListAnomaliesResponseSchema: GenMessage<ListAnomaliesResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 32);
+  messageDesc(file_kubehero_v1_control, 34);
 
 /**
  * @generated from message kubehero.v1.ListCapacityDemandsRequest
@@ -1270,7 +1335,7 @@ export type ListCapacityDemandsRequest = Message<"kubehero.v1.ListCapacityDemand
  * Use `create(ListCapacityDemandsRequestSchema)` to create a new message.
  */
 export const ListCapacityDemandsRequestSchema: GenMessage<ListCapacityDemandsRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 33);
+  messageDesc(file_kubehero_v1_control, 35);
 
 /**
  * @generated from message kubehero.v1.CapacityDemand
@@ -1373,7 +1438,7 @@ export type CapacityDemand = Message<"kubehero.v1.CapacityDemand"> & {
  * Use `create(CapacityDemandSchema)` to create a new message.
  */
 export const CapacityDemandSchema: GenMessage<CapacityDemand> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 34);
+  messageDesc(file_kubehero_v1_control, 36);
 
 /**
  * @generated from message kubehero.v1.ListCapacityDemandsResponse
@@ -1400,7 +1465,7 @@ export type ListCapacityDemandsResponse = Message<"kubehero.v1.ListCapacityDeman
  * Use `create(ListCapacityDemandsResponseSchema)` to create a new message.
  */
 export const ListCapacityDemandsResponseSchema: GenMessage<ListCapacityDemandsResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 35);
+  messageDesc(file_kubehero_v1_control, 37);
 
 /**
  * @generated from message kubehero.v1.PodCostSample
@@ -1590,7 +1655,7 @@ export type PodCostSample = Message<"kubehero.v1.PodCostSample"> & {
  * Use `create(PodCostSampleSchema)` to create a new message.
  */
 export const PodCostSampleSchema: GenMessage<PodCostSample> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 36);
+  messageDesc(file_kubehero_v1_control, 38);
 
 /**
  * NodeCostSample is one node's price and allocation at a tick — what
@@ -1720,7 +1785,7 @@ export type NodeCostSample = Message<"kubehero.v1.NodeCostSample"> & {
  * Use `create(NodeCostSampleSchema)` to create a new message.
  */
 export const NodeCostSampleSchema: GenMessage<NodeCostSample> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 37);
+  messageDesc(file_kubehero_v1_control, 39);
 
 /**
  * @generated from message kubehero.v1.IngestPodCostRequest
@@ -1753,7 +1818,7 @@ export type IngestPodCostRequest = Message<"kubehero.v1.IngestPodCostRequest"> &
  * Use `create(IngestPodCostRequestSchema)` to create a new message.
  */
 export const IngestPodCostRequestSchema: GenMessage<IngestPodCostRequest> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 38);
+  messageDesc(file_kubehero_v1_control, 40);
 
 /**
  * @generated from message kubehero.v1.IngestPodCostResponse
@@ -1779,7 +1844,7 @@ export type IngestPodCostResponse = Message<"kubehero.v1.IngestPodCostResponse">
  * Use `create(IngestPodCostResponseSchema)` to create a new message.
  */
 export const IngestPodCostResponseSchema: GenMessage<IngestPodCostResponse> = /*@__PURE__*/
-  messageDesc(file_kubehero_v1_control, 39);
+  messageDesc(file_kubehero_v1_control, 41);
 
 /**
  * @generated from service kubehero.v1.ControlPlaneService
@@ -1794,6 +1859,19 @@ export const ControlPlaneService: GenService<{
     methodKind: "unary";
     input: typeof HealthCheckRequestSchema;
     output: typeof HealthCheckResponseSchema;
+  },
+  /**
+   * WhoAmI echoes the resolved caller: who the presented credential is,
+   * its role, and (for cluster enrollment tokens) the cluster. The
+   * dashboard's token login and `kubehero auth whoami` use it to check
+   * a credential without side effects.
+   *
+   * @generated from rpc kubehero.v1.ControlPlaneService.WhoAmI
+   */
+  whoAmI: {
+    methodKind: "unary";
+    input: typeof WhoAmIRequestSchema;
+    output: typeof WhoAmIResponseSchema;
   },
   /**
    * Fleet view.

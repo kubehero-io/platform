@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -36,7 +37,7 @@ func main() {
 		Use:   "control-plane",
 		Short: "KubeHero control plane — policy engine, audit log, RPC surface",
 	}
-	root.AddCommand(serveCmd())
+	root.AddCommand(serveCmd(), migrateCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -109,24 +110,41 @@ func anomalyZThreshold(log *slog.Logger) float64 {
 
 func serve(parent context.Context, addr string) error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	var err error
 
 	// ─── storage ──────────────────────────────────────────────────────────
 	// Both are optional on startup — the control-plane degrades gracefully
 	// to read-only-stub mode when env is missing (useful for docs builds,
 	// integration testing, and the kind demo profile that runs without
 	// persistent stores).
-	pg, err := db.Open(parent, log, db.Options{URL: os.Getenv("DATABASE_URL")})
-	if err != nil {
-		log.Warn("postgres unavailable, running in stub mode", "err", err)
-	} else {
+	// A store whose URL is set must come up: on a fresh install the
+	// database pod is often still starting, so retry with backoff for
+	// KUBEHERO_STORE_WAIT (default 2m) and then exit non-zero so the
+	// orchestrator restarts us — never silently fall back to stub mode
+	// with a configured store.
+	storeWait := durationEnv(log, "KUBEHERO_STORE_WAIT", 2*time.Minute)
+	var pg, ch *sql.DB
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		pg, err = openWithRetry(parent, log, "postgres", storeWait, func(ctx context.Context) (*sql.DB, error) {
+			return db.Open(ctx, log, db.Options{URL: url})
+		})
+		if err != nil {
+			return err
+		}
 		defer pg.Close()
-	}
-
-	ch, err := clickhouse.Open(parent, log, clickhouse.Options{DSN: os.Getenv("CLICKHOUSE_URL")})
-	if err != nil {
-		log.Warn("clickhouse unavailable, running in stub mode", "err", err)
 	} else {
+		log.Warn("DATABASE_URL unset — no Postgres (clusters, policies, audit and alert rules are not persisted)")
+	}
+	if dsn := os.Getenv("CLICKHOUSE_URL"); dsn != "" {
+		ch, err = openWithRetry(parent, log, "clickhouse", storeWait, func(ctx context.Context) (*sql.DB, error) {
+			return clickhouse.Open(ctx, log, clickhouse.Options{DSN: dsn})
+		})
+		if err != nil {
+			return err
+		}
 		defer ch.Close()
+	} else {
+		log.Warn("CLICKHOUSE_URL unset — no time-series store (cost, logs, profiles, flows are not stored)")
 	}
 
 	fixturesOff := demoFixturesDisabled()
@@ -211,12 +229,18 @@ func serve(parent context.Context, addr string) error {
 		AllowAnonymous: os.Getenv("KUBEHERO_REQUIRE_AUTH") != "true",
 		Logger:         log,
 	}
+	if pg != nil {
+		// Enrollment tokens minted by RegisterCluster authenticate that
+		// cluster's collector + operator (hash compared, never stored).
+		authCfg.ClusterTokens = &store.ClustersPG{DB: pg}
+	}
 	if authCfg.OIDCIssuer != "" {
 		// Lazy-fetched JWKS cache — first verified token triggers the
 		// initial /.well-known/openid-configuration + jwks_uri pull.
 		// 1h TTL with auto-refresh on kid miss handles key rotation.
 		authCfg.JWKS = auth.NewJWKSCache(authCfg.OIDCIssuer)
 	}
+	rpcOpts.AuthRequired = !authCfg.AllowAnonymous
 	interceptors := connect.WithInterceptors(auth.NewInterceptor(authCfg))
 	path, handler := kuberov1connect.NewControlPlaneServiceHandler(rpc.New(rpcOpts), interceptors)
 	mux.Handle(path, handler)
@@ -271,4 +295,77 @@ func serve(parent context.Context, addr string) error {
 	sh, cancelSh := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelSh()
 	return srv.Shutdown(sh)
+}
+
+// migrateCmd applies Postgres and ClickHouse schema migrations and
+// exits — what the Helm pre-install/pre-upgrade hook runs. Each store
+// is migrated only when its URL is set; a configured store that can't
+// be reached is an error (the hook retries).
+func migrateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate",
+		Short: "Apply Postgres + ClickHouse schema migrations, then exit",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+			ctx := cmd.Context()
+			ran := 0
+			if os.Getenv("DATABASE_URL") != "" {
+				pg, err := db.Open(ctx, log, db.Options{URL: os.Getenv("DATABASE_URL")})
+				if err != nil {
+					return fmt.Errorf("postgres: %w", err)
+				}
+				_ = pg.Close()
+				ran++
+			}
+			if os.Getenv("CLICKHOUSE_URL") != "" {
+				ch, err := clickhouse.Open(ctx, log, clickhouse.Options{DSN: os.Getenv("CLICKHOUSE_URL")})
+				if err != nil {
+					return fmt.Errorf("clickhouse: %w", err)
+				}
+				_ = ch.Close()
+				ran++
+			}
+			if ran == 0 {
+				log.Warn("migrate: neither DATABASE_URL nor CLICKHOUSE_URL is set — nothing to do")
+			}
+			return nil
+		},
+	}
+}
+
+// openWithRetry calls open until it succeeds, ctx ends, or maxWait
+// elapses, backing off from 1s to 10s between attempts.
+func openWithRetry(ctx context.Context, log *slog.Logger, name string, maxWait time.Duration, open func(context.Context) (*sql.DB, error)) (*sql.DB, error) {
+	deadline := time.Now().Add(maxWait)
+	backoff := time.Second
+	for attempt := 1; ; attempt++ {
+		conn, err := open(ctx)
+		if err == nil {
+			return conn, nil
+		}
+		if time.Now().Add(backoff).After(deadline) {
+			return nil, fmt.Errorf("%s unavailable after %s (%d attempts): %w", name, maxWait, attempt, err)
+		}
+		log.Warn("store not ready, retrying", "store", name, "attempt", attempt, "in", backoff.String(), "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, 10*time.Second)
+	}
+}
+
+// durationEnv parses a Go duration from env, falling back to def.
+func durationEnv(log *slog.Logger, key string, def time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		log.Warn("invalid duration, using default", "env", key, "value", raw, "default", def.String())
+		return def
+	}
+	return d
 }
