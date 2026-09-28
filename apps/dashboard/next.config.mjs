@@ -8,6 +8,9 @@ const nextConfig = {
   // Produces a minimal self-contained runtime under .next/standalone so the
   // container image doesn't need node_modules at rest. See Dockerfile.
   output: "standalone",
+  // `next dev` would otherwise (re)generate AGENTS.md / CLAUDE.md in the
+  // app directory; the repo documents its conventions elsewhere.
+  agentRules: false,
   // Baseline hardening headers for every route. No CSP here: the App
   // Router's inline bootstrap scripts need per-request nonces, which is a
   // proxy.ts concern for a later pass.
