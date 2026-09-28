@@ -85,41 +85,56 @@ func directionName(d uint8) (string, bool) {
 // flowRowKey is the aggregation key of emitted rows: kernel keys that
 // differ only in addresses resolving to the same endpoint (a pod's IPv4
 // and IPv6 address, a node's several IPs) collapse into one row.
+// Endpoints are interned to small integers so the key stays 12 bytes:
+// the index sees up to a full table (131072 entries) every interval.
 type flowRowKey struct {
-	src, dst  string // endpointID
+	src, dst  uint32 // endpoint ids, see flowAggregator.intern
 	port      uint16
-	protocol  string
-	direction string
+	protocol  uint8
+	direction uint8
 }
 
 // flowAggregator translates drained kernel entries into Flow rows. One
 // aggregator serves one drain; the Resolver is consulted once per
-// distinct address.
+// distinct address. Rows live in one slice (indexed by key) rather than
+// one allocation each.
 type flowAggregator struct {
 	resolver        Resolver
 	includeLoopback bool
 
-	endpoints map[netip.Addr]*kuberov1.FlowEndpoint
-	rows      map[flowRowKey]*flowRow
+	byAddr map[netip.Addr]addrEndpoint
+	byID   map[string]uint32 // endpointID -> interned id
+
+	index map[flowRowKey]int
+	rows  []flowRow
 
 	skipped uint64 // entries dropped: loopback, malformed
 }
 
-type flowRow struct {
-	src, dst            *kuberov1.FlowEndpoint
-	srcAddr, dstAddr    netip.Addr
-	bytes, packets      uint64
-	retransmits         uint64
-	port                uint16
-	protocol, direction string
+// addrEndpoint is one address's completed endpoint and the interned id
+// of its identity.
+type addrEndpoint struct {
+	ep *kuberov1.FlowEndpoint
+	id uint32
 }
 
-func newFlowAggregator(r Resolver, includeLoopback bool) *flowAggregator {
+type flowRow struct {
+	key                         flowRowKey
+	srcAddr, dstAddr            netip.Addr // representative (lowest) addresses
+	bytes, packets, retransmits uint64
+}
+
+// newFlowAggregator sizes its tables for sizeHint rows (the previous
+// drain's count) so a steady node does not regrow them every interval.
+func newFlowAggregator(r Resolver, includeLoopback bool, sizeHint int) *flowAggregator {
+	sizeHint = max(0, min(sizeHint, maxFlowMapEntries))
 	return &flowAggregator{
 		resolver:        r,
 		includeLoopback: includeLoopback,
-		endpoints:       make(map[netip.Addr]*kuberov1.FlowEndpoint),
-		rows:            make(map[flowRowKey]*flowRow),
+		byAddr:          make(map[netip.Addr]addrEndpoint),
+		byID:            make(map[string]uint32),
+		index:           make(map[flowRowKey]int, sizeHint),
+		rows:            make([]flowRow, 0, sizeHint),
 	}
 }
 
@@ -142,10 +157,11 @@ func (a *flowAggregator) addRetransmits(k *flowKey, count uint64) {
 	}
 }
 
+// row returns the row for k, creating it. The pointer is only valid
+// until the next call (the slice may grow).
 func (a *flowAggregator) row(k *flowKey) *flowRow {
 	src, dst, ok := k.addrs()
-	dir, dirOK := directionName(k.Direction)
-	if !ok || !dirOK {
+	if !ok || k.Direction > dirIngress {
 		a.skipped++
 		return nil
 	}
@@ -155,37 +171,38 @@ func (a *flowAggregator) row(k *flowKey) *flowRow {
 		a.skipped++
 		return nil
 	}
-	srcEP, dstEP := a.endpoint(src), a.endpoint(dst)
 	rk := flowRowKey{
-		src:       endpointID(srcEP),
-		dst:       endpointID(dstEP),
+		src:       a.intern(src),
+		dst:       a.intern(dst),
 		port:      k.Port,
-		protocol:  protocolName(k.Protocol),
-		direction: dir,
+		protocol:  k.Protocol,
+		direction: k.Direction,
 	}
-	row := a.rows[rk]
-	if row == nil {
-		row = &flowRow{src: srcEP, dst: dstEP, srcAddr: src, dstAddr: dst, port: k.Port, protocol: rk.protocol, direction: dir}
-		a.rows[rk] = row
-		return row
+	i, ok := a.index[rk]
+	if !ok {
+		a.index[rk] = len(a.rows)
+		a.rows = append(a.rows, flowRow{key: rk, srcAddr: src, dstAddr: dst})
+		return &a.rows[len(a.rows)-1]
 	}
 	// Several addresses behind one endpoint: report the lowest so output
 	// does not depend on map iteration order.
+	row := &a.rows[i]
 	if src.Less(row.srcAddr) {
-		row.src, row.srcAddr = srcEP, src
+		row.srcAddr = src
 	}
 	if dst.Less(row.dstAddr) {
-		row.dst, row.dstAddr = dstEP, dst
+		row.dstAddr = dst
 	}
 	return row
 }
 
-// endpoint resolves addr once per drain. The Resolver's result is cloned
-// (resolvers typically hand out cached objects) and completed so every
-// emitted endpoint has ip, kind and name set.
-func (a *flowAggregator) endpoint(addr netip.Addr) *kuberov1.FlowEndpoint {
-	if ep, ok := a.endpoints[addr]; ok {
-		return ep
+// intern resolves addr once per drain and returns the id of its
+// endpoint identity, so addresses of one pod / service / node share an
+// id. The Resolver's result is cloned (resolvers typically hand out
+// cached objects) and completed so ip, kind and name are always set.
+func (a *flowAggregator) intern(addr netip.Addr) uint32 {
+	if e, ok := a.byAddr[addr]; ok {
+		return e.id
 	}
 	var ep *kuberov1.FlowEndpoint
 	if got := a.resolver.LookupIP(addr); got != nil {
@@ -202,8 +219,14 @@ func (a *flowAggregator) endpoint(addr netip.Addr) *kuberov1.FlowEndpoint {
 	if ep.Name == "" {
 		ep.Name = ep.Ip
 	}
-	a.endpoints[addr] = ep
-	return ep
+	eid := endpointID(ep)
+	id, ok := a.byID[eid]
+	if !ok {
+		id = uint32(len(a.byID))
+		a.byID[eid] = id
+	}
+	a.byAddr[addr] = addrEndpoint{ep: ep, id: id}
+	return id
 }
 
 // endpointID is the identity rows aggregate on: the Kubernetes object
@@ -227,24 +250,31 @@ func endpointID(ep *kuberov1.FlowEndpoint) string {
 	return "ip/" + ep.GetIp()
 }
 
-// flows returns the aggregated rows, heaviest first. ts is the end of
-// the window (drain time), window its measured length. Endpoint messages
-// are shared between rows of one batch: consumers must treat the batch
-// as read-only.
+// flows returns all aggregated rows as one batch (see batches).
 func (a *flowAggregator) flows(ts time.Time, window time.Duration) []*kuberov1.Flow {
+	var out []*kuberov1.Flow
+	a.batches(ts, window, max(1, len(a.rows)), func(b []*kuberov1.Flow) { out = b })
+	return out
+}
+
+// batches emits the aggregated rows heaviest first, in batches of at
+// most size. ts is the end of the window (drain time), window its
+// measured length. Messages are built per batch, so only one batch is
+// alive at a time even when the table was full. Endpoint messages are
+// shared between rows: consumers must treat batches as read-only. The
+// aggregator is spent afterwards.
+func (a *flowAggregator) batches(ts time.Time, window time.Duration, size int, emit func([]*kuberov1.Flow)) {
 	windowSec := int32(min(math.Round(window.Seconds()), math.MaxInt32))
 	if windowSec < 1 {
 		windowSec = 1
 	}
-	rows := make([]*flowRow, 0, len(a.rows))
-	for _, r := range a.rows {
-		rows = append(rows, r)
-	}
-	slices.SortFunc(rows, func(x, y *flowRow) int {
+	rows := a.rows
+	a.index = nil // sorting invalidates it
+	slices.SortFunc(rows, func(x, y flowRow) int {
 		if c := cmp.Compare(y.bytes, x.bytes); c != 0 {
 			return c
 		}
-		if c := cmp.Compare(x.direction, y.direction); c != 0 {
+		if c := cmp.Compare(x.key.direction, y.key.direction); c != 0 {
 			return c
 		}
 		if c := x.srcAddr.Compare(y.srcAddr); c != 0 {
@@ -253,26 +283,33 @@ func (a *flowAggregator) flows(ts time.Time, window time.Duration) []*kuberov1.F
 		if c := x.dstAddr.Compare(y.dstAddr); c != 0 {
 			return c
 		}
-		if c := cmp.Compare(x.port, y.port); c != 0 {
+		if c := cmp.Compare(x.key.port, y.key.port); c != 0 {
 			return c
 		}
-		return cmp.Compare(x.protocol, y.protocol)
+		return cmp.Compare(x.key.protocol, y.key.protocol)
 	})
-	out := make([]*kuberov1.Flow, len(rows))
 	ms := ts.UnixMilli()
-	for i, r := range rows {
-		out[i] = &kuberov1.Flow{
-			TsUnixMs:    ms,
-			WindowSec:   windowSec,
-			Src:         r.src,
-			Dst:         r.dst,
-			Port:        int32(r.port),
-			Protocol:    r.protocol,
-			Bytes:       r.bytes,
-			Packets:     r.packets,
-			Direction:   r.direction,
-			Retransmits: uint32(min(r.retransmits, math.MaxUint32)),
+	for len(rows) > 0 {
+		n := min(size, len(rows))
+		// One backing array per batch; elements are filled in place,
+		// never copied.
+		msgs := make([]kuberov1.Flow, n)
+		out := make([]*kuberov1.Flow, n)
+		for i := range n {
+			r, m := &rows[i], &msgs[i]
+			dir, _ := directionName(r.key.direction)
+			m.TsUnixMs = ms
+			m.WindowSec = windowSec
+			// The endpoint as resolved from the row's representative address.
+			m.Src, m.Dst = a.byAddr[r.srcAddr].ep, a.byAddr[r.dstAddr].ep
+			m.Port = int32(r.key.port)
+			m.Protocol = protocolName(r.key.protocol)
+			m.Bytes, m.Packets = r.bytes, r.packets
+			m.Direction = dir
+			m.Retransmits = uint32(min(r.retransmits, math.MaxUint32))
+			out[i] = m
 		}
+		emit(out)
+		rows = rows[n:]
 	}
-	return out
 }

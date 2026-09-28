@@ -6,6 +6,7 @@ package ebpf
 import (
 	"encoding/binary"
 	"net/netip"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -136,7 +137,7 @@ func TestProtocolAndDirectionNames(t *testing.T) {
 
 func TestFlowAggregation(t *testing.T) {
 	r := newFakeResolver()
-	agg := newFlowAggregator(r, false)
+	agg := newFlowAggregator(r, false, 0)
 	v := func(b, p uint64) *flowValue { return &flowValue{Bytes: b, Packets: p} }
 
 	// web -> db:5432, over IPv4 and IPv6 (dual-stack pod): one row.
@@ -217,10 +218,31 @@ func TestFlowAggregation(t *testing.T) {
 	}
 }
 
+func TestFlowBatches(t *testing.T) {
+	agg := newFlowAggregator(newFakeResolver(), false, 0)
+	for i := 0; i < 5; i++ {
+		agg.addFlow(key("10.0.0.1", "10.0.0.2", uint16(100+i), ipprotoTCP, dirEgress), &flowValue{Bytes: uint64(10 * (i + 1)), Packets: 1})
+	}
+	var sizes []int
+	var bytes []uint64
+	agg.batches(time.Now(), time.Second, 2, func(b []*kuberov1.Flow) {
+		sizes = append(sizes, len(b))
+		for _, f := range b {
+			bytes = append(bytes, f.Bytes)
+		}
+	})
+	if !slices.Equal(sizes, []int{2, 2, 1}) || !slices.Equal(bytes, []uint64{50, 40, 30, 20, 10}) {
+		t.Fatalf("batches %v, bytes %v", sizes, bytes)
+	}
+	if got := newFlowAggregator(newFakeResolver(), false, 0).flows(time.Now(), time.Second); len(got) != 0 {
+		t.Fatalf("empty aggregator produced %d rows", len(got))
+	}
+}
+
 func TestFlowEndpointCompletion(t *testing.T) {
 	r := newFakeResolver()
 	r.returnNil = true // a resolver that breaks its contract
-	agg := newFlowAggregator(r, true)
+	agg := newFlowAggregator(r, true, 0)
 	agg.addFlow(key("127.0.0.1", "10.9.9.9", 80, ipprotoTCP, dirIngress), &flowValue{Bytes: 5, Packets: 1})
 	flows := agg.flows(time.Now(), 0)
 	if len(flows) != 1 {
@@ -250,5 +272,36 @@ func TestEndpointID(t *testing.T) {
 		if got := endpointID(tt.ep); got != tt.want {
 			t.Errorf("endpointID(%v) = %q, want %q", tt.ep, got, tt.want)
 		}
+	}
+}
+
+// BenchmarkFlowAggregationFullTable drains a full default-size table
+// (131072 kernel entries: 512 pods talking to 256 peers over a few
+// ports, both directions) into rows.
+func BenchmarkFlowAggregationFullTable(b *testing.B) {
+	r := newFakeResolver()
+	keys := make([]flowKey, 0, defaultFlowMapEntries)
+	for i := 0; len(keys) < defaultFlowMapEntries; i++ {
+		pod := netip.AddrFrom4([4]byte{10, 1, byte(i / 256 % 2), byte(i % 256)})
+		peer := netip.AddrFrom4([4]byte{10, 2, 0, byte(i / 512 % 256)})
+		k := key(pod.String(), peer.String(), uint16(8000+i%64), ipprotoTCP, uint8(i%2))
+		keys = append(keys, *k)
+	}
+	v := flowValue{Bytes: 1500, Packets: 1}
+	hint := len(keys) // steady state: the previous drain sized the tables
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		agg := newFlowAggregator(r, false, hint)
+		for i := range keys {
+			agg.addFlow(&keys[i], &v)
+		}
+		rows := len(agg.rows)
+		emitted := 0
+		agg.batches(time.Now(), 15*time.Second, flowEmitBatch, func(fs []*kuberov1.Flow) { emitted += len(fs) })
+		if emitted != rows || rows == 0 {
+			b.Fatalf("emitted %d of %d rows", emitted, rows)
+		}
+		hint = rows
 	}
 }

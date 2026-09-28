@@ -24,9 +24,6 @@ const (
 	procRoot = "/proc"
 	// finalFlushTimeout bounds the last drain after ctx is cancelled.
 	finalFlushTimeout = 5 * time.Second
-	// flowEmitBatch / profileEmitSamples bound one Emit* call.
-	flowEmitBatch      = 2000
-	profileEmitSamples = 20000
 )
 
 // loops tracks the drain goroutines so tests can wait for detach and

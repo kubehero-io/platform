@@ -161,17 +161,6 @@ func batchProfiles(ps []*kuberov1.Profile, maxSamples int) [][]*kuberov1.Profile
 	return batches
 }
 
-// batchFlows splits flows into batches of at most size rows.
-func batchFlows(fs []*kuberov1.Flow, size int) [][]*kuberov1.Flow {
-	var batches [][]*kuberov1.Flow
-	for len(fs) > 0 {
-		n := min(size, len(fs))
-		batches = append(batches, fs[:n:n])
-		fs = fs[n:]
-	}
-	return batches
-}
-
 // topSamples keeps the limit heaviest entries (ties broken by key so
 // the choice is deterministic) and reports how many were dropped.
 func topSamples(keys []stackKey, counts []uint64, limit int) ([]stackKey, []uint64, int) {

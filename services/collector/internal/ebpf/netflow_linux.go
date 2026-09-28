@@ -13,6 +13,8 @@ import (
 
 	cebpf "github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
+
+	kuberov1 "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1"
 )
 
 // Slots of the per-CPU error arrays (bpf/netflow.bpf.c, tcpretrans.bpf.c).
@@ -35,6 +37,7 @@ type netflow struct {
 	rtLink link.Link
 
 	lastDrain                    time.Time
+	lastRows                     int // sizes the next drain's tables
 	flowUpdateErrs, rtUpdateErrs deltaCounter
 	rtReadErrs                   deltaCounter
 }
@@ -161,7 +164,7 @@ func (nf *netflow) flush(ctx context.Context) {
 	window := now.Sub(nf.lastDrain)
 	nf.lastDrain = now
 
-	agg := newFlowAggregator(nf.cfg.Resolver, nf.cfg.IncludeLoopback)
+	agg := newFlowAggregator(nf.cfg.Resolver, nf.cfg.IncludeLoopback, nf.lastRows)
 	n, err := drainMap(nf.objs.KhFlows, func(ks []flowKey, vs []flowValue) {
 		for i := range ks {
 			agg.addFlow(&ks[i], &vs[i])
@@ -190,18 +193,19 @@ func (nf *netflow) flush(ctx context.Context) {
 	}
 	nf.readKernelErrors()
 
-	flows := agg.flows(now, window)
+	rows := len(agg.rows)
+	nf.lastRows = rows
 	emitted := 0
-	for _, batch := range batchFlows(flows, flowEmitBatch) {
+	agg.batches(now, window, flowEmitBatch, func(batch []*kuberov1.Flow) {
 		if err := nf.cfg.EmitFlows(ctx, batch); err != nil {
 			counters.drainErrors.Add(1)
 			nf.log.Warn("ebpf: EmitFlows failed", "err", err, "flows", len(batch))
-			continue
+			return
 		}
 		emitted += len(batch)
 		counters.flowsEmitted.Add(uint64(len(batch)))
-	}
-	nf.log.Debug("ebpf netflow drain", "entries", n, "rows", len(flows), "emitted", emitted,
+	})
+	nf.log.Debug("ebpf netflow drain", "entries", n, "rows", rows, "emitted", emitted,
 		"skipped", agg.skipped, "window", window)
 }
 

@@ -125,11 +125,6 @@ func TestBatching(t *testing.T) {
 		t.Error("no profiles, no batches")
 	}
 
-	flows := make([]*kuberov1.Flow, 5)
-	fb := batchFlows(flows, 2)
-	if len(fb) != 3 || len(fb[0]) != 2 || len(fb[2]) != 1 || cap(fb[0]) != 2 {
-		t.Errorf("flow batches: %d", len(fb))
-	}
 }
 
 func TestTopSamples(t *testing.T) {

@@ -31,6 +31,11 @@ const (
 	minFlowMapEntries     = 1024
 	maxFlowMapEntries     = 1 << 20
 
+	// flowEmitBatch / profileEmitSamples bound one Emit* call, keeping
+	// each RPC well under common message-size limits.
+	flowEmitBatch      = 2000
+	profileEmitSamples = 20000
+
 	// FlowMapEntriesEnv overrides the kernel flow table size (entries,
 	// 1024..1048576) for nodes with unusually many distinct peers per
 	// flush interval. Read once by Start.
