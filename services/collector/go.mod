@@ -12,6 +12,8 @@ require (
 	k8s.io/client-go v0.35.0
 )
 
+require connectrpc.com/connect v1.20.0 // indirect
+
 // cost-model is never published on its own; it resolves through the
 // repo-root go.work in-workspace and through this replace elsewhere.
 replace github.com/kubehero-io/platform/packages/cost-model => ../../packages/cost-model
