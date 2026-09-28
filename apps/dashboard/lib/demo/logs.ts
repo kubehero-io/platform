@@ -9,8 +9,9 @@
 // actually shows.
 //
 // The story (anchored to "now", stable for 5 minutes at a time):
-//   · shop/payments: Stripe timeouts spike from ~70 to ~8 minutes ago,
-//     checkout surfaces "payment authorization failed", storefront warns;
+//   · shop/payments: Stripe timeouts spiking since ~70 minutes ago and
+//     still ongoing; checkout surfaces "payment authorization failed",
+//     storefront warns;
 //   · shop/cart: periodic "runtime: out of memory" fatals;
 //   · everything else hums along at believable rates.
 
@@ -47,8 +48,10 @@ const uuid = (r: () => number) => `${hex(r, 8)}-${hex(r, 4)}-4${hex(r, 3)}-a${he
 const ms = (r: () => number, lo: number, hi: number) => Math.round(lo + Math.pow(r(), 2) * (hi - lo));
 const pick = <T,>(r: () => number, xs: T[]) => xs[Math.floor(r() * xs.length)];
 
-// Incident window (relative minutes to the anchor): payments is failing.
-const INCIDENT = (rel: number) => (rel >= -70 && rel <= -8 ? 1 : 0);
+// Incident window (relative minutes to the anchor): payments started
+// failing ~70 minutes ago and still is — the alert on /alerts is firing
+// and /ask has something live to investigate.
+const INCIDENT = (rel: number) => (rel >= -70 ? 1 : 0);
 const incident = (base: number, peak: number) => (rel: number) => (INCIDENT(rel) ? peak / base : 1);
 
 const TEMPLATES: Record<string, Template[]> = {

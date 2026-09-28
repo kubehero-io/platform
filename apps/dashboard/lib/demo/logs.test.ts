@@ -46,7 +46,7 @@ describe("demo log store", () => {
     expect(v.totalBytes).toBeGreaterThan(v.totalLines * 100);
   });
 
-  it("puts the payments incident in the ~70→8 minutes-ago window", () => {
+  it("starts the payments incident ~70 minutes ago and keeps it going", () => {
     const s = demoStreams().find((x) => x.template.id === "pay-stripe-timeout")!;
     const anchorMin = anchorOf(NOW) / 60_000;
     const during = [...Array(20)].reduce((a, _, i) => a + countAt(s, anchorMin - 40 + i, anchorMin), 0);
