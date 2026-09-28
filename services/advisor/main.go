@@ -2,23 +2,24 @@
 // Copyright (c) KubeHero contributors
 
 // Command advisor is KubeHero's agentic layer: it monitors the fleet's
-// cost/ops telemetry, explains what changed, and PROPOSES guarded
+// cost/ops telemetry, explains what changed, answers operators'
+// questions with a read-only investigation loop, and PROPOSES guarded
 // actions.
 //
 // GUARDRAILS (non-negotiable):
 //   - The advisor is READ-ONLY. It never calls the Kubernetes API and
 //     never calls control-plane mutation RPCs — its only inputs are the
-//     control-plane's read RPCs (ListClusters, ListWasteRecommendations,
-//     ListAnomalies, GetTeamSpend, GetBurnRate).
+//     control-plane's read RPCs (internal/backend exposes nothing else).
 //   - Every proposed action's crd_yaml is a manifest the human (or CLI)
 //     applies through the operator's existing arming flow. Nothing the
 //     advisor emits executes automatically.
 //   - LLM output is validated: action kinds are whitelisted, impacts
 //     must be finite and >= 0, and crd_yaml must parse to a BudgetPolicy
 //     / CeilingPolicy / RightsizingPolicy — otherwise the action is
-//     downgraded to an investigate-only proposal.
-//   - The endpoint never fails because Anthropic is down: the LLM tier
-//     falls back to the deterministic rules tier on any error.
+//     downgraded to an investigate-only proposal. Evidence links must be
+//     dashboard-relative.
+//   - The endpoints never fail because Anthropic is down or declines: the
+//     LLM tier falls back to the deterministic rules tier on any error.
 package main
 
 import (
@@ -36,9 +37,11 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1/kuberov1connect"
+	"github.com/kubehero-io/platform/services/advisor/internal/backend"
 	"github.com/kubehero-io/platform/services/advisor/internal/brain"
 	"github.com/kubehero-io/platform/services/advisor/internal/brain/llm"
 	"github.com/kubehero-io/platform/services/advisor/internal/brain/rules"
+	"github.com/kubehero-io/platform/services/advisor/internal/investigate"
 	"github.com/kubehero-io/platform/services/advisor/internal/rpc"
 	"github.com/kubehero-io/platform/services/advisor/internal/source"
 )
@@ -63,14 +66,19 @@ func serveCmd() *cobra.Command {
 
 Configuration is via environment variables:
 
-  CONTROL_PLANE_URL   Base URL of the control-plane's Connect API
-                      (e.g. http://control-plane:8080). Unset: the
-                      advisor runs over a built-in demo fixture and
-                      briefings report source="demo".
-  ANTHROPIC_API_KEY   Enables the LLM brain (Claude). Unset: the
-                      deterministic rules brain runs alone. When set,
-                      any LLM failure still falls back to rules — the
-                      RPCs never fail because Anthropic is down.`,
+  CONTROL_PLANE_URL       Base URL of the control-plane's Connect API
+                          (e.g. http://control-plane:8080). Unset: the
+                          advisor runs over a built-in demo fixture and
+                          every answer reports source="demo".
+  KUBEHERO_API_TOKEN      Bearer token for the control plane (required
+  CONTROL_PLANE_TOKEN     when it runs with KUBEHERO_REQUIRE_AUTH); the
+                          first one set wins.
+  ANTHROPIC_API_KEY       Enables the LLM tier (Claude). Unset: the
+                          deterministic rules tier runs alone. When set,
+                          any LLM failure or refusal still falls back to
+                          rules — the RPCs never fail because Anthropic is
+                          down.
+  KUBEHERO_ADVISOR_MODEL  Claude model id (default claude-opus-5).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return serve(cmd.Context(), addr)
 		},
@@ -83,22 +91,29 @@ func serve(parent context.Context, addr string) error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
 	// ─── data in (tier 1) ─────────────────────────────────────────────────
-	var src source.Source
+	var be backend.Backend
+	demo := false
 	if cpURL := os.Getenv("CONTROL_PLANE_URL"); cpURL != "" {
-		log.Info("using control-plane source", "url", cpURL)
-		src = source.NewControlPlane(cpURL)
+		token := firstNonEmpty(os.Getenv("KUBEHERO_API_TOKEN"), os.Getenv("CONTROL_PLANE_TOKEN"))
+		log.Info("using control-plane source", "url", cpURL, "auth", token != "")
+		be = backend.NewConnect(cpURL, token)
 	} else {
-		log.Warn("DEMO MODE: CONTROL_PLANE_URL unset — briefings use built-in fixture data (source=\"demo\")")
-		src = source.Demo{}
+		log.Warn("DEMO MODE: CONTROL_PLANE_URL unset — briefings and investigations use built-in fixture data (source=\"demo\")")
+		be = backend.Demo{}
+		demo = true
 	}
+	src := source.NewControlPlane(be)
 
 	// ─── brains (tier 2, chosen at startup) ───────────────────────────────
 	var b brain.Brain = rules.New()
+	var inv investigate.Investigator = &investigate.Rules{Backend: be}
 	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		log.Info("LLM brain enabled (falls back to rules on any failure)")
-		b = llm.New(b, log)
+		cfg := llm.ConfigFromEnv()
+		log.Info("LLM tier enabled (falls back to rules on any failure)", "model", firstNonEmpty(cfg.Model, llm.DefaultModel))
+		b = llm.New(b, log, cfg)
+		inv = llm.NewInvestigator(be, inv, log, cfg)
 	} else {
-		log.Info("rules brain active (set ANTHROPIC_API_KEY to enable the LLM brain)")
+		log.Info("rules tier active (set ANTHROPIC_API_KEY to enable the LLM tier)")
 	}
 
 	// ─── HTTP + RPC ───────────────────────────────────────────────────────
@@ -116,7 +131,10 @@ func serve(parent context.Context, addr string) error {
 		_, _ = fmt.Fprintln(w, `kubehero_up{service="advisor"} 1`)
 	})
 
-	path, handler := kuberov1connect.NewAdvisorServiceHandler(rpc.New(b, src, log))
+	adv := rpc.New(b, src, log)
+	adv.Investigator = inv
+	adv.DemoData = demo
+	path, handler := kuberov1connect.NewAdvisorServiceHandler(adv)
 	mux.Handle(path, handler)
 
 	srv := &http.Server{
@@ -144,4 +162,13 @@ func serve(parent context.Context, addr string) error {
 	sh, cancelSh := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelSh()
 	return srv.Shutdown(sh)
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
