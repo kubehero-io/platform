@@ -6,49 +6,70 @@
 // in isolation.
 //
 // Policy — default deny: every page route needs a valid session except
-// the auth pages themselves. The old middleware kept an allow-list of
+// the sign-in pages themselves. The old middleware kept an allow-list of
 // protected prefixes, which silently left every newly added page
 // (/logs, /alerts, …) public until someone remembered to extend it.
 //
 // Proxy runs on the Node.js runtime in Next 16 (edge is not supported
-// for proxy), so unlike the old edge middleware it can afford to verify
-// the cookie's HMAC instead of only peeking at the payload. A forged or
-// stale cookie is treated exactly like no cookie.
+// for proxy), so unlike the old edge middleware it verifies and decrypts
+// the cookie instead of only peeking at the payload. A forged, expired
+// or wrong-mode cookie is treated exactly like no cookie.
 
+import type { AuthMode } from "./auth-mode";
 import type { Session } from "./session";
 
-export const AUTH_ROUTES = new Set(["/login", "/signup"]);
-
 export type GateDecision =
-  | { kind: "next" }
+  | { kind: "next"; clearCookie?: boolean }
   | { kind: "redirect"; to: string; clearCookie?: boolean };
+
+/**
+ * Whether a cryptographically valid session is acceptable right now:
+ * minted under the auth mode the dashboard currently runs in (a demo
+ * session must not survive a switch to token mode) and not expired.
+ */
+export function sessionAcceptable(s: Session, mode: AuthMode, now = Date.now()): boolean {
+  const sessionMode = s.mode ?? "demo";
+  if (sessionMode !== mode) return false;
+  if (s.expiresAt !== undefined && s.expiresAt <= now) return false;
+  return true;
+}
+
+/** Sign-in routes reachable without a session. Sign-up is a demo-only tour. */
+export function authRoutes(mode: AuthMode): ReadonlySet<string> {
+  return mode === "demo" ? new Set(["/login", "/signup"]) : new Set(["/login"]);
+}
 
 export function gate(
   pathname: string,
   rawCookie: string | undefined,
   verify: (raw: string) => Session | null,
+  mode: AuthMode = "demo",
+  now = Date.now(),
 ): GateDecision {
-  const session = rawCookie ? verify(rawCookie) : null;
-  const isAuthRoute = AUTH_ROUTES.has(pathname);
+  const verified = rawCookie ? verify(rawCookie) : null;
+  const session = verified && sessionAcceptable(verified, mode, now) ? verified : null;
+  // A cookie was presented but is unusable — drop it so the browser
+  // stops replaying it.
+  const clearCookie = !!rawCookie && !session;
 
-  if (isAuthRoute) {
-    // Signed-in users have no business on /login.
-    return session ? { kind: "redirect", to: "/overview" } : { kind: "next" };
+  // Token mode has no sign-up tour and no onboarding wizard.
+  if (mode === "token" && (pathname === "/signup" || pathname === "/onboarding")) {
+    return { kind: "redirect", to: session ? "/overview" : "/login", clearCookie };
+  }
+
+  if (authRoutes(mode).has(pathname)) {
+    if (session) return { kind: "redirect", to: "/overview" };
+    return clearCookie ? { kind: "next", clearCookie } : { kind: "next" };
   }
 
   if (!session) {
     const next = safeNextPath(pathname);
-    return {
-      kind: "redirect",
-      to: next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`,
-      // A cookie was presented but failed verification — drop it so the
-      // browser stops replaying it.
-      clearCookie: rawCookie !== undefined && rawCookie !== "",
-    };
+    const to = pathname === "/" || next !== pathname ? "/login" : `/login?next=${encodeURIComponent(next)}`;
+    return { kind: "redirect", to, clearCookie };
   }
 
-  // Onboarding gate: new accounts go through the wizard first.
-  if (!session.onboarded && pathname !== "/onboarding") {
+  // Onboarding gate: new demo accounts go through the wizard first.
+  if (!session.onboarded && pathname !== "/onboarding" && mode === "demo") {
     return { kind: "redirect", to: "/onboarding" };
   }
   return { kind: "next" };

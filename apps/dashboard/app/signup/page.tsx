@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { redirect } from "next/navigation";
 import { AuthShell } from "@/components/auth/auth-shell";
+import { authMode } from "@/lib/auth-mode";
 import { signUp } from "../login/actions";
 
-export const metadata = { title: "Sign in · KubeHero" };
+export const metadata = { title: "Create a demo account · KubeHero" };
 
 export default async function SignupPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  // Sign-up only exists as part of the demo tour (proxy.ts redirects too).
+  if (authMode() !== "demo") redirect("/login");
   const { error } = await searchParams;
   return (
     <AuthShell
-      title="Sign in"
+      title="Create a demo account"
       sub="Spin up a demo account. You'll walk through a 3-step onboarding, then the dashboard is yours to explore."
       footer={
         <span className="font-mono text-[11px] text-[var(--color-fg-dim)]">

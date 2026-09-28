@@ -7,14 +7,17 @@ import { CmdKHint } from "@/components/cmd-k-hint";
 import { NotificationBell } from "@/components/notification-bell";
 import { TimeRangeSelector } from "@/components/time-range-selector";
 import { UserMenu } from "@/components/user-menu";
-import { getSession } from "@/lib/session";
+import { authMode } from "@/lib/auth-mode";
+import { getSessionView } from "@/lib/session";
 
 export async function Topbar({
   crumbs,
 }: {
   crumbs: { label: string; href?: string }[];
 }) {
-  const s = await getSession();
+  const s = await getSessionView();
+  const mode = authMode();
+  const label = s?.email || (s?.subject ? s.subject : mode === "demo" ? "demo@kubehero.io" : "signed in");
   return (
     <header className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-[var(--color-line)] bg-[var(--color-bg)]/90 px-5 backdrop-blur-md">
       <nav className="flex items-center gap-2 font-mono text-[12px] text-[var(--color-fg-dim)]">
@@ -36,7 +39,7 @@ export async function Topbar({
         <TimeRangeSelector />
         <CmdKHint />
         <NotificationBell />
-        <UserMenu email={s?.email ?? "demo@kubehero.io"} org={s?.org ?? "demo"} />
+        <UserMenu label={label} org={s?.org || "kubehero"} role={s?.role} mode={mode} />
       </div>
     </header>
   );
