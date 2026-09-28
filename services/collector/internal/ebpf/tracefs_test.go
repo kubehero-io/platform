@@ -4,6 +4,8 @@
 package ebpf
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -121,5 +123,31 @@ func TestFieldName(t *testing.T) {
 		if got := fieldName(decl); got != want {
 			t.Errorf("fieldName(%q) = %q, want %q", decl, got, want)
 		}
+	}
+}
+
+// TestReadRetransmitOffsetsSearchesMounts mirrors LinuxKit: nothing at
+// /sys/kernel/tracing, the format under the debugfs mount.
+func TestReadRetransmitOffsetsSearchesMounts(t *testing.T) {
+	saved := tracefsRoots
+	t.Cleanup(func() { tracefsRoots = saved })
+
+	debugfs := t.TempDir()
+	dir := filepath.Join(debugfs, "events", "tcp", "tcp_retransmit_skb")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "format"), []byte(retransmitFormat610), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tracefsRoots = []string{filepath.Join(t.TempDir(), "missing"), debugfs}
+	got, err := readRetransmitOffsets()
+	if err != nil || got != (retransmitOffsets{Sport: 28, Dport: 30, SaddrV6: 42, DaddrV6: 58}) {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+
+	tracefsRoots = []string{filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")}
+	if _, err := readRetransmitOffsets(); err == nil || !strings.Contains(err.Error(), "tracefs") {
+		t.Fatalf("no tracefs: err = %v", err)
 	}
 }
