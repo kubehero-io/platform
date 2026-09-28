@@ -31,6 +31,7 @@ type fixture struct {
 	now    time.Time
 	ch     *Engine // ClickHouse, rollup enabled
 	raw    *Engine // ClickHouse, rollup disabled
+	paged  *Engine // ClickHouse with tiny keyset pages (ties cross page edges)
 	mem    *Engine // brute-force reference over the same stored rows
 	stored []Row
 }
@@ -133,7 +134,10 @@ func ingestFixture(t *testing.T) *fixture {
 		db: db, now: now, stored: stored,
 		ch:  New(Options{Store: &CHStore{Conn: db.Native}, Now: clock}),
 		raw: New(Options{Store: &CHStore{Conn: db.Native, DisableRollup: true}, Now: clock}),
-		mem: New(Options{Store: fixedRows(append([]Row(nil), stored...)), Now: clock}),
+		// 7-row pages: ClickHouse returns tied timestamps in arbitrary
+		// order, so page edges land inside tie groups all the time.
+		paged: New(Options{Store: &CHStore{Conn: db.Native}, Now: clock, ScanPageRows: 7}),
+		mem:   New(Options{Store: fixedRows(append([]Row(nil), stored...)), Now: clock}),
 	}
 }
 
@@ -195,12 +199,30 @@ func TestEngineAgainstClickHouse(t *testing.T) {
 			`{namespace="shop"} | logfmt | drop status, dur | keep level, namespace, user`,
 			`{cluster="c1", team="payments"} |= "created" or "failed"`,
 		}
+		// Tiny pages cost a round trip per 7 rows, so they run on a
+		// representative subset: ties across namespaces and pods, an exact
+		// SQL plan, a Go-side filter, and a match rare enough that 60
+		// lines span several time chunks.
+		pagedQueries := map[string]bool{
+			`{namespace=~"shop|pay", level!="info"}`:                   true,
+			`{namespace="shop"} | logfmt | status >= 500`:              true,
+			`{namespace="pay"} | json | msg="charge failed"`:           true,
+			`{cluster="c1", team="payments"} |= "created" or "failed"`: true,
+		}
 		for _, q := range queries {
-			for _, fwd := range []bool{false, true} {
+			for _, run := range []struct {
+				name string
+				fwd  bool
+				e    *Engine
+			}{{"backward", false, f.ch}, {"forward", true, f.ch}, {"backward, 7-row pages", false, f.paged}, {"forward, 7-row pages", true, f.paged}} {
+				if run.e == f.paged && !pagedQueries[q] {
+					continue
+				}
+				fwd := run.fwd
 				p := QueryParams{Query: q, Start: f.now.Add(-2 * time.Hour), End: f.now.Add(time.Minute), Limit: 60, Forward: fwd}
-				got, err := f.ch.Query(ctx, p)
+				got, err := run.e.Query(ctx, p)
 				if err != nil {
-					t.Fatalf("%s: %v", q, err)
+					t.Fatalf("%s (%s): %v", q, run.name, err)
 				}
 				want, err := f.mem.Query(ctx, p)
 				if err != nil {
