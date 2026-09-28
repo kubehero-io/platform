@@ -68,6 +68,23 @@ func (p *progress) stats() ScanStats {
 	return ScanStats{Rows: p.rows.Load(), Bytes: p.bytes.Load()}
 }
 
+// statsKey carries a per-request collector that every ClickHouse
+// statement adds its progress to (metric queries run several).
+type statsKey struct{}
+
+type statsCollector struct{ rows, bytes atomic.Int64 }
+
+// withStats returns a context whose ClickHouse statements accumulate
+// rows and bytes read into the returned collector.
+func withStats(ctx context.Context) (context.Context, *statsCollector) {
+	c := &statsCollector{}
+	return context.WithValue(ctx, statsKey{}, c), c
+}
+
+func (c *statsCollector) stats() ScanStats {
+	return ScanStats{Rows: c.rows.Load(), Bytes: c.bytes.Load()}
+}
+
 // query runs a statement with a deadline, the matching server-side
 // execution limit and progress accounting. The returned done func must
 // be called exactly once: it cancels the query first (so an early exit
@@ -76,11 +93,16 @@ func (p *progress) stats() ScanStats {
 func (s *CHStore) query(ctx context.Context, q logql.Query) (driver.Rows, *progress, func(), error) {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout())
 	pr := &progress{}
+	collector, _ := ctx.Value(statsKey{}).(*statsCollector)
 	ctx = chgo.Context(ctx,
 		chgo.WithSettings(chgo.Settings{"max_execution_time": int(s.timeout().Seconds())}),
 		chgo.WithProgress(func(p *chgo.Progress) {
 			pr.rows.Add(int64(p.Rows))
 			pr.bytes.Add(int64(p.Bytes))
+			if collector != nil {
+				collector.rows.Add(int64(p.Rows))
+				collector.bytes.Add(int64(p.Bytes))
+			}
 		}))
 	rows, err := s.Conn.Query(ctx, q.SQL, q.Args...)
 	if err != nil {

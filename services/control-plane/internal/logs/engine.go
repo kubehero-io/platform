@@ -304,11 +304,14 @@ func (e *Engine) Query(ctx context.Context, p QueryParams) (*QueryResult, error)
 		if step < 0 {
 			return nil, badRequest("step must be positive")
 		}
-		m, err := logql.Evaluate(ctx, x, start, end, step, e.store)
+		sctx, collected := withStats(ctx)
+		m, err := logql.Evaluate(sctx, x, start, end, step, e.store)
 		if err != nil {
 			return nil, err
 		}
 		res.Metric, res.Step = m, step
+		st := collected.stats()
+		res.Stats.RowsScanned, res.Stats.BytesScanned = st.Rows, st.Bytes
 	}
 	res.Stats.Exec = time.Since(began)
 	return res, nil
