@@ -5,6 +5,7 @@ toolchain go1.26.5
 use (
 	./cli/kubehero
 	./infra/dagger
+	./infra/demo/generator
 	./packages/cost-model
 	./packages/proto
 	./services/advisor

@@ -1,9 +1,9 @@
 apiVersion: v2
 name: kubehero
-description: KubeHero — Kubernetes efficiency across every cloud you run.
+description: KubeHero — open-source Kubernetes observability + FinOps in one install. Cost allocation, logs, continuous profiling, eBPF network cost, alerting, guarded rightsizing and read-only AI agents for AKS, GKE and EKS.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.3.0
+appVersion: "0.3.0"
 kubeVersion: ">=1.28-0"
 maintainers:
   - name: KubeHero
@@ -12,17 +12,28 @@ maintainers:
 home: https://kubehero.io
 sources:
   - https://github.com/kubehero-io/platform
+keywords:
+  - kubernetes
+  - finops
+  - opencost
+  - observability
+  - logs
+  - profiling
+  - ebpf
+  - cost
+  - rightsizing
 annotations:
   category: monitoring
   licenses: BUSL-1.1 AND Apache-2.0
 
 # ─── Subchart dependencies ────────────────────────────────────────────────
 #
-# Every dependency below is OFF by default — values.yaml ships
-# `<component>.embedded: false`, which keeps the chart installable
-# offline / air-gapped without `helm dep update`. Flip an `embedded`
-# value to true and re-run `helm dep update && helm upgrade --install`
-# to pull the subchart in.
+# Postgres and ClickHouse are built into this chart (templates/postgres.yaml,
+# templates/clickhouse.yaml — official images), not subcharts. Every
+# dependency below is optional and OFF by default, which keeps the chart
+# installable offline / air-gapped without `helm dep update`. Flip an
+# `embedded` value to true and re-run `helm dep update && helm upgrade
+# --install` to pull the subchart in.
 #
 # Mature clusters typically already run most of these as peers — we
 # install them via `infra/demo/stack-install.sh` for greenfield kind
@@ -34,22 +45,6 @@ annotations:
 # major bump that breaks our values plumbing.
 
 dependencies:
-  - name: postgresql
-    version: ">=15.0.0 <17.0.0"
-    repository: "https://charts.bitnami.com/bitnami"
-    condition: postgresql.embedded
-    tags: [storage]
-  - name: clickhouse
-    version: ">=6.0.0 <8.0.0"
-    repository: "https://charts.bitnami.com/bitnami"
-    condition: clickhouse.embedded
-    tags: [storage]
-  - name: valkey
-    version: ">=2.0.0 <4.0.0"
-    repository: "https://charts.bitnami.com/bitnami"
-    alias: cache
-    condition: cache.embedded
-    tags: [storage]
   - name: dex
     version: ">=0.18.0 <1.0.0"
     repository: "https://charts.dexidp.io"

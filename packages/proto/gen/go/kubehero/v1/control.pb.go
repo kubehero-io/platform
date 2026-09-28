@@ -111,6 +111,126 @@ func (x *HealthCheckResponse) GetVersion() string {
 	return ""
 }
 
+type WhoAmIRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WhoAmIRequest) Reset() {
+	*x = WhoAmIRequest{}
+	mi := &file_kubehero_v1_control_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WhoAmIRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WhoAmIRequest) ProtoMessage() {}
+
+func (x *WhoAmIRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kubehero_v1_control_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WhoAmIRequest.ProtoReflect.Descriptor instead.
+func (*WhoAmIRequest) Descriptor() ([]byte, []int) {
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{2}
+}
+
+type WhoAmIResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Subject       string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"` // "anonymous", "cluster:<id>", a key hash, or the OIDC sub
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`       // anonymous | viewer | auditor | member | admin | owner
+	Email         string                 `protobuf:"bytes,3,opt,name=email,proto3" json:"email,omitempty"`     // OIDC only
+	Groups        []string               `protobuf:"bytes,4,rep,name=groups,proto3" json:"groups,omitempty"`
+	ClusterId     string                 `protobuf:"bytes,5,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`           // set for cluster enrollment tokens
+	AuthRequired  bool                   `protobuf:"varint,6,opt,name=auth_required,json=authRequired,proto3" json:"auth_required,omitempty"` // false when the server accepts anonymous callers
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WhoAmIResponse) Reset() {
+	*x = WhoAmIResponse{}
+	mi := &file_kubehero_v1_control_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WhoAmIResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WhoAmIResponse) ProtoMessage() {}
+
+func (x *WhoAmIResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kubehero_v1_control_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WhoAmIResponse.ProtoReflect.Descriptor instead.
+func (*WhoAmIResponse) Descriptor() ([]byte, []int) {
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *WhoAmIResponse) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *WhoAmIResponse) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *WhoAmIResponse) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *WhoAmIResponse) GetGroups() []string {
+	if x != nil {
+		return x.Groups
+	}
+	return nil
+}
+
+func (x *WhoAmIResponse) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *WhoAmIResponse) GetAuthRequired() bool {
+	if x != nil {
+		return x.AuthRequired
+	}
+	return false
+}
+
 type ListClustersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PageSize      int32                  `protobuf:"varint,1,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
@@ -121,7 +241,7 @@ type ListClustersRequest struct {
 
 func (x *ListClustersRequest) Reset() {
 	*x = ListClustersRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[2]
+	mi := &file_kubehero_v1_control_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -133,7 +253,7 @@ func (x *ListClustersRequest) String() string {
 func (*ListClustersRequest) ProtoMessage() {}
 
 func (x *ListClustersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[2]
+	mi := &file_kubehero_v1_control_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -146,7 +266,7 @@ func (x *ListClustersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClustersRequest.ProtoReflect.Descriptor instead.
 func (*ListClustersRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{2}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListClustersRequest) GetPageSize() int32 {
@@ -176,7 +296,7 @@ type Cluster struct {
 
 func (x *Cluster) Reset() {
 	*x = Cluster{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[3]
+	mi := &file_kubehero_v1_control_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -188,7 +308,7 @@ func (x *Cluster) String() string {
 func (*Cluster) ProtoMessage() {}
 
 func (x *Cluster) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[3]
+	mi := &file_kubehero_v1_control_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -201,7 +321,7 @@ func (x *Cluster) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Cluster.ProtoReflect.Descriptor instead.
 func (*Cluster) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{3}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Cluster) GetId() string {
@@ -249,7 +369,7 @@ type ListClustersResponse struct {
 
 func (x *ListClustersResponse) Reset() {
 	*x = ListClustersResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[4]
+	mi := &file_kubehero_v1_control_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -261,7 +381,7 @@ func (x *ListClustersResponse) String() string {
 func (*ListClustersResponse) ProtoMessage() {}
 
 func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[4]
+	mi := &file_kubehero_v1_control_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -274,7 +394,7 @@ func (x *ListClustersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListClustersResponse.ProtoReflect.Descriptor instead.
 func (*ListClustersResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{4}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListClustersResponse) GetClusters() []*Cluster {
@@ -304,7 +424,7 @@ type RegisterClusterRequest struct {
 
 func (x *RegisterClusterRequest) Reset() {
 	*x = RegisterClusterRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[5]
+	mi := &file_kubehero_v1_control_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -316,7 +436,7 @@ func (x *RegisterClusterRequest) String() string {
 func (*RegisterClusterRequest) ProtoMessage() {}
 
 func (x *RegisterClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[5]
+	mi := &file_kubehero_v1_control_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -329,7 +449,7 @@ func (x *RegisterClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterClusterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterClusterRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{5}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RegisterClusterRequest) GetName() string {
@@ -381,7 +501,7 @@ type RegisterClusterResponse struct {
 
 func (x *RegisterClusterResponse) Reset() {
 	*x = RegisterClusterResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[6]
+	mi := &file_kubehero_v1_control_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +513,7 @@ func (x *RegisterClusterResponse) String() string {
 func (*RegisterClusterResponse) ProtoMessage() {}
 
 func (x *RegisterClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[6]
+	mi := &file_kubehero_v1_control_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +526,7 @@ func (x *RegisterClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterClusterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterClusterResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{6}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RegisterClusterResponse) GetCluster() *Cluster {
@@ -444,7 +564,7 @@ type ListAuditLogRequest struct {
 
 func (x *ListAuditLogRequest) Reset() {
 	*x = ListAuditLogRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[7]
+	mi := &file_kubehero_v1_control_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -456,7 +576,7 @@ func (x *ListAuditLogRequest) String() string {
 func (*ListAuditLogRequest) ProtoMessage() {}
 
 func (x *ListAuditLogRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[7]
+	mi := &file_kubehero_v1_control_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -469,7 +589,7 @@ func (x *ListAuditLogRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuditLogRequest.ProtoReflect.Descriptor instead.
 func (*ListAuditLogRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{7}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListAuditLogRequest) GetClusterId() string {
@@ -508,7 +628,7 @@ type AuditEntry struct {
 
 func (x *AuditEntry) Reset() {
 	*x = AuditEntry{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[8]
+	mi := &file_kubehero_v1_control_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -520,7 +640,7 @@ func (x *AuditEntry) String() string {
 func (*AuditEntry) ProtoMessage() {}
 
 func (x *AuditEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[8]
+	mi := &file_kubehero_v1_control_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -533,7 +653,7 @@ func (x *AuditEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuditEntry.ProtoReflect.Descriptor instead.
 func (*AuditEntry) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{8}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AuditEntry) GetId() string {
@@ -594,7 +714,7 @@ type ListAuditLogResponse struct {
 
 func (x *ListAuditLogResponse) Reset() {
 	*x = ListAuditLogResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[9]
+	mi := &file_kubehero_v1_control_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -606,7 +726,7 @@ func (x *ListAuditLogResponse) String() string {
 func (*ListAuditLogResponse) ProtoMessage() {}
 
 func (x *ListAuditLogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[9]
+	mi := &file_kubehero_v1_control_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -619,7 +739,7 @@ func (x *ListAuditLogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuditLogResponse.ProtoReflect.Descriptor instead.
 func (*ListAuditLogResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{9}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListAuditLogResponse) GetEntries() []*AuditEntry {
@@ -647,7 +767,7 @@ type AppendAuditEntryRequest struct {
 
 func (x *AppendAuditEntryRequest) Reset() {
 	*x = AppendAuditEntryRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[10]
+	mi := &file_kubehero_v1_control_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -659,7 +779,7 @@ func (x *AppendAuditEntryRequest) String() string {
 func (*AppendAuditEntryRequest) ProtoMessage() {}
 
 func (x *AppendAuditEntryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[10]
+	mi := &file_kubehero_v1_control_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -672,7 +792,7 @@ func (x *AppendAuditEntryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendAuditEntryRequest.ProtoReflect.Descriptor instead.
 func (*AppendAuditEntryRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{10}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AppendAuditEntryRequest) GetOrg() string {
@@ -755,7 +875,7 @@ type AppendAuditEntryResponse struct {
 
 func (x *AppendAuditEntryResponse) Reset() {
 	*x = AppendAuditEntryResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[11]
+	mi := &file_kubehero_v1_control_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -767,7 +887,7 @@ func (x *AppendAuditEntryResponse) String() string {
 func (*AppendAuditEntryResponse) ProtoMessage() {}
 
 func (x *AppendAuditEntryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[11]
+	mi := &file_kubehero_v1_control_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -780,7 +900,7 @@ func (x *AppendAuditEntryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppendAuditEntryResponse.ProtoReflect.Descriptor instead.
 func (*AppendAuditEntryResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{11}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AppendAuditEntryResponse) GetId() int64 {
@@ -809,7 +929,7 @@ type GetBurnRateRequest struct {
 
 func (x *GetBurnRateRequest) Reset() {
 	*x = GetBurnRateRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[12]
+	mi := &file_kubehero_v1_control_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -821,7 +941,7 @@ func (x *GetBurnRateRequest) String() string {
 func (*GetBurnRateRequest) ProtoMessage() {}
 
 func (x *GetBurnRateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[12]
+	mi := &file_kubehero_v1_control_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -834,7 +954,7 @@ func (x *GetBurnRateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBurnRateRequest.ProtoReflect.Descriptor instead.
 func (*GetBurnRateRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{12}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetBurnRateRequest) GetClusterId() string {
@@ -880,7 +1000,7 @@ type GetBurnRateResponse struct {
 
 func (x *GetBurnRateResponse) Reset() {
 	*x = GetBurnRateResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[13]
+	mi := &file_kubehero_v1_control_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -892,7 +1012,7 @@ func (x *GetBurnRateResponse) String() string {
 func (*GetBurnRateResponse) ProtoMessage() {}
 
 func (x *GetBurnRateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[13]
+	mi := &file_kubehero_v1_control_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -905,7 +1025,7 @@ func (x *GetBurnRateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBurnRateResponse.ProtoReflect.Descriptor instead.
 func (*GetBurnRateResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{13}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *GetBurnRateResponse) GetBurnRateMilli() int32 {
@@ -939,7 +1059,7 @@ type ListWasteRecommendationsRequest struct {
 
 func (x *ListWasteRecommendationsRequest) Reset() {
 	*x = ListWasteRecommendationsRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[14]
+	mi := &file_kubehero_v1_control_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -951,7 +1071,7 @@ func (x *ListWasteRecommendationsRequest) String() string {
 func (*ListWasteRecommendationsRequest) ProtoMessage() {}
 
 func (x *ListWasteRecommendationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[14]
+	mi := &file_kubehero_v1_control_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -964,7 +1084,7 @@ func (x *ListWasteRecommendationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWasteRecommendationsRequest.ProtoReflect.Descriptor instead.
 func (*ListWasteRecommendationsRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{14}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListWasteRecommendationsRequest) GetClusterId() string {
@@ -998,7 +1118,7 @@ type WasteRecommendation struct {
 
 func (x *WasteRecommendation) Reset() {
 	*x = WasteRecommendation{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[15]
+	mi := &file_kubehero_v1_control_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1010,7 +1130,7 @@ func (x *WasteRecommendation) String() string {
 func (*WasteRecommendation) ProtoMessage() {}
 
 func (x *WasteRecommendation) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[15]
+	mi := &file_kubehero_v1_control_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1023,7 +1143,7 @@ func (x *WasteRecommendation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WasteRecommendation.ProtoReflect.Descriptor instead.
 func (*WasteRecommendation) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{15}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *WasteRecommendation) GetRank() string {
@@ -1098,7 +1218,7 @@ type ListWasteRecommendationsResponse struct {
 
 func (x *ListWasteRecommendationsResponse) Reset() {
 	*x = ListWasteRecommendationsResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[16]
+	mi := &file_kubehero_v1_control_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1110,7 +1230,7 @@ func (x *ListWasteRecommendationsResponse) String() string {
 func (*ListWasteRecommendationsResponse) ProtoMessage() {}
 
 func (x *ListWasteRecommendationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[16]
+	mi := &file_kubehero_v1_control_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1123,7 +1243,7 @@ func (x *ListWasteRecommendationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWasteRecommendationsResponse.ProtoReflect.Descriptor instead.
 func (*ListWasteRecommendationsResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{16}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListWasteRecommendationsResponse) GetRecommendations() []*WasteRecommendation {
@@ -1144,7 +1264,7 @@ type GetWorkloadRequest struct {
 
 func (x *GetWorkloadRequest) Reset() {
 	*x = GetWorkloadRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[17]
+	mi := &file_kubehero_v1_control_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1156,7 +1276,7 @@ func (x *GetWorkloadRequest) String() string {
 func (*GetWorkloadRequest) ProtoMessage() {}
 
 func (x *GetWorkloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[17]
+	mi := &file_kubehero_v1_control_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1169,7 +1289,7 @@ func (x *GetWorkloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkloadRequest.ProtoReflect.Descriptor instead.
 func (*GetWorkloadRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{17}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *GetWorkloadRequest) GetCluster() string {
@@ -1203,7 +1323,7 @@ type GetWorkloadResponse struct {
 
 func (x *GetWorkloadResponse) Reset() {
 	*x = GetWorkloadResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[18]
+	mi := &file_kubehero_v1_control_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1215,7 +1335,7 @@ func (x *GetWorkloadResponse) String() string {
 func (*GetWorkloadResponse) ProtoMessage() {}
 
 func (x *GetWorkloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[18]
+	mi := &file_kubehero_v1_control_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1228,7 +1348,7 @@ func (x *GetWorkloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkloadResponse.ProtoReflect.Descriptor instead.
 func (*GetWorkloadResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{18}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *GetWorkloadResponse) GetRecommendation() *WasteRecommendation {
@@ -1255,7 +1375,7 @@ type ListPoliciesRequest struct {
 
 func (x *ListPoliciesRequest) Reset() {
 	*x = ListPoliciesRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[19]
+	mi := &file_kubehero_v1_control_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1267,7 +1387,7 @@ func (x *ListPoliciesRequest) String() string {
 func (*ListPoliciesRequest) ProtoMessage() {}
 
 func (x *ListPoliciesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[19]
+	mi := &file_kubehero_v1_control_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1280,7 +1400,7 @@ func (x *ListPoliciesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPoliciesRequest.ProtoReflect.Descriptor instead.
 func (*ListPoliciesRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{19}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListPoliciesRequest) GetClusterId() string {
@@ -1311,7 +1431,7 @@ type Policy struct {
 
 func (x *Policy) Reset() {
 	*x = Policy{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[20]
+	mi := &file_kubehero_v1_control_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1323,7 +1443,7 @@ func (x *Policy) String() string {
 func (*Policy) ProtoMessage() {}
 
 func (x *Policy) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[20]
+	mi := &file_kubehero_v1_control_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1336,7 +1456,7 @@ func (x *Policy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Policy.ProtoReflect.Descriptor instead.
 func (*Policy) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{20}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *Policy) GetName() string {
@@ -1390,7 +1510,7 @@ type ListPoliciesResponse struct {
 
 func (x *ListPoliciesResponse) Reset() {
 	*x = ListPoliciesResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[21]
+	mi := &file_kubehero_v1_control_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1402,7 +1522,7 @@ func (x *ListPoliciesResponse) String() string {
 func (*ListPoliciesResponse) ProtoMessage() {}
 
 func (x *ListPoliciesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[21]
+	mi := &file_kubehero_v1_control_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1415,7 +1535,7 @@ func (x *ListPoliciesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPoliciesResponse.ProtoReflect.Descriptor instead.
 func (*ListPoliciesResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{21}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListPoliciesResponse) GetPolicies() []*Policy {
@@ -1438,7 +1558,7 @@ type ArmPolicyRequest struct {
 
 func (x *ArmPolicyRequest) Reset() {
 	*x = ArmPolicyRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[22]
+	mi := &file_kubehero_v1_control_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1450,7 +1570,7 @@ func (x *ArmPolicyRequest) String() string {
 func (*ArmPolicyRequest) ProtoMessage() {}
 
 func (x *ArmPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[22]
+	mi := &file_kubehero_v1_control_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1463,7 +1583,7 @@ func (x *ArmPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArmPolicyRequest.ProtoReflect.Descriptor instead.
 func (*ArmPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{22}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ArmPolicyRequest) GetClusterId() string {
@@ -1516,7 +1636,7 @@ type ArmPolicyResponse struct {
 
 func (x *ArmPolicyResponse) Reset() {
 	*x = ArmPolicyResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[23]
+	mi := &file_kubehero_v1_control_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1528,7 +1648,7 @@ func (x *ArmPolicyResponse) String() string {
 func (*ArmPolicyResponse) ProtoMessage() {}
 
 func (x *ArmPolicyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[23]
+	mi := &file_kubehero_v1_control_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1541,7 +1661,7 @@ func (x *ArmPolicyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArmPolicyResponse.ProtoReflect.Descriptor instead.
 func (*ArmPolicyResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{23}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ArmPolicyResponse) GetPolicyName() string {
@@ -1581,7 +1701,7 @@ type GetTeamSpendRequest struct {
 
 func (x *GetTeamSpendRequest) Reset() {
 	*x = GetTeamSpendRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[24]
+	mi := &file_kubehero_v1_control_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1593,7 +1713,7 @@ func (x *GetTeamSpendRequest) String() string {
 func (*GetTeamSpendRequest) ProtoMessage() {}
 
 func (x *GetTeamSpendRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[24]
+	mi := &file_kubehero_v1_control_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1606,7 +1726,7 @@ func (x *GetTeamSpendRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTeamSpendRequest.ProtoReflect.Descriptor instead.
 func (*GetTeamSpendRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{24}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetTeamSpendRequest) GetWindow() string {
@@ -1632,7 +1752,7 @@ type TeamSpend struct {
 
 func (x *TeamSpend) Reset() {
 	*x = TeamSpend{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[25]
+	mi := &file_kubehero_v1_control_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1644,7 +1764,7 @@ func (x *TeamSpend) String() string {
 func (*TeamSpend) ProtoMessage() {}
 
 func (x *TeamSpend) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[25]
+	mi := &file_kubehero_v1_control_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1657,7 +1777,7 @@ func (x *TeamSpend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TeamSpend.ProtoReflect.Descriptor instead.
 func (*TeamSpend) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{25}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *TeamSpend) GetTeam() string {
@@ -1727,7 +1847,7 @@ type GetTeamSpendResponse struct {
 
 func (x *GetTeamSpendResponse) Reset() {
 	*x = GetTeamSpendResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[26]
+	mi := &file_kubehero_v1_control_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1739,7 +1859,7 @@ func (x *GetTeamSpendResponse) String() string {
 func (*GetTeamSpendResponse) ProtoMessage() {}
 
 func (x *GetTeamSpendResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[26]
+	mi := &file_kubehero_v1_control_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1752,7 +1872,7 @@ func (x *GetTeamSpendResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTeamSpendResponse.ProtoReflect.Descriptor instead.
 func (*GetTeamSpendResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{26}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *GetTeamSpendResponse) GetTeams() []*TeamSpend {
@@ -1787,7 +1907,7 @@ type ListVulnerabilitiesRequest struct {
 
 func (x *ListVulnerabilitiesRequest) Reset() {
 	*x = ListVulnerabilitiesRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[27]
+	mi := &file_kubehero_v1_control_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1799,7 +1919,7 @@ func (x *ListVulnerabilitiesRequest) String() string {
 func (*ListVulnerabilitiesRequest) ProtoMessage() {}
 
 func (x *ListVulnerabilitiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[27]
+	mi := &file_kubehero_v1_control_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1812,7 +1932,7 @@ func (x *ListVulnerabilitiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListVulnerabilitiesRequest.ProtoReflect.Descriptor instead.
 func (*ListVulnerabilitiesRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{27}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ListVulnerabilitiesRequest) GetClusterId() string {
@@ -1857,7 +1977,7 @@ type Vulnerability struct {
 
 func (x *Vulnerability) Reset() {
 	*x = Vulnerability{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[28]
+	mi := &file_kubehero_v1_control_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1869,7 +1989,7 @@ func (x *Vulnerability) String() string {
 func (*Vulnerability) ProtoMessage() {}
 
 func (x *Vulnerability) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[28]
+	mi := &file_kubehero_v1_control_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1882,7 +2002,7 @@ func (x *Vulnerability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Vulnerability.ProtoReflect.Descriptor instead.
 func (*Vulnerability) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{28}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *Vulnerability) GetId() string {
@@ -1990,7 +2110,7 @@ type ListVulnerabilitiesResponse struct {
 
 func (x *ListVulnerabilitiesResponse) Reset() {
 	*x = ListVulnerabilitiesResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[29]
+	mi := &file_kubehero_v1_control_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2002,7 +2122,7 @@ func (x *ListVulnerabilitiesResponse) String() string {
 func (*ListVulnerabilitiesResponse) ProtoMessage() {}
 
 func (x *ListVulnerabilitiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[29]
+	mi := &file_kubehero_v1_control_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2015,7 +2135,7 @@ func (x *ListVulnerabilitiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListVulnerabilitiesResponse.ProtoReflect.Descriptor instead.
 func (*ListVulnerabilitiesResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{29}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ListVulnerabilitiesResponse) GetVulnerabilities() []*Vulnerability {
@@ -2064,7 +2184,7 @@ type ListAnomaliesRequest struct {
 
 func (x *ListAnomaliesRequest) Reset() {
 	*x = ListAnomaliesRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[30]
+	mi := &file_kubehero_v1_control_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2076,7 +2196,7 @@ func (x *ListAnomaliesRequest) String() string {
 func (*ListAnomaliesRequest) ProtoMessage() {}
 
 func (x *ListAnomaliesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[30]
+	mi := &file_kubehero_v1_control_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2089,7 +2209,7 @@ func (x *ListAnomaliesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAnomaliesRequest.ProtoReflect.Descriptor instead.
 func (*ListAnomaliesRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{30}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ListAnomaliesRequest) GetScope() string {
@@ -2132,7 +2252,7 @@ type Anomaly struct {
 
 func (x *Anomaly) Reset() {
 	*x = Anomaly{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[31]
+	mi := &file_kubehero_v1_control_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2144,7 +2264,7 @@ func (x *Anomaly) String() string {
 func (*Anomaly) ProtoMessage() {}
 
 func (x *Anomaly) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[31]
+	mi := &file_kubehero_v1_control_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2157,7 +2277,7 @@ func (x *Anomaly) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Anomaly.ProtoReflect.Descriptor instead.
 func (*Anomaly) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{31}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *Anomaly) GetId() string {
@@ -2241,7 +2361,7 @@ type ListAnomaliesResponse struct {
 
 func (x *ListAnomaliesResponse) Reset() {
 	*x = ListAnomaliesResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[32]
+	mi := &file_kubehero_v1_control_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2253,7 +2373,7 @@ func (x *ListAnomaliesResponse) String() string {
 func (*ListAnomaliesResponse) ProtoMessage() {}
 
 func (x *ListAnomaliesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[32]
+	mi := &file_kubehero_v1_control_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2266,7 +2386,7 @@ func (x *ListAnomaliesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAnomaliesResponse.ProtoReflect.Descriptor instead.
 func (*ListAnomaliesResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{32}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListAnomaliesResponse) GetAnomalies() []*Anomaly {
@@ -2293,7 +2413,7 @@ type ListCapacityDemandsRequest struct {
 
 func (x *ListCapacityDemandsRequest) Reset() {
 	*x = ListCapacityDemandsRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[33]
+	mi := &file_kubehero_v1_control_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2305,7 +2425,7 @@ func (x *ListCapacityDemandsRequest) String() string {
 func (*ListCapacityDemandsRequest) ProtoMessage() {}
 
 func (x *ListCapacityDemandsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[33]
+	mi := &file_kubehero_v1_control_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2318,7 +2438,7 @@ func (x *ListCapacityDemandsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCapacityDemandsRequest.ProtoReflect.Descriptor instead.
 func (*ListCapacityDemandsRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{33}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ListCapacityDemandsRequest) GetClusterId() string {
@@ -2358,7 +2478,7 @@ type CapacityDemand struct {
 
 func (x *CapacityDemand) Reset() {
 	*x = CapacityDemand{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[34]
+	mi := &file_kubehero_v1_control_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2370,7 +2490,7 @@ func (x *CapacityDemand) String() string {
 func (*CapacityDemand) ProtoMessage() {}
 
 func (x *CapacityDemand) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[34]
+	mi := &file_kubehero_v1_control_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2383,7 +2503,7 @@ func (x *CapacityDemand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapacityDemand.ProtoReflect.Descriptor instead.
 func (*CapacityDemand) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{34}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *CapacityDemand) GetId() string {
@@ -2488,7 +2608,7 @@ type ListCapacityDemandsResponse struct {
 
 func (x *ListCapacityDemandsResponse) Reset() {
 	*x = ListCapacityDemandsResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[35]
+	mi := &file_kubehero_v1_control_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2500,7 +2620,7 @@ func (x *ListCapacityDemandsResponse) String() string {
 func (*ListCapacityDemandsResponse) ProtoMessage() {}
 
 func (x *ListCapacityDemandsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[35]
+	mi := &file_kubehero_v1_control_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2513,7 +2633,7 @@ func (x *ListCapacityDemandsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCapacityDemandsResponse.ProtoReflect.Descriptor instead.
 func (*ListCapacityDemandsResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{35}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ListCapacityDemandsResponse) GetDemands() []*CapacityDemand {
@@ -2593,7 +2713,7 @@ type PodCostSample struct {
 
 func (x *PodCostSample) Reset() {
 	*x = PodCostSample{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[36]
+	mi := &file_kubehero_v1_control_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2605,7 +2725,7 @@ func (x *PodCostSample) String() string {
 func (*PodCostSample) ProtoMessage() {}
 
 func (x *PodCostSample) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[36]
+	mi := &file_kubehero_v1_control_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2618,7 +2738,7 @@ func (x *PodCostSample) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodCostSample.ProtoReflect.Descriptor instead.
 func (*PodCostSample) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{36}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PodCostSample) GetCluster() string {
@@ -2855,7 +2975,7 @@ type NodeCostSample struct {
 
 func (x *NodeCostSample) Reset() {
 	*x = NodeCostSample{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[37]
+	mi := &file_kubehero_v1_control_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2867,7 +2987,7 @@ func (x *NodeCostSample) String() string {
 func (*NodeCostSample) ProtoMessage() {}
 
 func (x *NodeCostSample) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[37]
+	mi := &file_kubehero_v1_control_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2880,7 +3000,7 @@ func (x *NodeCostSample) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeCostSample.ProtoReflect.Descriptor instead.
 func (*NodeCostSample) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{37}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *NodeCostSample) GetNode() string {
@@ -3045,7 +3165,7 @@ type IngestPodCostRequest struct {
 
 func (x *IngestPodCostRequest) Reset() {
 	*x = IngestPodCostRequest{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[38]
+	mi := &file_kubehero_v1_control_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3057,7 +3177,7 @@ func (x *IngestPodCostRequest) String() string {
 func (*IngestPodCostRequest) ProtoMessage() {}
 
 func (x *IngestPodCostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[38]
+	mi := &file_kubehero_v1_control_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3070,7 +3190,7 @@ func (x *IngestPodCostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestPodCostRequest.ProtoReflect.Descriptor instead.
 func (*IngestPodCostRequest) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{38}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *IngestPodCostRequest) GetClusterId() string {
@@ -3107,7 +3227,7 @@ type IngestPodCostResponse struct {
 
 func (x *IngestPodCostResponse) Reset() {
 	*x = IngestPodCostResponse{}
-	mi := &file_kubehero_v1_control_proto_msgTypes[39]
+	mi := &file_kubehero_v1_control_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3119,7 +3239,7 @@ func (x *IngestPodCostResponse) String() string {
 func (*IngestPodCostResponse) ProtoMessage() {}
 
 func (x *IngestPodCostResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kubehero_v1_control_proto_msgTypes[39]
+	mi := &file_kubehero_v1_control_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3132,7 +3252,7 @@ func (x *IngestPodCostResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngestPodCostResponse.ProtoReflect.Descriptor instead.
 func (*IngestPodCostResponse) Descriptor() ([]byte, []int) {
-	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{39}
+	return file_kubehero_v1_control_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *IngestPodCostResponse) GetWritten() int32 {
@@ -3157,7 +3277,16 @@ const file_kubehero_v1_control_proto_rawDesc = "" +
 	"\x12HealthCheckRequest\"G\n" +
 	"\x13HealthCheckResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\"Q\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\x0f\n" +
+	"\rWhoAmIRequest\"\xb0\x01\n" +
+	"\x0eWhoAmIResponse\x12\x18\n" +
+	"\asubject\x18\x01 \x01(\tR\asubject\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\x12\x14\n" +
+	"\x05email\x18\x03 \x01(\tR\x05email\x12\x16\n" +
+	"\x06groups\x18\x04 \x03(\tR\x06groups\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x05 \x01(\tR\tclusterId\x12#\n" +
+	"\rauth_required\x18\x06 \x01(\bR\fauthRequired\"Q\n" +
 	"\x13ListClustersRequest\x12\x1b\n" +
 	"\tpage_size\x18\x01 \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
@@ -3434,9 +3563,10 @@ const file_kubehero_v1_control_proto_rawDesc = "" +
 	"\x05nodes\x18\x03 \x03(\v2\x1b.kubehero.v1.NodeCostSampleR\x05nodes\"K\n" +
 	"\x15IngestPodCostResponse\x12\x18\n" +
 	"\awritten\x18\x01 \x01(\x05R\awritten\x12\x18\n" +
-	"\adropped\x18\x02 \x01(\x05R\adropped2\x85\v\n" +
+	"\adropped\x18\x02 \x01(\x05R\adropped2\xca\v\n" +
 	"\x13ControlPlaneService\x12R\n" +
-	"\vHealthCheck\x12\x1f.kubehero.v1.HealthCheckRequest\x1a .kubehero.v1.HealthCheckResponse\"\x00\x12U\n" +
+	"\vHealthCheck\x12\x1f.kubehero.v1.HealthCheckRequest\x1a .kubehero.v1.HealthCheckResponse\"\x00\x12C\n" +
+	"\x06WhoAmI\x12\x1a.kubehero.v1.WhoAmIRequest\x1a\x1b.kubehero.v1.WhoAmIResponse\"\x00\x12U\n" +
 	"\fListClusters\x12 .kubehero.v1.ListClustersRequest\x1a!.kubehero.v1.ListClustersResponse\"\x00\x12^\n" +
 	"\x0fRegisterCluster\x12#.kubehero.v1.RegisterClusterRequest\x1a$.kubehero.v1.RegisterClusterResponse\"\x00\x12U\n" +
 	"\fListAuditLog\x12 .kubehero.v1.ListAuditLogRequest\x1a!.kubehero.v1.ListAuditLogResponse\"\x00\x12a\n" +
@@ -3464,97 +3594,101 @@ func file_kubehero_v1_control_proto_rawDescGZIP() []byte {
 	return file_kubehero_v1_control_proto_rawDescData
 }
 
-var file_kubehero_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
+var file_kubehero_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
 var file_kubehero_v1_control_proto_goTypes = []any{
 	(*HealthCheckRequest)(nil),               // 0: kubehero.v1.HealthCheckRequest
 	(*HealthCheckResponse)(nil),              // 1: kubehero.v1.HealthCheckResponse
-	(*ListClustersRequest)(nil),              // 2: kubehero.v1.ListClustersRequest
-	(*Cluster)(nil),                          // 3: kubehero.v1.Cluster
-	(*ListClustersResponse)(nil),             // 4: kubehero.v1.ListClustersResponse
-	(*RegisterClusterRequest)(nil),           // 5: kubehero.v1.RegisterClusterRequest
-	(*RegisterClusterResponse)(nil),          // 6: kubehero.v1.RegisterClusterResponse
-	(*ListAuditLogRequest)(nil),              // 7: kubehero.v1.ListAuditLogRequest
-	(*AuditEntry)(nil),                       // 8: kubehero.v1.AuditEntry
-	(*ListAuditLogResponse)(nil),             // 9: kubehero.v1.ListAuditLogResponse
-	(*AppendAuditEntryRequest)(nil),          // 10: kubehero.v1.AppendAuditEntryRequest
-	(*AppendAuditEntryResponse)(nil),         // 11: kubehero.v1.AppendAuditEntryResponse
-	(*GetBurnRateRequest)(nil),               // 12: kubehero.v1.GetBurnRateRequest
-	(*GetBurnRateResponse)(nil),              // 13: kubehero.v1.GetBurnRateResponse
-	(*ListWasteRecommendationsRequest)(nil),  // 14: kubehero.v1.ListWasteRecommendationsRequest
-	(*WasteRecommendation)(nil),              // 15: kubehero.v1.WasteRecommendation
-	(*ListWasteRecommendationsResponse)(nil), // 16: kubehero.v1.ListWasteRecommendationsResponse
-	(*GetWorkloadRequest)(nil),               // 17: kubehero.v1.GetWorkloadRequest
-	(*GetWorkloadResponse)(nil),              // 18: kubehero.v1.GetWorkloadResponse
-	(*ListPoliciesRequest)(nil),              // 19: kubehero.v1.ListPoliciesRequest
-	(*Policy)(nil),                           // 20: kubehero.v1.Policy
-	(*ListPoliciesResponse)(nil),             // 21: kubehero.v1.ListPoliciesResponse
-	(*ArmPolicyRequest)(nil),                 // 22: kubehero.v1.ArmPolicyRequest
-	(*ArmPolicyResponse)(nil),                // 23: kubehero.v1.ArmPolicyResponse
-	(*GetTeamSpendRequest)(nil),              // 24: kubehero.v1.GetTeamSpendRequest
-	(*TeamSpend)(nil),                        // 25: kubehero.v1.TeamSpend
-	(*GetTeamSpendResponse)(nil),             // 26: kubehero.v1.GetTeamSpendResponse
-	(*ListVulnerabilitiesRequest)(nil),       // 27: kubehero.v1.ListVulnerabilitiesRequest
-	(*Vulnerability)(nil),                    // 28: kubehero.v1.Vulnerability
-	(*ListVulnerabilitiesResponse)(nil),      // 29: kubehero.v1.ListVulnerabilitiesResponse
-	(*ListAnomaliesRequest)(nil),             // 30: kubehero.v1.ListAnomaliesRequest
-	(*Anomaly)(nil),                          // 31: kubehero.v1.Anomaly
-	(*ListAnomaliesResponse)(nil),            // 32: kubehero.v1.ListAnomaliesResponse
-	(*ListCapacityDemandsRequest)(nil),       // 33: kubehero.v1.ListCapacityDemandsRequest
-	(*CapacityDemand)(nil),                   // 34: kubehero.v1.CapacityDemand
-	(*ListCapacityDemandsResponse)(nil),      // 35: kubehero.v1.ListCapacityDemandsResponse
-	(*PodCostSample)(nil),                    // 36: kubehero.v1.PodCostSample
-	(*NodeCostSample)(nil),                   // 37: kubehero.v1.NodeCostSample
-	(*IngestPodCostRequest)(nil),             // 38: kubehero.v1.IngestPodCostRequest
-	(*IngestPodCostResponse)(nil),            // 39: kubehero.v1.IngestPodCostResponse
-	nil,                                      // 40: kubehero.v1.PodCostSample.LabelsEntry
+	(*WhoAmIRequest)(nil),                    // 2: kubehero.v1.WhoAmIRequest
+	(*WhoAmIResponse)(nil),                   // 3: kubehero.v1.WhoAmIResponse
+	(*ListClustersRequest)(nil),              // 4: kubehero.v1.ListClustersRequest
+	(*Cluster)(nil),                          // 5: kubehero.v1.Cluster
+	(*ListClustersResponse)(nil),             // 6: kubehero.v1.ListClustersResponse
+	(*RegisterClusterRequest)(nil),           // 7: kubehero.v1.RegisterClusterRequest
+	(*RegisterClusterResponse)(nil),          // 8: kubehero.v1.RegisterClusterResponse
+	(*ListAuditLogRequest)(nil),              // 9: kubehero.v1.ListAuditLogRequest
+	(*AuditEntry)(nil),                       // 10: kubehero.v1.AuditEntry
+	(*ListAuditLogResponse)(nil),             // 11: kubehero.v1.ListAuditLogResponse
+	(*AppendAuditEntryRequest)(nil),          // 12: kubehero.v1.AppendAuditEntryRequest
+	(*AppendAuditEntryResponse)(nil),         // 13: kubehero.v1.AppendAuditEntryResponse
+	(*GetBurnRateRequest)(nil),               // 14: kubehero.v1.GetBurnRateRequest
+	(*GetBurnRateResponse)(nil),              // 15: kubehero.v1.GetBurnRateResponse
+	(*ListWasteRecommendationsRequest)(nil),  // 16: kubehero.v1.ListWasteRecommendationsRequest
+	(*WasteRecommendation)(nil),              // 17: kubehero.v1.WasteRecommendation
+	(*ListWasteRecommendationsResponse)(nil), // 18: kubehero.v1.ListWasteRecommendationsResponse
+	(*GetWorkloadRequest)(nil),               // 19: kubehero.v1.GetWorkloadRequest
+	(*GetWorkloadResponse)(nil),              // 20: kubehero.v1.GetWorkloadResponse
+	(*ListPoliciesRequest)(nil),              // 21: kubehero.v1.ListPoliciesRequest
+	(*Policy)(nil),                           // 22: kubehero.v1.Policy
+	(*ListPoliciesResponse)(nil),             // 23: kubehero.v1.ListPoliciesResponse
+	(*ArmPolicyRequest)(nil),                 // 24: kubehero.v1.ArmPolicyRequest
+	(*ArmPolicyResponse)(nil),                // 25: kubehero.v1.ArmPolicyResponse
+	(*GetTeamSpendRequest)(nil),              // 26: kubehero.v1.GetTeamSpendRequest
+	(*TeamSpend)(nil),                        // 27: kubehero.v1.TeamSpend
+	(*GetTeamSpendResponse)(nil),             // 28: kubehero.v1.GetTeamSpendResponse
+	(*ListVulnerabilitiesRequest)(nil),       // 29: kubehero.v1.ListVulnerabilitiesRequest
+	(*Vulnerability)(nil),                    // 30: kubehero.v1.Vulnerability
+	(*ListVulnerabilitiesResponse)(nil),      // 31: kubehero.v1.ListVulnerabilitiesResponse
+	(*ListAnomaliesRequest)(nil),             // 32: kubehero.v1.ListAnomaliesRequest
+	(*Anomaly)(nil),                          // 33: kubehero.v1.Anomaly
+	(*ListAnomaliesResponse)(nil),            // 34: kubehero.v1.ListAnomaliesResponse
+	(*ListCapacityDemandsRequest)(nil),       // 35: kubehero.v1.ListCapacityDemandsRequest
+	(*CapacityDemand)(nil),                   // 36: kubehero.v1.CapacityDemand
+	(*ListCapacityDemandsResponse)(nil),      // 37: kubehero.v1.ListCapacityDemandsResponse
+	(*PodCostSample)(nil),                    // 38: kubehero.v1.PodCostSample
+	(*NodeCostSample)(nil),                   // 39: kubehero.v1.NodeCostSample
+	(*IngestPodCostRequest)(nil),             // 40: kubehero.v1.IngestPodCostRequest
+	(*IngestPodCostResponse)(nil),            // 41: kubehero.v1.IngestPodCostResponse
+	nil,                                      // 42: kubehero.v1.PodCostSample.LabelsEntry
 }
 var file_kubehero_v1_control_proto_depIdxs = []int32{
-	3,  // 0: kubehero.v1.ListClustersResponse.clusters:type_name -> kubehero.v1.Cluster
-	3,  // 1: kubehero.v1.RegisterClusterResponse.cluster:type_name -> kubehero.v1.Cluster
-	8,  // 2: kubehero.v1.ListAuditLogResponse.entries:type_name -> kubehero.v1.AuditEntry
-	15, // 3: kubehero.v1.ListWasteRecommendationsResponse.recommendations:type_name -> kubehero.v1.WasteRecommendation
-	15, // 4: kubehero.v1.GetWorkloadResponse.recommendation:type_name -> kubehero.v1.WasteRecommendation
-	8,  // 5: kubehero.v1.GetWorkloadResponse.history:type_name -> kubehero.v1.AuditEntry
-	20, // 6: kubehero.v1.ListPoliciesResponse.policies:type_name -> kubehero.v1.Policy
-	25, // 7: kubehero.v1.GetTeamSpendResponse.teams:type_name -> kubehero.v1.TeamSpend
-	28, // 8: kubehero.v1.ListVulnerabilitiesResponse.vulnerabilities:type_name -> kubehero.v1.Vulnerability
-	31, // 9: kubehero.v1.ListAnomaliesResponse.anomalies:type_name -> kubehero.v1.Anomaly
-	34, // 10: kubehero.v1.ListCapacityDemandsResponse.demands:type_name -> kubehero.v1.CapacityDemand
-	40, // 11: kubehero.v1.PodCostSample.labels:type_name -> kubehero.v1.PodCostSample.LabelsEntry
-	36, // 12: kubehero.v1.IngestPodCostRequest.samples:type_name -> kubehero.v1.PodCostSample
-	37, // 13: kubehero.v1.IngestPodCostRequest.nodes:type_name -> kubehero.v1.NodeCostSample
+	5,  // 0: kubehero.v1.ListClustersResponse.clusters:type_name -> kubehero.v1.Cluster
+	5,  // 1: kubehero.v1.RegisterClusterResponse.cluster:type_name -> kubehero.v1.Cluster
+	10, // 2: kubehero.v1.ListAuditLogResponse.entries:type_name -> kubehero.v1.AuditEntry
+	17, // 3: kubehero.v1.ListWasteRecommendationsResponse.recommendations:type_name -> kubehero.v1.WasteRecommendation
+	17, // 4: kubehero.v1.GetWorkloadResponse.recommendation:type_name -> kubehero.v1.WasteRecommendation
+	10, // 5: kubehero.v1.GetWorkloadResponse.history:type_name -> kubehero.v1.AuditEntry
+	22, // 6: kubehero.v1.ListPoliciesResponse.policies:type_name -> kubehero.v1.Policy
+	27, // 7: kubehero.v1.GetTeamSpendResponse.teams:type_name -> kubehero.v1.TeamSpend
+	30, // 8: kubehero.v1.ListVulnerabilitiesResponse.vulnerabilities:type_name -> kubehero.v1.Vulnerability
+	33, // 9: kubehero.v1.ListAnomaliesResponse.anomalies:type_name -> kubehero.v1.Anomaly
+	36, // 10: kubehero.v1.ListCapacityDemandsResponse.demands:type_name -> kubehero.v1.CapacityDemand
+	42, // 11: kubehero.v1.PodCostSample.labels:type_name -> kubehero.v1.PodCostSample.LabelsEntry
+	38, // 12: kubehero.v1.IngestPodCostRequest.samples:type_name -> kubehero.v1.PodCostSample
+	39, // 13: kubehero.v1.IngestPodCostRequest.nodes:type_name -> kubehero.v1.NodeCostSample
 	0,  // 14: kubehero.v1.ControlPlaneService.HealthCheck:input_type -> kubehero.v1.HealthCheckRequest
-	2,  // 15: kubehero.v1.ControlPlaneService.ListClusters:input_type -> kubehero.v1.ListClustersRequest
-	5,  // 16: kubehero.v1.ControlPlaneService.RegisterCluster:input_type -> kubehero.v1.RegisterClusterRequest
-	7,  // 17: kubehero.v1.ControlPlaneService.ListAuditLog:input_type -> kubehero.v1.ListAuditLogRequest
-	10, // 18: kubehero.v1.ControlPlaneService.AppendAuditEntry:input_type -> kubehero.v1.AppendAuditEntryRequest
-	12, // 19: kubehero.v1.ControlPlaneService.GetBurnRate:input_type -> kubehero.v1.GetBurnRateRequest
-	14, // 20: kubehero.v1.ControlPlaneService.ListWasteRecommendations:input_type -> kubehero.v1.ListWasteRecommendationsRequest
-	17, // 21: kubehero.v1.ControlPlaneService.GetWorkload:input_type -> kubehero.v1.GetWorkloadRequest
-	19, // 22: kubehero.v1.ControlPlaneService.ListPolicies:input_type -> kubehero.v1.ListPoliciesRequest
-	22, // 23: kubehero.v1.ControlPlaneService.ArmPolicy:input_type -> kubehero.v1.ArmPolicyRequest
-	24, // 24: kubehero.v1.ControlPlaneService.GetTeamSpend:input_type -> kubehero.v1.GetTeamSpendRequest
-	27, // 25: kubehero.v1.ControlPlaneService.ListVulnerabilities:input_type -> kubehero.v1.ListVulnerabilitiesRequest
-	30, // 26: kubehero.v1.ControlPlaneService.ListAnomalies:input_type -> kubehero.v1.ListAnomaliesRequest
-	33, // 27: kubehero.v1.ControlPlaneService.ListCapacityDemands:input_type -> kubehero.v1.ListCapacityDemandsRequest
-	38, // 28: kubehero.v1.ControlPlaneService.IngestPodCost:input_type -> kubehero.v1.IngestPodCostRequest
-	1,  // 29: kubehero.v1.ControlPlaneService.HealthCheck:output_type -> kubehero.v1.HealthCheckResponse
-	4,  // 30: kubehero.v1.ControlPlaneService.ListClusters:output_type -> kubehero.v1.ListClustersResponse
-	6,  // 31: kubehero.v1.ControlPlaneService.RegisterCluster:output_type -> kubehero.v1.RegisterClusterResponse
-	9,  // 32: kubehero.v1.ControlPlaneService.ListAuditLog:output_type -> kubehero.v1.ListAuditLogResponse
-	11, // 33: kubehero.v1.ControlPlaneService.AppendAuditEntry:output_type -> kubehero.v1.AppendAuditEntryResponse
-	13, // 34: kubehero.v1.ControlPlaneService.GetBurnRate:output_type -> kubehero.v1.GetBurnRateResponse
-	16, // 35: kubehero.v1.ControlPlaneService.ListWasteRecommendations:output_type -> kubehero.v1.ListWasteRecommendationsResponse
-	18, // 36: kubehero.v1.ControlPlaneService.GetWorkload:output_type -> kubehero.v1.GetWorkloadResponse
-	21, // 37: kubehero.v1.ControlPlaneService.ListPolicies:output_type -> kubehero.v1.ListPoliciesResponse
-	23, // 38: kubehero.v1.ControlPlaneService.ArmPolicy:output_type -> kubehero.v1.ArmPolicyResponse
-	26, // 39: kubehero.v1.ControlPlaneService.GetTeamSpend:output_type -> kubehero.v1.GetTeamSpendResponse
-	29, // 40: kubehero.v1.ControlPlaneService.ListVulnerabilities:output_type -> kubehero.v1.ListVulnerabilitiesResponse
-	32, // 41: kubehero.v1.ControlPlaneService.ListAnomalies:output_type -> kubehero.v1.ListAnomaliesResponse
-	35, // 42: kubehero.v1.ControlPlaneService.ListCapacityDemands:output_type -> kubehero.v1.ListCapacityDemandsResponse
-	39, // 43: kubehero.v1.ControlPlaneService.IngestPodCost:output_type -> kubehero.v1.IngestPodCostResponse
-	29, // [29:44] is the sub-list for method output_type
-	14, // [14:29] is the sub-list for method input_type
+	2,  // 15: kubehero.v1.ControlPlaneService.WhoAmI:input_type -> kubehero.v1.WhoAmIRequest
+	4,  // 16: kubehero.v1.ControlPlaneService.ListClusters:input_type -> kubehero.v1.ListClustersRequest
+	7,  // 17: kubehero.v1.ControlPlaneService.RegisterCluster:input_type -> kubehero.v1.RegisterClusterRequest
+	9,  // 18: kubehero.v1.ControlPlaneService.ListAuditLog:input_type -> kubehero.v1.ListAuditLogRequest
+	12, // 19: kubehero.v1.ControlPlaneService.AppendAuditEntry:input_type -> kubehero.v1.AppendAuditEntryRequest
+	14, // 20: kubehero.v1.ControlPlaneService.GetBurnRate:input_type -> kubehero.v1.GetBurnRateRequest
+	16, // 21: kubehero.v1.ControlPlaneService.ListWasteRecommendations:input_type -> kubehero.v1.ListWasteRecommendationsRequest
+	19, // 22: kubehero.v1.ControlPlaneService.GetWorkload:input_type -> kubehero.v1.GetWorkloadRequest
+	21, // 23: kubehero.v1.ControlPlaneService.ListPolicies:input_type -> kubehero.v1.ListPoliciesRequest
+	24, // 24: kubehero.v1.ControlPlaneService.ArmPolicy:input_type -> kubehero.v1.ArmPolicyRequest
+	26, // 25: kubehero.v1.ControlPlaneService.GetTeamSpend:input_type -> kubehero.v1.GetTeamSpendRequest
+	29, // 26: kubehero.v1.ControlPlaneService.ListVulnerabilities:input_type -> kubehero.v1.ListVulnerabilitiesRequest
+	32, // 27: kubehero.v1.ControlPlaneService.ListAnomalies:input_type -> kubehero.v1.ListAnomaliesRequest
+	35, // 28: kubehero.v1.ControlPlaneService.ListCapacityDemands:input_type -> kubehero.v1.ListCapacityDemandsRequest
+	40, // 29: kubehero.v1.ControlPlaneService.IngestPodCost:input_type -> kubehero.v1.IngestPodCostRequest
+	1,  // 30: kubehero.v1.ControlPlaneService.HealthCheck:output_type -> kubehero.v1.HealthCheckResponse
+	3,  // 31: kubehero.v1.ControlPlaneService.WhoAmI:output_type -> kubehero.v1.WhoAmIResponse
+	6,  // 32: kubehero.v1.ControlPlaneService.ListClusters:output_type -> kubehero.v1.ListClustersResponse
+	8,  // 33: kubehero.v1.ControlPlaneService.RegisterCluster:output_type -> kubehero.v1.RegisterClusterResponse
+	11, // 34: kubehero.v1.ControlPlaneService.ListAuditLog:output_type -> kubehero.v1.ListAuditLogResponse
+	13, // 35: kubehero.v1.ControlPlaneService.AppendAuditEntry:output_type -> kubehero.v1.AppendAuditEntryResponse
+	15, // 36: kubehero.v1.ControlPlaneService.GetBurnRate:output_type -> kubehero.v1.GetBurnRateResponse
+	18, // 37: kubehero.v1.ControlPlaneService.ListWasteRecommendations:output_type -> kubehero.v1.ListWasteRecommendationsResponse
+	20, // 38: kubehero.v1.ControlPlaneService.GetWorkload:output_type -> kubehero.v1.GetWorkloadResponse
+	23, // 39: kubehero.v1.ControlPlaneService.ListPolicies:output_type -> kubehero.v1.ListPoliciesResponse
+	25, // 40: kubehero.v1.ControlPlaneService.ArmPolicy:output_type -> kubehero.v1.ArmPolicyResponse
+	28, // 41: kubehero.v1.ControlPlaneService.GetTeamSpend:output_type -> kubehero.v1.GetTeamSpendResponse
+	31, // 42: kubehero.v1.ControlPlaneService.ListVulnerabilities:output_type -> kubehero.v1.ListVulnerabilitiesResponse
+	34, // 43: kubehero.v1.ControlPlaneService.ListAnomalies:output_type -> kubehero.v1.ListAnomaliesResponse
+	37, // 44: kubehero.v1.ControlPlaneService.ListCapacityDemands:output_type -> kubehero.v1.ListCapacityDemandsResponse
+	41, // 45: kubehero.v1.ControlPlaneService.IngestPodCost:output_type -> kubehero.v1.IngestPodCostResponse
+	30, // [30:46] is the sub-list for method output_type
+	14, // [14:30] is the sub-list for method input_type
 	14, // [14:14] is the sub-list for extension type_name
 	14, // [14:14] is the sub-list for extension extendee
 	0,  // [0:14] is the sub-list for field type_name
@@ -3571,7 +3705,7 @@ func file_kubehero_v1_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kubehero_v1_control_proto_rawDesc), len(file_kubehero_v1_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   41,
+			NumMessages:   43,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

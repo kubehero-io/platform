@@ -76,6 +76,8 @@ type ControlPlane struct {
 	// team spend, capacity demands.
 	PG *sql.DB
 	CH *sql.DB
+	// AuthRequired mirrors KUBEHERO_REQUIRE_AUTH for WhoAmI.
+	AuthRequired bool
 }
 
 // Options is a tiny option-bag so callers can grow capability without
@@ -92,6 +94,7 @@ type Options struct {
 	DemoFixturesDisabled bool
 	PG                   *sql.DB
 	CH                   *sql.DB
+	AuthRequired         bool
 }
 
 func New(opts ...Options) *ControlPlane {
@@ -129,6 +132,9 @@ func New(opts ...Options) *ControlPlane {
 		}
 		if o.CH != nil {
 			cp.CH = o.CH
+		}
+		if o.AuthRequired {
+			cp.AuthRequired = true
 		}
 	}
 	return cp

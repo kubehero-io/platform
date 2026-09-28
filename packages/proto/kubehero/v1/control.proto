@@ -10,6 +10,12 @@ service ControlPlaneService {
   // Liveness + version probe.
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse) {}
 
+  // WhoAmI echoes the resolved caller: who the presented credential is,
+  // its role, and (for cluster enrollment tokens) the cluster. The
+  // dashboard's token login and `kubehero auth whoami` use it to check
+  // a credential without side effects.
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse) {}
+
   // Fleet view.
   rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {}
 
@@ -80,6 +86,19 @@ message HealthCheckRequest {}
 message HealthCheckResponse {
   string status = 1;
   string version = 2;
+}
+
+// ─── WhoAmI ───────────────────────────────────────────────────────────────
+
+message WhoAmIRequest {}
+
+message WhoAmIResponse {
+  string subject = 1;      // "anonymous", "cluster:<id>", a key hash, or the OIDC sub
+  string role = 2;         // anonymous | viewer | auditor | member | admin | owner
+  string email = 3;        // OIDC only
+  repeated string groups = 4;
+  string cluster_id = 5;   // set for cluster enrollment tokens
+  bool auth_required = 6;  // false when the server accepts anonymous callers
 }
 
 // ─── ListClusters ─────────────────────────────────────────────────────────

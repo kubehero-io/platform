@@ -1,4 +1,4 @@
-<svg width="1280" height="320" viewBox="0 0 1280 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KubeHero — one pane of glass for Kubernetes cost, efficiency, and control">
+<svg width="1280" height="320" viewBox="0 0 1280 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KubeHero — every signal, every dollar, one agent">
   <defs>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
       <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#1c1c1c" stroke-width="1"/>
@@ -20,15 +20,17 @@
   <!-- wordmark -->
   <g font-family="ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, monospace">
     <text x="24" y="150" font-size="64" font-weight="700" letter-spacing="2" fill="#fafafa">KUBEHERO</text>
-    <text x="24" y="192" font-size="20" fill="#a3a3a3">One pane of glass for Kubernetes cost, efficiency, and control.</text>
-    <text x="24" y="248" font-size="14" fill="#525252">$ helm install kubehero oci://ghcr.io/kubehero-io/charts/kubehero</text>
+    <text x="24" y="192" font-size="20" fill="#a3a3a3">Every signal. Every dollar. One agent.</text>
+    <text x="24" y="248" font-size="14" fill="#525252">$ helm install kubehero oci://ghcr.io/kubehero-io/charts/kubehero -n kubehero-system --create-namespace</text>
     <g font-size="12" fill="#737373">
-      <text x="24" y="292">[ EKS ]</text>
-      <text x="100" y="292">[ GKE ]</text>
-      <text x="176" y="292">[ AKS ]</text>
-      <text x="252" y="292">[ eBPF telemetry ]</text>
-      <text x="404" y="292">[ spend ceilings ]</text>
-      <text x="548" y="292">[ GPU waste ]</text>
+      <text x="24" y="292">[ cost ]</text>
+      <text x="96" y="292">[ logs ]</text>
+      <text x="168" y="292">[ profiles ]</text>
+      <text x="272" y="292">[ eBPF network ]</text>
+      <text x="400" y="292">[ alerts ]</text>
+      <text x="480" y="292">[ rightsizing ]</text>
+      <text x="592" y="292">[ agents · MCP ]</text>
+      <text x="720" y="292">[ EKS · GKE · AKS ]</text>
     </g>
   </g>
 

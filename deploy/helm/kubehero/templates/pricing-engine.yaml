@@ -1,22 +1,74 @@
 {{- if .Values.pricingEngine.enabled -}}
-apiVersion: batch/v1
-kind: CronJob
+{{- $fullname := include "kubehero.fullname" . }}
+# Pricing engine: serves PricingService.Quote (live AWS / GCP / Azure
+# price lists behind a cache, static catalog fallback). Collectors call
+# it to price the node they run on.
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: {{ include "kubehero.fullname" . }}-pricing-engine
+  name: {{ $fullname }}-pricing-engine
   labels: {{- include "kubehero.labels" . | nindent 4 }}
 spec:
-  schedule: {{ .Values.pricingEngine.schedule | quote }}
-  jobTemplate:
+  replicas: {{ .Values.pricingEngine.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: pricing-engine
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/component: pricing-engine
     spec:
-      template:
-        spec:
-          serviceAccountName: {{ include "kubehero.fullname" . }}-pricing-engine
-          {{- with (include "kubehero.priorityClassName" .) }}
-          priorityClassName: {{ . }}
-          {{- end }}
-          restartPolicy: OnFailure
-          containers:
-            - name: refresh
-              image: {{ include "kubehero.image" (dict "root" . "image" .Values.pricingEngine.image) }}
-              args: ["quote", "--cloud=aws", "--sku=m5.large", "--region=us-east-1"]
+      serviceAccountName: {{ $fullname }}-pricing-engine
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with (include "kubehero.priorityClassName" .) }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: pricing-engine
+          image: {{ include "kubehero.image" (dict "root" . "image" .Values.pricingEngine.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "--addr=:{{ .Values.pricingEngine.service.port }}"]
+          env:
+            {{- if .Values.pricingEngine.gcpBillingSecret }}
+            - name: GCP_BILLING_API_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.pricingEngine.gcpBillingSecret }}, key: api-key }
+            {{- end }}
+            {{- with .Values.pricingEngine.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.pricingEngine.service.port }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          securityContext: {{- include "kubehero.containerSecurityContext" . | nindent 12 }}
+          resources: {{- toYaml .Values.pricingEngine.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-pricing-engine
+  labels:
+    {{- include "kubehero.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pricing-engine
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/component: pricing-engine
+  ports:
+    - port: {{ .Values.pricingEngine.service.port }}
+      targetPort: http
+      name: http
 {{- end }}

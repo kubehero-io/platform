@@ -9,18 +9,18 @@ import (
 )
 
 // Demo returns a realistic-looking set of series demonstrating the
-// chargeback labels. Used until eBPF probes populate real values.
-// The shape exactly matches what production emits — only the numbers
-// are synthetic.
+// chargeback labels (serve --demo, for dashboards without a cluster).
+// The shape matches what the cost scanner emits — only the numbers are
+// synthetic, and every series carries source="demo".
 func Demo() []Series {
 	now := float64(time.Now().Unix())
 	teams := []string{"ml-inference", "retrieval", "data", "edge", "platform"}
 	pools := []poolMeta{
 		{"aks-nc24ads", "azure", "westeurope", "A100 80GB"},
-		{"eks-p5",      "aws",   "us-east-1",  "H100 80GB"},
-		{"gke-g2",      "gcp",   "europe-west4", "L4 24GB"},
-		{"aks-d16as",   "azure", "westeurope", ""},
-		{"eks-c6i",     "aws",   "us-east-1",  ""},
+		{"eks-p5", "aws", "us-east-1", "H100 80GB"},
+		{"gke-g2", "gcp", "europe-west4", "L4 24GB"},
+		{"aks-d16as", "azure", "westeurope", ""},
+		{"eks-c6i", "aws", "us-east-1", ""},
 	}
 
 	var out []Series
@@ -47,6 +47,8 @@ func Demo() []Series {
 				"cloud":       p.cloud,
 				"region":      p.region,
 				"cluster":     p.cloud + "-" + p.region,
+				// Synthetic data is always labelled as such.
+				"source": "demo",
 			}
 			if p.gpuKind != "" {
 				labels["gpu_kind"] = p.gpuKind
@@ -74,7 +76,11 @@ func Demo() []Series {
 type poolMeta struct{ nodepool, cloud, region, gpuKind string }
 
 func clamp(x float64) float64 {
-	if x < 0 { return 0 }
-	if x > 1 { return 1 }
+	if x < 0 {
+		return 0
+	}
+	if x > 1 {
+		return 1
+	}
 	return x
 }

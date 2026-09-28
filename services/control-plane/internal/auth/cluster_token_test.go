@@ -96,3 +96,19 @@ func TestStaticAPIKeyStillWinsOverClusterToken(t *testing.T) {
 		t.Fatalf("principal = %+v, verifier calls = %d", p, v.calls)
 	}
 }
+
+func TestAPIKeyRoleSuffixes(t *testing.T) {
+	cases := map[string]Role{
+		"a:owner": RoleOwner, "b:admin": RoleAdmin, "c:auditor": RoleAuditor,
+		"d:member": RoleMember, "e:viewer": RoleViewer, "f": RoleMember,
+	}
+	for entry, want := range cases {
+		token, role := splitKey(entry)
+		if role != want {
+			t.Errorf("%q → role %q, want %q", entry, role, want)
+		}
+		if token == "" || token == entry && want != RoleMember {
+			t.Errorf("%q → token %q", entry, token)
+		}
+	}
+}

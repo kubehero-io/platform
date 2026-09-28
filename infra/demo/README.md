@@ -1,46 +1,59 @@
-# kind demo — KubeHero end-to-end
+# Demos and end-to-end tests
 
-Two flavors. Pick the one that matches what you want to see.
+Three ways to see KubeHero run for real. All of them exercise the real
+images, the real ingest path and the real stores — nothing is mocked.
 
-## `task demo` — full stack + policy that trips
-
-The flagship demo. One command: kind cluster, all 5 KubeHero services, demo workloads, and a `BudgetPolicy` + `CeilingPolicy` sized to trip within ~3 minutes of the collector first ingesting.
-
-```bash
-task demo                              # ~5-7 min cold
-task demo:clean                        # tear down
-# or:
-./infra/demo/task-demo.sh
-./infra/demo/task-demo.sh --clean
-```
-
-When it's ready you can:
-
-- port-forward the dashboard at `:3001` and log in
-- watch `kubectl describe ceilingpolicy ml-inference-ceiling` — burn rate updates each reconcile
-- query the audit log via the cp's `ListAuditLog` RPC and see the `ceiling.tripped` event land
-
-The tripping policy lives in `tripping-policy.yaml`. It's `hardStop=false` by default (alert-only); flip it to `true` and arm the policy to see the escalator actually cap HPAs.
-
-## `kind-demo.sh` — collector + Prometheus only
-
-The original, minimal flavor. Boots Grafana with three pre-loaded chargeback dashboards. Useful when you only want to look at the metric shape and don't need the policy / control-plane story.
+## `docker compose` — full stack, no cluster (fastest)
 
 ```bash
-./infra/demo/kind-demo.sh              # full setup
-./infra/demo/kind-demo.sh --clean      # tear down
+docker compose up --build -d      # from the repo root
+open http://localhost:3001         # dashboard (demo sign-in)
 ```
 
-After it finishes (~4 minutes):
+The `demo-generator` service streams a synthetic three-cluster fleet
+(`eks-use1-prod`, `gke-euw4-batch`, `aks-westeu-prod-01`) through the
+real ingest APIs: pod + node cost, container usage, logs, CPU profiles,
+eBPF-style flows and cluster events, with 72h of backfilled history. The
+stories are consistent across every signal:
 
-- **Grafana** at http://localhost:30080 (admin / kubehero) with three pre-loaded dashboards in the **KubeHero** folder
-- **Prometheus** scraping the collector and applying the chargeback recording rules
-- **Demo workloads** across `ml-inference`, `retrieval`, `data`, `edge` namespaces
+- **checkout retry storm** (began 3h before start): spend anomaly, a
+  flood of `payment gateway timeout, retrying` logs, TLS handshakes in
+  the CPU profile, egress + retransmits to `api.stripe.com`
+- **payments-worker OOMs** every ~2h — rightsizing must never shrink it
+- **idle A100s** on `model-server-a100` (~22% GPU utilisation)
+- **over-provisioned gateways** — clear downsizing recommendations
+- **etl-backfill can't schedule** — capacity demand with a priced fix
+
+`./infra/demo/smoke.sh` boots the stack and asserts all of the above
+through every public API (Connect, Loki, OpenCost, FOCUS, advisor,
+dashboard). `task smoke` runs it.
+
+## `e2e-kind.sh` — the real chart on a local cluster
+
+```bash
+./infra/demo/e2e-kind.sh              # build, install, assert, tear down
+KEEP=1 ./infra/demo/e2e-kind.sh       # …and keep the cluster
+```
+
+Builds every image, loads them into kind, installs the Helm chart with
+embedded Postgres + ClickHouse and auth on, runs a small live "shop"
+(three real services built from the generator's `workload` mode: HTTP
+traffic, JSON logs, CPU, `/debug/pprof`) and waits until the real
+collector's data answers every query: allocation, LogQL, rightsizing,
+profiles and — when the kernel allows eBPF — the service map.
+
+## `task-demo.sh` — the guided demo
+
+```bash
+task demo            # = ./infra/demo/task-demo.sh
+task demo:clean
+```
+
+`e2e-kind.sh` plus the classic demo workloads and a BudgetPolicy +
+CeilingPolicy sized to trip (`tripping-policy.yaml`), then prints the
+dashboard / CLI commands and your admin token.
 
 ## Prerequisites
 
-- `docker` (any recent version)
-- `kind` 0.20+
-- `helm` 3.12+
-- `kubectl`
-- `task` (for `task demo`) — `brew install go-task/tap/go-task`
+docker, kind (≥ 0.30), helm (≥ 3.15), kubectl, curl, jq. Docker Desktop
+needs ~6 GB of memory for the kind flavours.

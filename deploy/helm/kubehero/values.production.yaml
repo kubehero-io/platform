@@ -14,8 +14,12 @@
 controlPlane:
   replicas: 3
   resources:
-    requests: { cpu: 250m, memory: 256Mi }
-    limits:   { cpu: 2,    memory: 1Gi }
+    requests: { cpu: 500m, memory: 512Mi }
+    limits:   { cpu: 4,    memory: 2Gi }
+  # Never serve demo fixtures; authenticated API only.
+  demoMode: "false"
+  auth:
+    requireAuth: true
 
 dashboard:
   replicas: 2
@@ -51,24 +55,27 @@ autoscaling:
     maxReplicas: 6
     targetCPU: 70
 
-# ─── Storage: external by default (BYO Postgres + ClickHouse) ─────────────
+# ─── Storage: managed Postgres + ClickHouse (DSNs in Secrets) ─────────────
+#   kubectl create secret generic kubehero-postgres \
+#     --from-literal=url='postgres://kubehero:…@pg.internal:5432/kubehero?sslmode=verify-full'
+#   kubectl create secret generic kubehero-clickhouse \
+#     --from-literal=url='clickhouse://kubehero:…@ch.internal:9440/kubehero?secure=true'
 postgresql:
   embedded: false
   external:
-    sslMode: verify-full
-    existingSecret: kubehero-postgres-credentials
-
+    existingSecret: kubehero-postgres
 clickhouse:
   embedded: false
   external:
-    existingSecret: kubehero-clickhouse-credentials
+    existingSecret: kubehero-clickhouse
 
-# ─── Auth via OIDC; embedded Dex off, point at customer issuer ────────────
+# ─── Never serve demo fixtures; authenticated API only ────────────────────
+# ─── Auth via OIDC; embedded Dex off, point at your issuer ────────────────
+# controlPlane.auth.oidc.issuerURL / audience / groupRoles in your
+# env-specific overlay.
 auth:
   dex:
     embedded: false
-  workos:
-    enabled: false
 
 # ─── Posture: turn on Trivy ingest in production ──────────────────────────
 security:

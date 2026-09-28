@@ -1,43 +1,52 @@
-# KubeHero full stack for local development — no K8s required.
+# KubeHero full stack for local development — no Kubernetes required.
 #
 #   docker compose up --build -d
-#   open http://localhost:3001   # dashboard
+#   open http://localhost:3001   # dashboard (demo sign-in)
 #
 # What you get:
-#   · collector on :8081 emitting demo chargeback metrics
-#   · control-plane on :8080 (Connect-RPC + /metrics)
-#   · pricing-engine on :8082
-#   · advisor on :8083 (agentic briefings; set ANTHROPIC_API_KEY for the LLM brain)
-#   · dashboard on :3001
-#   · postgres 16 on :5432 (metadata)
-#   · clickhouse on :9000 (time-series)
-#   · valkey on :6379 (cache + rate limit)
-#   · grafana on :3000 with pre-loaded dashboards
-#   · prometheus on :9090 scraping every service
+#   · control-plane on :8080 — Connect-RPC plus the compatibility APIs
+#     (OpenCost /allocation, Loki /loki/api/v1/*, OTLP /v1/logs,
+#     Pyroscope /ingest, FOCUS export)
+#   · demo-generator — a synthetic three-cluster fleet (eks-use1-prod,
+#     gke-euw4-batch, aks-westeu-prod-01) streamed through the REAL ingest
+#     APIs: pod + node cost, container usage, logs, CPU profiles, eBPF-style
+#     flows and cluster events, with 72h of backfilled history and a live
+#     incident (checkout retry storm) for the advisor to investigate
+#   · advisor on :8083 (set ANTHROPIC_API_KEY for the Claude brain)
+#   · pricing-engine on :8082, dashboard on :3001
+#   · postgres 18 on :5432 (metadata), clickhouse 26.8 LTS on :9000/:8123
+#   · grafana on :3000 (admin / kubehero) with Prometheus + KubeHero-as-Loki
+#     datasources, prometheus on :9090
+#   · collector on :8081 — idles without a cluster (it needs a kubeconfig);
+#     run it against kind for the real node agent (see LOCAL_DEV.md)
 #
 # Tear down:
 #   docker compose down -v
 
 name: kubehero
 
+x-go-build: &go-build
+  context: .
+
 services:
   # ─── storage ──────────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: kubehero
       POSTGRES_PASSWORD: kubehero
       POSTGRES_DB: kubehero
+      PGDATA: /var/lib/postgresql/data/pgdata
     ports: ["5432:5432"]
-    volumes: [pg-data:/var/lib/postgresql/data]
+    volumes: [pg18-data:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kubehero"]
+      test: ["CMD-SHELL", "pg_isready -U kubehero -d kubehero"]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 30
 
   clickhouse:
-    image: clickhouse/clickhouse-server:24.8-alpine
+    image: clickhouse/clickhouse-server:26.8-alpine
     environment:
       CLICKHOUSE_USER: kubehero
       CLICKHOUSE_PASSWORD: kubehero
@@ -47,68 +56,71 @@ services:
     volumes: [ch-data:/var/lib/clickhouse]
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
-
-  valkey:
-    image: valkey/valkey:8-alpine
-    command: ["valkey-server", "--appendonly", "yes"]
-    ports: ["6379:6379"]
-    volumes: [valkey-data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   # ─── KubeHero services ────────────────────────────────────────────────
-  collector:
-    build:
-      context: .
-      dockerfile: services/collector/Dockerfile
-    command: ["serve", "--addr=:8081", "--demo=true"]
-    ports: ["8081:8081"]
-    depends_on: { postgres: { condition: service_healthy } }
-
   control-plane:
-    build:
-      context: .
-      dockerfile: services/control-plane/Dockerfile
+    build: { <<: *go-build, dockerfile: services/control-plane/Dockerfile }
     command: ["serve", "--addr=:8080"]
     environment:
       DATABASE_URL: "postgres://kubehero:kubehero@postgres:5432/kubehero?sslmode=disable"
       CLICKHOUSE_URL: "clickhouse://kubehero:kubehero@clickhouse:9000/kubehero"
-      REDIS_URL: "redis://valkey:6379"
+      AUDIT_HMAC_KEY: "local-dev-only-audit-key"
+      # Open access for local dev. The Helm chart requires auth by default.
+      KUBEHERO_REQUIRE_AUTH: "false"
     ports: ["8080:8080"]
     depends_on:
       postgres:   { condition: service_healthy }
-      clickhouse: { condition: service_started }
-      valkey:     { condition: service_started }
+      clickhouse: { condition: service_healthy }
+
+  demo-generator:
+    build: { <<: *go-build, dockerfile: infra/demo/generator/Dockerfile }
+    command: ["--url=http://control-plane:8080", "--backfill=72h", "--interval=15s"]
+    depends_on: [control-plane]
+    restart: on-failure
 
   advisor:
-    build:
-      context: .
-      dockerfile: services/advisor/Dockerfile
+    build: { <<: *go-build, dockerfile: services/advisor/Dockerfile }
     command: ["serve", "--addr=:8083"]
     environment:
       CONTROL_PLANE_URL: "http://control-plane:8080"
-      # Optional: enables the LLM brain; unset = deterministic rules brain.
+      # Optional: enables the Claude brain; unset = deterministic rules brain.
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     ports: ["8083:8083"]
     depends_on: [control-plane]
 
   pricing-engine:
-    build:
-      context: .
-      dockerfile: services/pricing-engine/Dockerfile
+    build: { <<: *go-build, dockerfile: services/pricing-engine/Dockerfile }
     command: ["serve", "--addr=:8082"]
     ports: ["8082:8082"]
 
-  dashboard:
-    build:
-      context: .
-      dockerfile: apps/dashboard/Dockerfile
+  collector:
+    build: { <<: *go-build, dockerfile: services/collector/Dockerfile }
+    command: ["serve", "--addr=:8081", "--demo=true", "--logs=false", "--ebpf=false"]
     environment:
-      NEXT_PUBLIC_API_URL: "http://localhost:8080"
-    ports: ["3001:3001"]
+      CONTROL_PLANE_URL: "http://control-plane:8080"
+      PRICING_ENGINE_URL: "http://pricing-engine:8082"
+      CLUSTER_ID: "local-compose"
+    ports: ["8081:8081"]
     depends_on: [control-plane]
+
+  dashboard:
+    build: { <<: *go-build, dockerfile: apps/dashboard/Dockerfile }
+    environment:
+      CONTROL_PLANE_URL: "http://control-plane:8080"
+      ADVISOR_URL: "http://advisor:8083"
+      KUBEHERO_DASHBOARD_AUTH: "demo"
+      KUBEHERO_SESSION_SECRET: "local-dev-only-session-secret-change-me-0123456789"
+    ports: ["3001:3001"]
+    depends_on: [control-plane, advisor]
 
   # ─── observability ────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:v2.55.0
+    image: prom/prometheus:v3.15.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=7d
@@ -119,7 +131,7 @@ services:
     ports: ["9090:9090"]
 
   grafana:
-    image: grafana/grafana:11.3.0
+    image: grafana/grafana:13.2.2
     environment:
       GF_SECURITY_ADMIN_PASSWORD: kubehero
       GF_AUTH_ANONYMOUS_ENABLED: "true"
@@ -130,11 +142,10 @@ services:
       - ./deploy/helm/kubehero/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports: ["3000:3000"]
-    depends_on: [prometheus]
+    depends_on: [prometheus, control-plane]
 
 volumes:
-  pg-data:
+  pg18-data:
   ch-data:
-  valkey-data:
   prom-data:
   grafana-data:

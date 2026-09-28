@@ -47,6 +47,17 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Rightsizing skips containers a VerticalPodAutoscaler already owns.
+  - apiGroups: ["autoscaling.k8s.io"]
+    resources: ["verticalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  # Posture: Trivy Operator vulnerability reports (read-only).
+  - apiGroups: ["aquasecurity.github.io"]
+    resources: ["vulnerabilityreports"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -100,6 +111,14 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes", "pods"]
     verbs: ["get", "list"]
+  # Warning events (OOMKilling, BackOff, FailedScheduling, Evicted, …)
+  # → cluster events for alerting and capacity demands. Read-only.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -110,6 +129,31 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: {{ $fullname }}-collector
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-collector
+    namespace: {{ .Release.Namespace }}
+---
+# Leader election for cluster-scoped scans: one Lease, this namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-collector-leader
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-collector-leader
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-collector-leader
 subjects:
   - kind: ServiceAccount
     name: {{ $fullname }}-collector

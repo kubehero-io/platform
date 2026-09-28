@@ -59,3 +59,4 @@ deploy/helm/*/Chart.lock
 /services/pricing-engine/pricing-engine
 /cli/kubehero/kubehero
 /infra/dagger/dagger
+/infra/demo/generator/generator

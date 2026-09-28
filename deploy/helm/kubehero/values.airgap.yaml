@@ -1,8 +1,18 @@
 # Values overlay for air-gapped installs.
+#
+# Mirror every image into your registry first:
+#   ghcr.io/kubehero-io/{control-plane,collector,operator,advisor,pricing-engine,dashboard}:<version>
+#   postgres:18-alpine            (only with postgresql.embedded=true)
+#   clickhouse/clickhouse-server:26.8-alpine  (only with clickhouse.embedded=true)
 airgap: true
 image:
-  registry: ""   # Expect customer to mirror images to their own registry and
-                 # set this (plus imagePullSecrets) accordingly.
+  registry: ""   # set to your mirror, e.g. registry.internal/kubehero
+                 # (plus imagePullSecrets) — KubeHero images resolve to
+                 # <registry>/<repository>/<name>:<tag>.
+postgresql:
+  image: registry.internal/library/postgres:18-alpine
+clickhouse:
+  image: registry.internal/clickhouse/clickhouse-server:26.8-alpine
 telemetry:
   otlp:
     enabled: false
