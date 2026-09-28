@@ -50,12 +50,12 @@ type workload struct {
 	// Usage model: base fraction of request, diurnal swing, noise.
 	CPUUse, MemUse, Diurnal, Noise float64
 	// Optional behaviours.
-	RetryStorm   bool // checkout-api: the incident
-	OOMs         bool // payments-worker: runs out of memory
-	BatchWindow  [2]int
-	GPUUtil      float64
+	RetryStorm    bool // checkout-api: the incident
+	OOMs          bool // payments-worker: runs out of memory
+	BatchWindow   [2]int
+	GPUUtil       float64
 	Unschedulable bool
-	pods         []*pod
+	pods          []*pod
 }
 
 type pod struct {

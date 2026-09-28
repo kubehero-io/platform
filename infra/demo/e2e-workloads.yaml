@@ -1,0 +1,97 @@
+# A tiny real "shop" for end-to-end tests on a live cluster: three
+# services built from the demo-generator image (`generator workload`)
+# calling each other, logging JSON, burning a little CPU and exposing
+# /debug/pprof. The collector tails their logs, the eBPF agent sees the
+# traffic + CPU, the pprof scraper pulls their profiles.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+  labels: { kubehero.io/team: payments }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: shop
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: frontend } }
+  template:
+    metadata:
+      labels: { app: frontend, kubehero.io/team: growth, kubehero.io/cost-center: cc-330 }
+      annotations:
+        profiles.grafana.com/cpu.scrape: "true"
+        profiles.grafana.com/cpu.port: "8080"
+    spec:
+      containers:
+        - name: frontend
+          image: kubehero/demo-generator:e2e
+          imagePullPolicy: IfNotPresent
+          args: ["workload", "--name=frontend", "--call=http://checkout.shop.svc:8080/checkout", "--rps=15", "--work=1500"]
+          ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: 250m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 128Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: shop
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: checkout } }
+  template:
+    metadata:
+      labels: { app: checkout, kubehero.io/team: payments, kubehero.io/cost-center: cc-210 }
+      annotations:
+        profiles.grafana.com/cpu.scrape: "true"
+        profiles.grafana.com/cpu.port: "8080"
+    spec:
+      containers:
+        - name: checkout
+          image: kubehero/demo-generator:e2e
+          imagePullPolicy: IfNotPresent
+          args: ["workload", "--name=checkout", "--call=http://payments.shop.svc:8080/pay", "--rps=10", "--work=4000", "--error-rate=0.03"]
+          ports: [{ containerPort: 8080 }]
+          resources:
+            # Deliberately over-requested so rightsizing has something to say.
+            requests: { cpu: "1", memory: 512Mi }
+            limits:   { cpu: "1", memory: 512Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  namespace: shop
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: payments } }
+  template:
+    metadata:
+      labels: { app: payments, kubehero.io/team: payments, kubehero.io/cost-center: cc-210 }
+    spec:
+      containers:
+        - name: payments
+          image: kubehero/demo-generator:e2e
+          imagePullPolicy: IfNotPresent
+          args: ["workload", "--name=payments", "--work=6000", "--error-rate=0.05"]
+          ports: [{ containerPort: 8080 }]
+          resources:
+            requests: { cpu: 200m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: checkout, namespace: shop }
+spec:
+  selector: { app: checkout }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: payments, namespace: shop }
+spec:
+  selector: { app: payments }
+  ports: [{ port: 8080, targetPort: 8080 }]

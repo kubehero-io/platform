@@ -173,9 +173,9 @@ func eventBatch(c *cluster, states []podState, t time.Time, step time.Duration) 
 				out = append(out, &kuberov1.ClusterEvent{
 					TsUnixMs: t.UnixMilli(), Kind: "oom_killed", Severity: "warn",
 					Source: ref(c, w, st.p), Reason: "OOMKilled",
-					Message: fmt.Sprintf("Container %s exceeded its memory limit (%.2fGi) and was OOM-killed", w.Name, w.MemLimitGiB),
+					Message:    fmt.Sprintf("Container %s exceeded its memory limit (%.2fGi) and was OOM-killed", w.Name, w.MemLimitGiB),
 					Attributes: map[string]string{"restart_count": fmt.Sprint(st.p.Restarts), "limit_bytes": fmt.Sprint(gib(w.MemLimitGiB))},
-					Count: 1,
+					Count:      1,
 				})
 			}
 		}
@@ -186,8 +186,8 @@ func eventBatch(c *cluster, states []podState, t time.Time, step time.Duration) 
 		}
 		out = append(out, &kuberov1.ClusterEvent{
 			TsUnixMs: t.UnixMilli(), Kind: "unschedulable", Severity: "warn",
-			Source: &kuberov1.PodRef{Namespace: w.Namespace, Pod: w.pods[0].Name, Workload: w.Name, WorkloadKind: w.Kind, Team: w.Team},
-			Reason: "FailedScheduling",
+			Source:  &kuberov1.PodRef{Namespace: w.Namespace, Pod: w.pods[0].Name, Workload: w.Name, WorkloadKind: w.Kind, Team: w.Team},
+			Reason:  "FailedScheduling",
 			Message: fmt.Sprintf("0/%d nodes are available: %d Insufficient cpu, %d Insufficient memory.", len(c.Nodes), len(c.Nodes), len(c.Nodes)),
 			Attributes: map[string]string{
 				"cpu_millicores": fmt.Sprint(int(w.CPUReq * 1000)), "mem_bytes": fmt.Sprint(gib(w.MemReqGiB)),
@@ -411,9 +411,9 @@ func profileBatch(c *cluster, states []podState, t, start time.Time, window time
 // ─── flows ───────────────────────────────────────────────────────────────
 
 type edge struct {
-	from, to string // workload names; to may be "ext:<host>"
-	port         int32
-	bytesPerSec  float64
+	from, to    string // workload names; to may be "ext:<host>"
+	port        int32
+	bytesPerSec float64
 }
 
 var clusterEdges = map[string][]edge{
@@ -482,8 +482,8 @@ func flowBatch(c *cluster, states []podState, t, start time.Time, window time.Du
 				b := uint64(total / float64(len(srcs)))
 				out = append(out, &kuberov1.Flow{
 					TsUnixMs: t.UnixMilli(), WindowSec: int32(window.Seconds()),
-					Src: endpointFor(c, s),
-					Dst: &kuberov1.FlowEndpoint{Ip: "203.0.113." + fmt.Sprint(10+len(host)%200), Kind: "external", Name: host},
+					Src:  endpointFor(c, s),
+					Dst:  &kuberov1.FlowEndpoint{Ip: "203.0.113." + fmt.Sprint(10+len(host)%200), Kind: "external", Name: host},
 					Port: e.port, Protocol: "tcp", Bytes: b, Packets: b / 1200,
 					Direction: "egress", Retransmits: uint32(float64(b/1200) * retrans),
 				})

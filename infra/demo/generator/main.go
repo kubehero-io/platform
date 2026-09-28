@@ -11,6 +11,9 @@
 //
 //	generator --url http://localhost:8080 --backfill 72h --interval 15s
 //
+// `generator workload …` instead runs a small real microservice for
+// live-cluster end-to-end tests (see workload.go).
+//
 // Stories baked in: a checkout retry storm (spend, error logs, TLS
 // handshakes in the CPU profile, egress + retransmits) that began three
 // hours before start; a payments worker that OOMs every ~2h; idle A100s;
@@ -38,16 +41,23 @@ import (
 )
 
 type config struct {
-	url, token        string
-	backfill, step    time.Duration
-	interval          time.Duration
-	seed              uint64
-	once              bool
-	maxLogsPerPod     int
+	url, token         string
+	backfill, step     time.Duration
+	interval           time.Duration
+	seed               uint64
+	once               bool
+	maxLogsPerPod      int
 	backfillLogsPerPod int
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "workload" {
+		if err := runWorkload(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	var cfg config
 	flag.StringVar(&cfg.url, "url", envOr("CONTROL_PLANE_URL", "http://localhost:8080"), "control-plane base URL")
 	flag.StringVar(&cfg.token, "token", os.Getenv("CONTROL_PLANE_TOKEN"), "bearer token (member role)")
