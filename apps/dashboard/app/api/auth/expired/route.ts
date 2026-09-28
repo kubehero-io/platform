@@ -8,11 +8,14 @@
 // user right back. Route handlers may set cookies: clear it here, then
 // continue to the sign-in page.
 
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/session";
 
-export function GET(req: NextRequest) {
-  const res = NextResponse.redirect(new URL("/login?reason=expired", req.url));
+export function GET() {
+  // A relative Location on purpose: behind an ingress, a route handler's
+  // request URL carries the pod's own address (e.g. localhost:3001), not
+  // the host the browser used.
+  const res = new NextResponse(null, { status: 307, headers: { Location: "/login?reason=expired", "Cache-Control": "no-store" } });
   res.cookies.set(SESSION_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }
