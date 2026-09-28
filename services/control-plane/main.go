@@ -36,7 +36,7 @@ func main() {
 		Use:   "control-plane",
 		Short: "KubeHero control plane — policy engine, audit log, RPC surface",
 	}
-	root.AddCommand(serveCmd())
+	root.AddCommand(serveCmd(), migrateCmd())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -211,6 +211,11 @@ func serve(parent context.Context, addr string) error {
 		AllowAnonymous: os.Getenv("KUBEHERO_REQUIRE_AUTH") != "true",
 		Logger:         log,
 	}
+	if pg != nil {
+		// Enrollment tokens minted by RegisterCluster authenticate that
+		// cluster's collector + operator (hash compared, never stored).
+		authCfg.ClusterTokens = &store.ClustersPG{DB: pg}
+	}
 	if authCfg.OIDCIssuer != "" {
 		// Lazy-fetched JWKS cache — first verified token triggers the
 		// initial /.well-known/openid-configuration + jwks_uri pull.
@@ -271,4 +276,40 @@ func serve(parent context.Context, addr string) error {
 	sh, cancelSh := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelSh()
 	return srv.Shutdown(sh)
+}
+
+// migrateCmd applies Postgres and ClickHouse schema migrations and
+// exits — what the Helm pre-install/pre-upgrade hook runs. Each store
+// is migrated only when its URL is set; a configured store that can't
+// be reached is an error (the hook retries).
+func migrateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate",
+		Short: "Apply Postgres + ClickHouse schema migrations, then exit",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+			ctx := cmd.Context()
+			ran := 0
+			if os.Getenv("DATABASE_URL") != "" {
+				pg, err := db.Open(ctx, log, db.Options{URL: os.Getenv("DATABASE_URL")})
+				if err != nil {
+					return fmt.Errorf("postgres: %w", err)
+				}
+				_ = pg.Close()
+				ran++
+			}
+			if os.Getenv("CLICKHOUSE_URL") != "" {
+				ch, err := clickhouse.Open(ctx, log, clickhouse.Options{DSN: os.Getenv("CLICKHOUSE_URL")})
+				if err != nil {
+					return fmt.Errorf("clickhouse: %w", err)
+				}
+				_ = ch.Close()
+				ran++
+			}
+			if ran == 0 {
+				log.Warn("migrate: neither DATABASE_URL nor CLICKHOUSE_URL is set — nothing to do")
+			}
+			return nil
+		},
+	}
 }

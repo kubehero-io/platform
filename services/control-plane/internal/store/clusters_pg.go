@@ -3,7 +3,10 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -111,4 +114,25 @@ func (s *ClustersPG) Touch(ctx context.Context, id string, nodes int32, state st
 	  WHERE id = $1`
 	_, err := s.DB.ExecContext(ctx, q, id, nodes, state, time.Now().UTC())
 	return err
+}
+
+// VerifyClusterToken implements auth.ClusterTokenVerifier: the token a
+// RegisterCluster call handed out is valid when its SHA-256 matches a
+// cluster's stored fingerprint. Only the hash is ever compared.
+func (s *ClustersPG) VerifyClusterToken(ctx context.Context, token string) (string, bool, error) {
+	if token == "" {
+		return "", false, nil
+	}
+	sum := sha256.Sum256([]byte(token))
+	fp := "sha256:" + hex.EncodeToString(sum[:])
+	var id string
+	err := s.DB.QueryRowContext(ctx,
+		`SELECT id::text FROM clusters WHERE cert_fingerprint = $1 LIMIT 1`, fp).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return id, true, nil
 }
