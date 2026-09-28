@@ -32,11 +32,12 @@ describe("protojson readers", () => {
 });
 
 describe("nanosecond timestamps", () => {
-  it("keeps sub-millisecond precision that Number() would lose", () => {
+  it("converts to ms at double precision and keeps exact ns identity as a string", () => {
     const s = "1727500000123456789";
-    // Naive conversion rounds to the nearest representable double.
-    expect(Number(s) / 1e6).not.toBe(1727500000123.456789);
     expect(nsToMs(s)).toBeCloseTo(1727500000123.4568, 3);
+    // Number() cannot tell two lines 1ns apart; the string key can.
+    expect(Number("1727500000123456789")).toBe(Number("1727500000123456790"));
+    expect(compareNs(nsKey("1727500000123456789"), nsKey("1727500000123456790"))).toBeLessThan(0);
   });
 
   it("handles short and odd inputs", () => {
