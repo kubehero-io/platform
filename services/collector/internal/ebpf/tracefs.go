@@ -86,11 +86,13 @@ func parseTracepointFormat(r io.Reader) (map[string]tpField, error) {
 }
 
 // fieldName returns the identifier of a C declaration such as
-// "const void * skbaddr" or "__u8 saddr_v6[16]".
+// "const void * skbaddr", "__u8 saddr_v6[16]" or "__data_loc char[] dev".
 func fieldName(decl string) string {
 	decl = strings.TrimSpace(decl)
-	if i := strings.IndexByte(decl, '['); i >= 0 {
-		decl = decl[:i]
+	if strings.HasSuffix(decl, "]") { // array suffix on the name itself
+		if i := strings.LastIndexByte(decl, '['); i >= 0 {
+			decl = decl[:i]
+		}
 	}
 	decl = strings.TrimRight(decl, " \t")
 	i := strings.LastIndexAny(decl, " \t*")
