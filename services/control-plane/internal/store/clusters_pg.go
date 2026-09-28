@@ -85,6 +85,19 @@ func (s *ClustersPG) List(ctx context.Context, orgID string, pageSize, offset in
 	if pageSize <= 0 || pageSize > 500 {
 		pageSize = 100
 	}
+	// Callers pass the org slug ("default"); org_id is a UUID column, so
+	// resolve it first (as AuditPG.List does) — comparing a slug against
+	// a UUID column is a query error, not an empty result.
+	if !looksLikeUUID(orgID) {
+		var resolved string
+		if err := s.DB.QueryRowContext(ctx, `SELECT id::text FROM orgs WHERE slug = $1`, orgID).Scan(&resolved); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, err
+		}
+		orgID = resolved
+	}
 	const q = `
 	  SELECT id::text, org_id::text, slug, name, cloud, region,
 	         COALESCE(cert_fingerprint,''), nodes_count, last_seen, state, created_at

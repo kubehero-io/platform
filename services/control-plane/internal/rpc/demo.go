@@ -74,7 +74,7 @@ func demoWorkloadHistory(cluster, namespace, name string) []*kuberov1.AuditEntry
 func demoCapacityDemands() []*kuberov1.CapacityDemand {
 	return []*kuberov1.CapacityDemand{
 		{
-			Id: "demand-gke-batch-a100",
+			Id:      "demand-gke-batch-a100",
 			Cluster: "gke-euw4-batch", Namespace: "data",
 			Workload:                "etl-nightly",
 			PendingPods:             12,
@@ -88,7 +88,7 @@ func demoCapacityDemands() []*kuberov1.CapacityDemand {
 			Source:                  "demo",
 		},
 		{
-			Id: "demand-aks-ml-a100",
+			Id:      "demand-aks-ml-a100",
 			Cluster: "aks-westeu-prod-01", Namespace: "ml-inference",
 			Workload:                "model-server-a100-canary",
 			PendingPods:             2,
@@ -102,7 +102,7 @@ func demoCapacityDemands() []*kuberov1.CapacityDemand {
 			Source:                  "demo",
 		},
 		{
-			Id: "demand-eks-retrieval",
+			Id:      "demand-eks-retrieval",
 			Cluster: "eks-use1-prod", Namespace: "retrieval",
 			Workload:                "retrieval-indexer",
 			PendingPods:             4,

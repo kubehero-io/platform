@@ -19,7 +19,8 @@ import (
 //
 // Severity is mapped: info→info, warning→warning, critical→critical.
 // The dedup key defaults to Message.Source so repeated firings of the
-// same policy collapse into a single PagerDuty incident.
+// same policy collapse into a single PagerDuty incident, and a resolved
+// Message sends event_action "resolve" with that key, closing it.
 type PagerDuty struct {
 	// Endpoint overrides the Events API URL. Defaults to the public
 	// endpoint; tests inject an httptest URL.
@@ -49,9 +50,13 @@ func (p PagerDuty) Send(ctx context.Context, channel string, m Message) error {
 	}
 	severity := pdSeverity(m.Severity)
 
+	action := "trigger"
+	if m.Resolved() {
+		action = "resolve"
+	}
 	payload := map[string]any{
 		"routing_key":  routingKey,
-		"event_action": "trigger",
+		"event_action": action,
 		"dedup_key":    dedup,
 		"payload": map[string]any{
 			"summary":   truncate(m.Title, 1024),
@@ -89,7 +94,7 @@ func (p PagerDuty) Send(ctx context.Context, channel string, m Message) error {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("pagerduty: %w", err)
+		return fmt.Errorf("pagerduty: %w", sanitize(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {

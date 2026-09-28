@@ -44,7 +44,8 @@ func (s Slack) Send(ctx context.Context, channel string, m Message) error {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("slack: %w", err)
+		// The webhook URL is the credential: never echo it.
+		return fmt.Errorf("slack: %w", sanitize(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -75,10 +76,12 @@ func isLocalHost(rest string) bool {
 // it stays readable in busy channels and on mobile.
 func slackPayload(m Message) any {
 	emoji := ":large_blue_circle:"
-	switch m.Severity {
-	case SeverityWarning:
+	switch {
+	case m.Resolved():
+		emoji = ":white_check_mark:"
+	case m.Severity == SeverityWarning:
 		emoji = ":warning:"
-	case SeverityCritical:
+	case m.Severity == SeverityCritical:
 		emoji = ":rotating_light:"
 	}
 

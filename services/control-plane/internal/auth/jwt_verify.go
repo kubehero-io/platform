@@ -24,9 +24,9 @@ import (
 //
 // Returns a Principal stamped with sub + email + role on success.
 // Role resolution priority (highest wins):
-//   1. groups claim mapped via Config.GroupRoles
-//   2. legacy `kh_roles` claim (admin only)
-//   3. fail-closed default = viewer
+//  1. groups claim mapped via Config.GroupRoles
+//  2. legacy `kh_roles` claim (admin only)
+//  3. fail-closed default = viewer
 //
 // Replaces decodeJWTPresence as the production path; presence-only
 // fallback is used only when JWKS is nil (dev mode).

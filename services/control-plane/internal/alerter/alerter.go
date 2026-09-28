@@ -3,16 +3,27 @@
 
 // Package alerter delivers escalation messages to operator channels.
 //
-// Each policy step lists one or more channel strings; the scheme of each
-// string selects a provider:
+// Each policy step or alert rule lists one or more channel strings; the
+// scheme of each string selects a provider:
 //
 //	slack://hooks.slack.com/services/T00/B00/XXX   → Slack incoming webhook
 //	pagerduty://<routing-key>                      → PagerDuty Events API v2
 //	opsgenie://<api-key>[?team=ops&priority=P2]    → OpsGenie alerts API
+//	webhook+https://example.com/hook               → generic JSON webhook
+//	teams://<workflow-webhook-host>/<path>         → Microsoft Teams (Adaptive Card)
+//	discord+https://discord.com/api/webhooks/…     → Discord webhook
+//	alertmanager+https://am:9093                   → Alertmanager POST /api/v2/alerts
+//
+// ("+http" variants of webhook and alertmanager exist for in-cluster
+// receivers; plaintext is the operator's explicit choice.)
 //
 // The Router fans out to providers in parallel and aggregates errors —
 // one bad channel does not silence the others. Providers themselves are
 // stateless and safe for concurrent use.
+//
+// Channel strings are credentials (webhook paths, routing keys, API
+// keys): RedactChannel renders them safe to list or log, and every
+// error the package returns names channels only in redacted form.
 package alerter
 
 import (
@@ -43,7 +54,26 @@ type Message struct {
 	Source   string            // policy kind/name, used as dedup key
 	Fields   map[string]string // optional key/value pairs surfaced in cards
 	URL      string            // deep link back into the dashboard
+
+	// Alert lifecycle (set by the alert rule evaluator; zero values for
+	// one-shot messages like ArmPolicy page-outs). Providers that model
+	// incidents use them: PagerDuty resolves, OpsGenie closes,
+	// Alertmanager receives labels/annotations/startsAt/endsAt.
+	Status      string            // "firing" (default) | "resolved"
+	Labels      map[string]string // alert identity, incl. alertname
+	Annotations map[string]string // summary, description, runbook_url
+	StartsAt    time.Time
+	EndsAt      time.Time // resolve time; for firing alerts, when to expire if not refreshed
 }
+
+// Resolved reports whether the message closes an alert.
+func (m Message) Resolved() bool { return m.Status == StatusResolved }
+
+// Lifecycle statuses.
+const (
+	StatusFiring   = "firing"
+	StatusResolved = "resolved"
+)
 
 // Severity is normalised across providers. Each maps it to its own scale.
 type Severity string
@@ -60,14 +90,73 @@ type Router struct {
 	providers map[string]Provider
 }
 
-// NewRouter wires the default provider set. Tests inject overrides via
-// WithProvider.
+// NewRouter wires every built-in provider, then the given providers
+// (which replace a built-in of the same scheme). Tests inject
+// overrides via WithProvider.
 func NewRouter(providers ...Provider) *Router {
-	r := &Router{providers: make(map[string]Provider, len(providers))}
+	r := &Router{providers: map[string]Provider{}}
+	for _, p := range Builtins() {
+		r.providers[strings.ToLower(p.Scheme())] = p
+	}
 	for _, p := range providers {
 		r.providers[strings.ToLower(p.Scheme())] = p
 	}
 	return r
+}
+
+// Builtins is one instance of every provider KubeHero ships, keyed by
+// scheme through Scheme().
+func Builtins() []Provider {
+	return []Provider{
+		NewSlack(), NewPagerDuty(), NewOpsGenie(),
+		NewWebhook("webhook+https"), NewWebhook("webhook+http"),
+		NewTeams("teams"), NewTeams("teams+https"),
+		NewDiscord("discord"), NewDiscord("discord+https"),
+		NewAlertmanager("alertmanager+https"), NewAlertmanager("alertmanager+http"),
+	}
+}
+
+// Validate checks that a channel string names a registered provider
+// and a well-formed target — what an API accepting channels calls
+// before storing them. Errors never echo the channel's secret parts.
+func (r *Router) Validate(channel string) error {
+	channel = strings.TrimSpace(channel)
+	if len(channel) > 2048 {
+		return errors.New("channel longer than 2048 bytes")
+	}
+	scheme, rest, err := splitScheme(channel)
+	if err != nil {
+		return fmt.Errorf("channel %q: %w", RedactChannel(channel), err)
+	}
+	p, ok := r.providers[scheme]
+	if !ok {
+		return fmt.Errorf("channel %q: no provider for scheme %q", RedactChannel(channel), scheme)
+	}
+	if v, ok := p.(interface{ validate(rest string) error }); ok {
+		if err := v.validate(rest); err != nil {
+			return fmt.Errorf("channel %q: %w", RedactChannel(channel), err)
+		}
+	}
+	return nil
+}
+
+// Heartbeater is implemented by providers that model alert state
+// themselves (Alertmanager expires alerts not re-sent before EndsAt):
+// they must receive every evaluation of a firing alert, not only the
+// transitions chat receivers get.
+type Heartbeater interface {
+	Heartbeat() bool
+}
+
+// WantsHeartbeat reports whether the channel's provider must receive
+// every evaluation of a firing alert.
+func (r *Router) WantsHeartbeat(channel string) bool {
+	scheme, _, err := splitScheme(strings.TrimSpace(channel))
+	if err != nil {
+		return false
+	}
+	h, ok := r.providers[scheme].(Heartbeater)
+	return ok && h.Heartbeat()
 }
 
 // WithProvider returns a copy with the given provider registered (or
@@ -107,17 +196,20 @@ func (r *Router) SendAll(ctx context.Context, channels []string, msg Message) er
 		if ch == "" {
 			continue
 		}
+		// Errors name channels only in redacted form: they end up in
+		// logs and the alert notification log.
+		safe := RedactChannel(ch)
 		scheme, _, err := splitScheme(ch)
 		if err != nil {
 			mu.Lock()
-			errs = append(errs, fmt.Errorf("%s: %w", ch, err))
+			errs = append(errs, fmt.Errorf("%s: %w", safe, err))
 			mu.Unlock()
 			continue
 		}
 		p, ok := r.providers[scheme]
 		if !ok {
 			mu.Lock()
-			errs = append(errs, fmt.Errorf("%s: no provider for scheme %q", ch, scheme))
+			errs = append(errs, fmt.Errorf("%s: no provider for scheme %q", safe, scheme))
 			mu.Unlock()
 			continue
 		}
@@ -126,7 +218,7 @@ func (r *Router) SendAll(ctx context.Context, channels []string, msg Message) er
 			defer wg.Done()
 			if err := p.Send(ctx, ch, msg); err != nil {
 				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", ch, err))
+				errs = append(errs, fmt.Errorf("%s: %w", safe, sanitize(err)))
 				mu.Unlock()
 			}
 		}(p, ch)

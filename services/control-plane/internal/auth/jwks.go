@@ -34,10 +34,10 @@ type JWKSCache struct {
 	HTTPClient *http.Client
 	TTL        time.Duration
 
-	mu        sync.RWMutex
-	keys      map[string]any   // kid → *rsa.PublicKey or *ecdsa.PublicKey
-	loadedAt  time.Time
-	jwksURL   string
+	mu       sync.RWMutex
+	keys     map[string]any // kid → *rsa.PublicKey or *ecdsa.PublicKey
+	loadedAt time.Time
+	jwksURL  string
 }
 
 // NewJWKSCache constructs an empty cache. Call Get(ctx, kid) to fetch
@@ -151,15 +151,15 @@ func (c *JWKSCache) discoverJWKSURL(ctx context.Context) (string, error) {
 // reasonable OIDC IdP emits HMAC-signed tokens for verification by
 // public RPs.
 type jwk struct {
-	Kty string `json:"kty"` // RSA | EC
-	Use string `json:"use"` // "sig"
-	Alg string `json:"alg"` // RS256, ES256, …
-	Kid string `json:"kid"`
-	N   string `json:"n,omitempty"` // RSA modulus (base64url)
-	E   string `json:"e,omitempty"` // RSA exponent
-	Crv string `json:"crv,omitempty"` // EC: P-256 etc.
-	X   string `json:"x,omitempty"`   // EC X
-	Y   string `json:"y,omitempty"`   // EC Y
+	Kty string   `json:"kty"` // RSA | EC
+	Use string   `json:"use"` // "sig"
+	Alg string   `json:"alg"` // RS256, ES256, …
+	Kid string   `json:"kid"`
+	N   string   `json:"n,omitempty"`   // RSA modulus (base64url)
+	E   string   `json:"e,omitempty"`   // RSA exponent
+	Crv string   `json:"crv,omitempty"` // EC: P-256 etc.
+	X   string   `json:"x,omitempty"`   // EC X
+	Y   string   `json:"y,omitempty"`   // EC Y
 	X5c []string `json:"x5c,omitempty"` // optional cert chain (DER base64)
 }
 

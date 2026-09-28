@@ -10,62 +10,60 @@
 //	  clickhouse/clickhouse-server:26.8-alpine
 //	KUBEHERO_TEST_CLICKHOUSE_URL=clickhouse://kubehero:kubehero@localhost:19000/kubehero \
 //	  go test -tags integration ./internal/clickhouse/
+//
+// Each test migrates its own throwaway database; the one in the URL is
+// only used to create and drop it.
 package clickhouse
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"io"
 	"log/slog"
 	"math"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 )
 
-// OpenTestDB connects to KUBEHERO_TEST_CLICKHOUSE_URL, drops every
-// table so each run starts clean, and migrates. Skips when unset.
+// OpenTestDB creates a throwaway database (kh_chtest_<random>) on the
+// server named by KUBEHERO_TEST_CLICKHOUSE_URL, migrates it with Open,
+// and drops it when the test ends — it never touches the database the
+// DSN names, which other suites share. Skips when the variable is unset.
 func OpenTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("KUBEHERO_TEST_CLICKHOUSE_URL")
 	if dsn == "" {
 		t.Skip("KUBEHERO_TEST_CLICKHOUSE_URL not set")
 	}
-	ctx := context.Background()
-	raw, err := sql.Open("clickhouse", dsn)
+	u, err := url.Parse(dsn)
 	if err != nil {
+		t.Fatalf("parse KUBEHERO_TEST_CLICKHOUSE_URL: %v", err)
+	}
+	var rnd [6]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := raw.QueryContext(ctx, `SELECT name, engine FROM system.tables WHERE database = currentDatabase()`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var views, tables []string
-	for rows.Next() {
-		var name, engine string
-		if err := rows.Scan(&name, &engine); err != nil {
-			t.Fatal(err)
-		}
-		if engine == "MaterializedView" {
-			views = append(views, name)
-		} else {
-			tables = append(tables, name)
-		}
-	}
-	_ = rows.Close()
-	for _, v := range views {
-		if _, err := raw.ExecContext(ctx, "DROP VIEW IF EXISTS "+v); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, tb := range tables {
-		if _, err := raw.ExecContext(ctx, "DROP TABLE IF EXISTS "+tb); err != nil {
-			t.Fatal(err)
-		}
-	}
-	_ = raw.Close()
+	name := "kh_chtest_" + hex.EncodeToString(rnd[:])
 
-	db, err := Open(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{DSN: dsn})
+	ctx := context.Background()
+	admin, err := sql.Open("clickhouse", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
+		t.Fatalf("create %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+name)
+		_ = admin.Close()
+	})
+
+	u.Path = "/" + name
+	db, err := Open(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{DSN: u.String()})
 	if err != nil {
 		t.Fatalf("open+migrate: %v", err)
 	}

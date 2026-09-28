@@ -45,10 +45,10 @@ type Runner struct {
 }
 
 type StepResult struct {
-	Action   string
-	Outcome  string // success · error · skipped
-	Message  string
-	AuditID  int64
+	Action      string
+	Outcome     string // success · error · skipped
+	Message     string
+	AuditID     int64
 	ReverseBlob []byte // for undo
 }
 

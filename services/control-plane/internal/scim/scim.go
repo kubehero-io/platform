@@ -64,16 +64,16 @@ type Store interface {
 // attributes) round-trip via Raw so we don't lose data — we just
 // don't act on it yet.
 type User struct {
-	Schemas    []string         `json:"schemas"`
-	ID         string           `json:"id"`
-	UserName   string           `json:"userName"`
-	Name       Name             `json:"name,omitempty"`
+	Schemas     []string        `json:"schemas"`
+	ID          string          `json:"id"`
+	UserName    string          `json:"userName"`
+	Name        Name            `json:"name,omitempty"`
 	DisplayName string          `json:"displayName,omitempty"`
-	Emails     []Email          `json:"emails,omitempty"`
-	Active     bool             `json:"active"`
-	Groups     []GroupRef       `json:"groups,omitempty"`
-	Meta       Meta             `json:"meta,omitempty"`
-	Raw        json.RawMessage  `json:"-"`
+	Emails      []Email         `json:"emails,omitempty"`
+	Active      bool            `json:"active"`
+	Groups      []GroupRef      `json:"groups,omitempty"`
+	Meta        Meta            `json:"meta,omitempty"`
+	Raw         json.RawMessage `json:"-"`
 }
 
 type Name struct {
@@ -103,11 +103,11 @@ type Meta struct {
 
 // Group is the SCIM 2.0 Group resource shape.
 type Group struct {
-	Schemas     []string  `json:"schemas"`
-	ID          string    `json:"id"`
-	DisplayName string    `json:"displayName"`
-	Members     []Member  `json:"members,omitempty"`
-	Meta        Meta      `json:"meta,omitempty"`
+	Schemas     []string `json:"schemas"`
+	ID          string   `json:"id"`
+	DisplayName string   `json:"displayName"`
+	Members     []Member `json:"members,omitempty"`
+	Meta        Meta     `json:"meta,omitempty"`
 }
 
 type Member struct {
@@ -250,8 +250,10 @@ func (s *MemoryStore) DeleteGroup(id string) bool {
 
 // matchUserFilter implements the small slice of SCIM filter syntax
 // IdPs actually use for de-duplication during provisioning:
-//   userName eq "alice@example.com"
-//   externalId eq "okta-1234"
+//
+//	userName eq "alice@example.com"
+//	externalId eq "okta-1234"
+//
 // Anything else falls through to "match everything".
 func matchUserFilter(u *User, filter string) bool {
 	if filter == "" {
@@ -503,10 +505,10 @@ func constantTimeEqual(a, b string) bool {
 // trigger Bulk requests we'd then 501 on.
 func serviceProviderConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"},
-		"patch":   map[string]bool{"supported": true},
-		"bulk":    map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0},
-		"filter":  map[string]any{"supported": true, "maxResults": 200},
+		"schemas":        []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"},
+		"patch":          map[string]bool{"supported": true},
+		"bulk":           map[string]any{"supported": false, "maxOperations": 0, "maxPayloadSize": 0},
+		"filter":         map[string]any{"supported": true, "maxResults": 200},
 		"changePassword": map[string]bool{"supported": false},
 		"sort":           map[string]bool{"supported": false},
 		"etag":           map[string]bool{"supported": false},

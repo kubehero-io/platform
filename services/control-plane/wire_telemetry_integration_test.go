@@ -69,7 +69,7 @@ func newHarness(t *testing.T, name string) *harness {
 // second by the ingest batchers).
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

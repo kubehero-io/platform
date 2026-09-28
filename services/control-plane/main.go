@@ -110,6 +110,9 @@ func anomalyZThreshold(log *slog.Logger) float64 {
 
 func serve(parent context.Context, addr string) error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	// Packages that log without an injected logger (the store-backed
+	// ControlPlane RPCs, library code) emit the same JSON lines.
+	slog.SetDefault(log)
 	var err error
 
 	// ─── storage ──────────────────────────────────────────────────────────
