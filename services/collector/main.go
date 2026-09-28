@@ -52,7 +52,7 @@ func versionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the collector version",
-		Run:   func(*cobra.Command, []string) { fmt.Println(version) },
+		Run:   func(cmd *cobra.Command, _ []string) { fmt.Fprintln(cmd.OutOrStdout(), version) },
 	}
 }
 

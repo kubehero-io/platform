@@ -79,6 +79,8 @@ type Config struct {
 
 	// Client overrides the Kubernetes client (tests).
 	Client kubernetes.Interface
+	// Stats overrides the kubelet stats provider (tests).
+	Stats kubeletstats.Provider
 }
 
 // LogsConfig configures container log tailing.
@@ -386,9 +388,12 @@ func enqueueProfiles(q *ship.Queue[*kuberov1.IngestProfilesRequest], r *kuberov1
 const maxFlowsPerRequest = 5000
 
 // startEBPF attaches the kernel programs. Netflow needs the cluster-wide
-// IP index (pod / service / node informers on every node); those
-// informers are only kept running if the programs actually attached, so
-// a host without eBPF support doesn't pay their memory.
+// IP index (pod / service / node informers on every node). Those
+// informers start only after the programs attached: a host without eBPF
+// support must not list every pod in the cluster just to throw the
+// result away (N nodes × a full list on every rollout). The first drain
+// runs a FlushInterval after attach, by which time the index has synced;
+// anything drained earlier is attributed "external" at worst.
 func (a *App) startEBPF(ctx context.Context, wg *sync.WaitGroup, owners *kube.OwnerResolver, profileQ *ship.Queue[*kuberov1.IngestProfilesRequest]) {
 	ec := a.cfg.EBPF
 	ectx, ecancel := context.WithCancel(ctx)
@@ -401,16 +406,6 @@ func (a *App) startEBPF(ctx context.Context, wg *sync.WaitGroup, owners *kube.Ow
 		ecancel()
 		a.log.Warn("eBPF resolver setup failed — kernel telemetry disabled", "err", err)
 		return
-	}
-	if ec.Netflow {
-		sctx, scancel := context.WithTimeout(ectx, 2*time.Minute)
-		err := res.Start(sctx)
-		scancel()
-		if err != nil {
-			ecancel()
-			a.log.Warn("cluster-wide pod/service/node cache did not sync — eBPF disabled", "err", err)
-			return
-		}
 	}
 	flowQ := ship.NewQueue(ship.QueueConfig{Signal: "flows", MaxItems: 200_000, MaxBytes: 32 << 20, Timeout: 20 * time.Second}, a.ship.SendFlows, a.log)
 	a.startQueue(ctx, wg, flowQ.Run, flowQ.Flush)
@@ -454,6 +449,11 @@ func (a *App) startEBPF(ctx context.Context, wg *sync.WaitGroup, owners *kube.Ow
 	}
 	if ec.Netflow {
 		metrics.EBPFStatus.With("netflow").Set(1)
+		go func() {
+			if err := res.Start(ectx); err != nil && ectx.Err() == nil {
+				a.log.Warn("cluster-wide pod/service/node cache did not sync — flow peers will read as external", "err", err)
+			}
+		}()
 	}
 	if ec.Profiler {
 		metrics.EBPFStatus.With("profiler").Set(1)
@@ -483,6 +483,9 @@ func tickLoop(ctx context.Context, interval time.Duration, fn func(time.Time)) {
 }
 
 func (a *App) statsProvider() (kubeletstats.Provider, error) {
+	if a.cfg.Stats != nil {
+		return a.cfg.Stats, nil
+	}
 	var inner kubeletstats.Provider
 	if a.cfg.KubeletURL != "" {
 		d, err := kubeletstats.NewDirect(kubeletstats.DirectConfig{
