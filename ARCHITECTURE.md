@@ -1,303 +1,200 @@
-# KubeHero — Product Architecture
+# KubeHero — Architecture
 
-> The public architecture overview for KubeHero, an open-source, self-hosted Kubernetes cost-monitoring platform. This is a high-level map; the implementation lives in this repo.
+> The public architecture overview for KubeHero: open-source, self-hosted Kubernetes observability and FinOps in one install. This is the map; the implementation lives in this repo.
 
 ---
 
 ## 0. North Star
 
-**One pane of glass, for every cluster, showing every dollar — with a trigger you can pull when things go wrong.**
+**Every signal. Every dollar. One agent.**
 
-We are not building another metrics dashboard. Metrics dashboards are commodity. We are building the *control surface* that an on-call operator actually needs at 3 AM when a bad deploy is spawning 400 GPU nodes.
+Teams run five tools to understand a Kubernetes fleet — a log store, a cost allocator, a continuous profiler, a network observer, an alerting stack — each with its own agent on every node, its own UI and its own bill. None of them can answer the question that matters at 3 AM: *what changed, what does it cost, and what exactly should we do about it?*
 
-The three hard problems we solve, in order of priority:
+KubeHero collects every signal once, stores it once, prices it, and puts a read-only agent on top that explains it and proposes guarded changes:
 
-1. **Attribution** — which pod, on which node, in which cluster, belonging to which team, is wasting money *right now*.
-2. **Recommendation** — the precise config change that recovers it without breaking SLOs.
-3. **Enforcement** — when human action isn't fast enough, the policy engine fires and stops the bleeding.
+1. **Attribution** — which pod, workload, team and cluster is spending (compute, GPUs, network, logs) and wasting — right now and over time.
+2. **Explanation** — logs, profiles, flows, events and spend correlated, so a cost spike comes with its cause.
+3. **Guarded action** — rightsizing and spend ceilings expressed as policy CRDs that a human arms and the operator executes, bounded and reversible.
 
 ---
 
 ## 1. Repository layout
 
-This monorepo holds everything the product is made of.
-
-- Apache 2.0 — CLI, collector, cost-model, proto.
-- BSL 1.1 — control-plane, operator, pricing-engine, advisor, dashboard (source-available, self-hostable, free to run).
-
-The structure:
-
 ```
 kubehero-platform/
 ├── apps/
-│   ├── dashboard/          # Next.js 15 — app.kubehero.io
-│   └── docs/               # Next.js 15 + Fumadocs — docs.kubehero.io
+│   ├── dashboard/          # Next.js 16 — the UI
+│   └── docs/               # Next.js + Fumadocs — docs site
 ├── services/
-│   ├── control-plane/      # Go — API server (Connect-RPC), policy engine, anomaly detection
-│   ├── collector/          # Go — DaemonSet: measured utilisation + cost ingest
-│   ├── pricing-engine/     # Go — AWS/GCP/Azure pricing catalog + discounts
-│   ├── operator/           # Go — controller-runtime, enforces CRDs
-│   └── advisor/            # Go — agentic layer: briefings + proposed guarded actions
-├── cli/
-│   └── kubehero/           # Go — the operator's command-line tool
+│   ├── control-plane/      # Go — APIs, ingest, query engines, alerting, compat shims
+│   ├── collector/          # Go — node agent (DaemonSet): cost, logs, pprof, eBPF
+│   ├── operator/           # Go — controller-runtime, guarded policy CRDs
+│   ├── advisor/            # Go — agentic layer: briefings, investigations
+│   └── pricing-engine/     # Go — AWS / GCP / Azure price catalog
+├── cli/kubehero/           # Go — CLI + MCP server
 ├── packages/
-│   ├── proto/              # Protobuf / Connect schemas (Go + TS generated)
-│   ├── tsconfig/           # Shared TypeScript configs (dashboard + docs)
-│   └── cost-model/         # Canonical cost calculation library (Go)
+│   ├── proto/              # Protobuf / Connect contracts (Go + TS generated)
+│   ├── cost-model/         # Canonical cost math (Go)
+│   └── tsconfig/           # Shared TS configs
 ├── deploy/
-│   ├── helm/               # Helm charts (full stack + federated collector)
+│   ├── helm/               # The kubehero chart (embedded Postgres + ClickHouse)
 │   └── terraform/          # Reference infra (GKE + Cloud SQL + ClickHouse)
 └── infra/
-    └── dagger/             # CI as code (Dagger.io, language-agnostic pipelines)
+    ├── demo/               # compose / kind demos, demo telemetry generator, e2e harness
+    └── dagger/             # CI as code
 ```
+
+Licensing: Apache 2.0 — CLI, collector, cost-model, proto. BSL 1.1 — control plane, operator, advisor, pricing engine, dashboard (source-available, free to self-host).
 
 ---
 
 ## 2. System diagram
 
 ```
-┌─────────────────────────── CUSTOMER CLUSTER (any K8s 1.28+) ───────────────────────────┐
-│                                                                                          │
-│   ┌─────────────────┐    ┌─────────────────┐    ┌──────────────────────┐                │
-│   │  Collector      │    │  Operator       │    │  Apps (customer's)   │                │
-│   │  DaemonSet      │    │  Deployment     │    │  Deployments/STS/... │                │
-│   │  ──────────     │    │  ──────────     │    │                      │                │
-│   │  pod/node scan  │    │  watches CRDs   │    │                      │                │
-│   │  kubelet stats  │    │  enforces kill  │    │                      │                │
-│   │  cost-model $   │    │  switch tiers   │    │                      │                │
-│   │  (eBPF: future) │    │  audits actions │    │                      │                │
-│   └────────┬────────┘    └──────▲──────────┘    └──────────────────────┘                │
-│            │ Connect-RPC        │ K8s API                                                │
-│            │ (5s cost batches)  │                                                        │
-└────────────┼────────────────────┼────────────────────────────────────────────────────────┘
-             │                    │
-             │                    │     ┌───────────── DASHBOARD + CLI ────────────┐
-             │                    │     │  Next.js @ app.kubehero.io               │
-             │                    │     │  `kubehero` CLI binary                   │
-             │                    │     └──────▲──────────────────────▲────────────┘
-             │                    │            │ Connect-RPC          │ GetBriefing /
-             │                    │            │                      │ ListAdvice
-             ▼                    │            ▼                      ▼
-      ┌───────────────────────────┴──────────────┐         ┌──────────────────────┐
-      │  Control Plane API (Go, Connect-RPC)     │         │  Advisor             │
-      │  ──────────────────────────────────      │  read   │  (Go, Connect-RPC)   │
-      │  ingest → ClickHouse · metadata → PG     │  RPCs   │  ──────────────────  │
-      │  z-score anomaly detection · burn rate   │◄────────│  brains: llm → rules │
-      │  auth: OIDC (Dex) / API keys             │  only   │  (demo w/o a CP)     │
-      └───┬──────────────▲───────────────┬───────┘         │  guardrail-validated │
-          │              │ Quote RPC     │                 │  CRD proposals       │
-          ▼              │               ▼                 └──────────────────────┘
-   ┌──────────────┐   ┌──┴───────────┐   ┌──────────────┐
-   │  ClickHouse  │   │  Pricing Eng │   │  PostgreSQL  │
-   │  (time-series│   │  live cloud  │   │  metadata    │
-   │   at scale)  │   │  APIs with a │   │  policies    │
-   └──────────────┘   │  static tbl  │   │  audit log   │
-                      └──────────────┘   └──────────────┘
+┌──────────────────────────── EVERY CLUSTER (K8s ≥ 1.28 · AKS · GKE · EKS) ───────────────────────────┐
+│                                                                                                     │
+│  collector (DaemonSet, one per node — reports ONLY its node)          operator (Deployment)        │
+│  ├─ cost: pods × node price, measured usage (kubelet Summary API)     ├─ BudgetPolicy              │
+│  ├─ usage history per container (rightsizing)                          ├─ CeilingPolicy (burn rate) │
+│  ├─ logs: tails /var/log/pods (CRI + json-file), levels, trace ids     ├─ RightsizingPolicy         │
+│  ├─ profiles: pprof scraping of annotated pods                         │   recommend·shadow·apply   │
+│  ├─ eBPF: cgroup_skb flow accounting, TCP retransmits, CPU sampling    └─ human-armed, bounded,     │
+│  └─ events: OOM kills, crash loops, restarts (+ leader: unschedulable      audited, reversible      │
+│     pods, Warning events)                                                                           │
+└──────────────┬──────────────────────────────────────────────────────────────────────▲──────────────┘
+               │ Connect-RPC (protobuf, gzip, per-cluster token)                       │ burn rate,
+               ▼                                                                       │ rightsizing
+┌──────────────────────────────────── CONTROL PLANE ──────────────────────────────────┴──────────────┐
+│  ingest: IngestPodCost + TelemetryService    compat: Loki push/query · OTLP/HTTP logs ·            │
+│  engines: LogQL · Drain patterns · allocation (OpenCost-compatible) · FOCUS export ·               │
+│           rightsizing percentiles · flamegraphs · service map · anomalies · alert evaluator        │
+│  auth: API keys, cluster tokens, OIDC (JWKS) · audit log (HMAC-signed, append-only)                │
+│        ┌────────────────────────┐                        ┌──────────────────┐                      │
+│        │ ClickHouse             │  every time series      │ Postgres         │ clusters, policies,  │
+│        │ cost · logs · profiles │  (TTLs + rollups)       │ audit · alerts   │ silences, users      │
+│        │ flows · usage · events │                         └──────────────────┘                      │
+│        └────────────────────────┘                                                                   │
+└───────▲───────────────────▲─────────────────────▲──────────────────────────▲──────────────────────┘
+        │ read RPCs          │                      │                          │ Loki API / OpenCost API
+  ┌─────┴──────┐     ┌───────┴────────┐     ┌──────┴───────┐          ┌───────┴──────────┐
+  │ dashboard  │     │ advisor        │     │ CLI · MCP    │          │ Grafana · OpenCost│
+  │ (Next.js)  │────▶│ briefings ·    │◀────│ server       │          │ consumers · agents│
+  └────────────┘     │ investigations │     └──────────────┘          └──────────────────┘
+                     │ read-only tools│
+                     └───────┬────────┘
+                             │ optional (BYO key)
+                             ▼
+                        Claude API
 ```
 
 ---
 
-## 3. Component detail
+## 3. Components
 
 ### 3.1 Collector (DaemonSet, Go)
 
-The telemetry and attribution layer. One service fills the role earlier drafts of this doc split into a kernel "agent" plus a separate ingress tier — the collector is both.
+One pod per node. Each collector reports **only the node it runs on** (`NODE_NAME` from the downward API): its pods' cost and usage, its container logs, its eBPF flows and CPU samples. Cluster-scoped scans — unschedulable pods and Kubernetes Warning events — run on a single leader elected through a `coordination.k8s.io` Lease. (Before 0.3 every collector reported every pod in the cluster, so an N-node cluster was billed N times; see the changelog.)
 
-**What it measures today**: every 5 seconds the collector lists pods and nodes from the kube API and blends resource requests with **measured utilisation from the kubelet Summary API** (`/api/v1/nodes/{node}/proxy/stats/summary` — `cpu.usageNanoCores` and `memory.workingSetBytes`, the number the OOM killer actually cares about). Cost per pod is `max(requests, measured)` × the node's hourly rate, computed by `packages/cost-model` so the collector, control plane, and CLI all price a pod identically. Where kubelet stats are unavailable (RBAC, Windows kubelets), it degrades to a request-based estimate for that node's pods — never crashes.
+- **Cost** — pods are priced from their node: `max(requests, measured usage)` share of allocatable × the node's hourly price, split into CPU / memory / GPU parts by `packages/cost-model` (GPU nodes attribute a documented share of the price to accelerators). Node price comes from the `kubehero.io/node-hourly-usd` annotation, the pricing engine (live cloud price lists), or an estimate — the source is recorded on every node sample. Each sample carries the interval it covers, so spend is `rate × interval`, and each collector reports its node's price and allocation so idle cost (price − allocated) is exact.
+- **Usage history** — per-container CPU and working-set memory from the kubelet Summary API, with requests, limits, restarts and the last termination reason. This is what rightsizing percentiles are computed from.
+- **Logs** — tails `/var/log/pods` (CRI and docker json-file formats), reassembles partial lines, survives rotation and truncation with checkpointed offsets, detects levels and trace ids, rate-limits per container and ships batches. A drop-in for Promtail / Alloy log collection.
+- **Profiles (pull)** — scrapes `/debug/pprof` from pods annotated the Grafana/Pyroscope way (`profiles.grafana.com/cpu.scrape: "true"` + port) or with `kubehero.io/profile*`.
+- **eBPF** (Linux ≥ 5.8, cgroup v2, privileged): `cgroup_skb` ingress/egress programs on the root cgroup account bytes and packets per endpoint pair; the `tcp:tcp_retransmit_skb` tracepoint counts retransmits; `perf_event` sampling at 49 Hz captures kernel + user stacks for every container on the node, symbolised from ELF symbol tables (and Go's pclntab). Addresses resolve to pods, Services and nodes from informer caches; cgroup ids resolve to containers. No CO-RE/BTF dependency: programs use stable UAPI contexts only. When the kernel or privileges don't allow it, the collector logs one line and keeps collecting everything else.
+- **Events** — OOM kills, crash loops, image pull failures, restarts, evictions, node pressure, unschedulable pods.
 
-**eBPF is future work — being honest about that.** The plan is still scheduler-attached probes ([`cilium/ebpf`](https://github.com/cilium/ebpf)) for 1-second, cgroup-accurate burst visibility; the build-tag stubs sit in `probes_linux.go` waiting for them. Until they land, the numbers are the kubelet's own measurements — real utilisation, not request-based guesses, just at the kubelet's aggregation resolution rather than per-tick kernel truth. GPU (DCGM/MIG) and TPU telemetry ride the same roadmap.
+RBAC is read-only: pods, nodes, services, owners (ReplicaSets, Jobs), events, `nodes/proxy` for kubelet stats, and a namespaced Lease for leader election. The collector never writes to customer resources.
 
-**Emission**: cost batches ship to the control plane over Connect-RPC each scan, stamped with the cluster id and authenticated with the per-cluster token minted by `kubehero cluster add`. Per-node overhead target: **< 0.5% CPU, < 50 MB RSS**.
+### 3.2 Control plane (Go, Connect-RPC)
 
-**RBAC**: strict read-only — list pods/nodes plus `get` on `nodes/proxy` for the kubelet summaries. Never has write perms on customer resources. Enforcement is done exclusively by the Operator pod, under a separate ServiceAccount whose permissions are opt-in per `RightsizingPolicy`.
-
-### 3.2 Control Plane API (Go, Connect-RPC)
-
-- **Transport**: [Connect-RPC](https://connectrpc.com/) (not plain gRPC). Why: same `.proto` files work from Go → TS via `connect-es`, no gRPC-Web transcoding headache, works over plain HTTP/2 through any load balancer.
-- **Stores**: PostgreSQL for metadata (users, orgs, clusters, policies, audit), ClickHouse for time-series. No attempt to do both in one DB — TimescaleDB was considered and rejected at expected data volumes (billions of data points/day at scale).
-- **Auth**: 
-  - Cloud: [Clerk](https://clerk.com/) or [WorkOS](https://workos.com/) — SSO-friendly, cheap for B2B SaaS.
-  - Self-hosted: Dex as OIDC proxy to customer's IdP.
-- **Audit**: every policy evaluation, every enforcement action, every rightsizing recommendation writes to `audit_log` table. Append-only. Exported to customer's SIEM via syslog/Webhook.
-- **Anomaly detection**: real rolling z-scores, not vibes — each workload's current spend bucket is scored against its trailing baseline (default |z| ≥ 3, tunable via `KUBEHERO_ANOMALY_Z_THRESHOLD`). Series with too little baseline are reported unscoreable rather than guessed at.
-- **Demo mode**: RPCs without a backing store fall back to built-in demo fixtures so the stack demos out of the box. Set `KUBEHERO_DEMO_MODE=false` in production to fail loudly (`FailedPrecondition`) instead of serving fake data.
+- **Transport**: [Connect-RPC](https://connectrpc.com/) — the same `.proto` contracts serve Go, TypeScript, the CLI and plain `curl`.
+- **Stores**: ClickHouse for every time series, Postgres for metadata. ClickHouse schema is versioned (`internal/clickhouse/migrations`, applied once, recorded in `kubehero_schema_migrations`); Postgres uses golang-migrate. `control-plane migrate` applies both and exits. On startup a configured store that isn't reachable yet is retried for `KUBEHERO_STORE_WAIT` before the process exits — never a silent fallback to demo data.
+- **Signals and engines**
+  - *Cost* — `workload_cost_1h` / `node_cost_1h` rollups priced as rate × interval. `CostService.GetAllocation` aggregates by any dimension (namespace, workload, controller, pod, node, nodepool, team, cost center, zone, `label:<key>`) with idle rows, idle sharing (weighted / even) and shared-namespace redistribution, in OpenCost's model; `/allocation/compute` serves the same data in OpenCost's wire format. `/api/v1/export/focus` streams a FinOps FOCUS CSV. Time series with a month-end forecast and a fleet efficiency score round it out.
+  - *Rightsizing* — per-container p50/p95/p99/max from 5-minute t-digest rollups; CPU sized to a percentile plus headroom, memory never below observed max and never down after an OOM kill; confidence from coverage; savings priced from the workload's own cost per core-hour and GiB-hour.
+  - *Logs* — a LogQL engine (selectors, line filters, `json`/`logfmt`/`regexp` parsers, label filters, `line_format`, metric queries with range aggregations and `sum/avg/min/max/topk by`) compiled to parameterised ClickHouse SQL, with per-minute volume rollups for cheap metric queries; Drain pattern mining; live tail. The Loki push and query APIs make Promtail, Alloy, Fluent Bit and Grafana's Loki datasource work unchanged; OTLP/HTTP logs are accepted too.
+  - *Profiles* — content-addressed stacks (`profile_stacks`) and samples; merged flamegraphs, diff flamegraphs against a baseline window, top functions, and $/month per function from the workload's CPU spend. Pyroscope's `/ingest` accepts pushes from Pyroscope SDKs.
+  - *Network* — flows priced at ingest (internet egress and cross-zone $/GB per cloud, configurable); workload service map with bytes, retransmits and cost per edge; per-workload network spend.
+  - *Alerting* — one evaluator for every signal: LogQL metric queries, spend rate, budget burn, anomalies, network spend and cluster events. Pending → firing → resolved state machine, silences, re-notification; channels: Slack, PagerDuty, Opsgenie, Teams, Discord, generic webhooks, Alertmanager.
+  - *Anomalies* — rolling z-scores of each workload's spend against its trailing baseline.
+- **Auth**: static API keys with roles (owner / admin / auditor / member / viewer), per-cluster enrollment tokens (only their SHA-256 is stored), OIDC with JWKS verification and group → role mapping, SCIM 2.0 provisioning. `WhoAmI` echoes the resolved caller. The Helm chart requires auth by default and wires generated tokens into every in-cluster client.
+- **Audit**: every policy change, arming, enforcement and apply writes an HMAC-signed, append-only row.
+- **Demo mode**: RPCs whose store isn't configured serve clearly-labelled fixtures (`source: "demo"`) so a fresh install and the docs never look empty. `KUBEHERO_DEMO_MODE=false` turns fixtures off; those RPCs then fail with `FailedPrecondition`.
 
 ### 3.3 Operator (Go, controller-runtime)
 
-Watches three CRDs:
+Three CRDs, all conservative by default:
 
 ```yaml
-# ── Budget: declarative spending intent ──
-apiVersion: kubehero.io/v1
-kind: Budget
-metadata: { name: prod-monthly }
-spec:
-  scope:
-    clusterSelector: { matchLabels: { env: prod } }
-    namespaceSelector: { matchExpressions: [...] }
-  limits:
-    monthly: { amount: 100000, currency: USD }
-    hourly: { amount: 300 }
-  alerting:
-    channels: [slack://ops, pagerduty://prod-p1]
-    thresholds: [50, 80, 95, 100]   # percentage of budget
-
-# ── CeilingPolicy: what to do when budget breached ──
-apiVersion: kubehero.io/v1
-kind: CeilingPolicy
-metadata: { name: prod-hard-ceiling }
-spec:
-  budgetRef: { name: prod-monthly }
-  trigger:
-    burnRate: 1.5x       # cost growth > 1.5× budgeted rate
-    window: 5m           # sustained over 5 minutes
-  escalation:
-    - { action: hpa.cap, ratio: 0.5, waitAfter: 2m }
-    - { action: pod.evict, selector: { priorityClassName: "low" }, waitAfter: 3m }
-    - { action: nodepool.cordon, selector: { label: "workload=batch" }, waitAfter: 5m }
-    - { action: alert, channels: [slack://ops-oncall] }
-  cooldown: 10m
-  require:
-    humanArm: true       # requires dashboard "arm" toggle before auto-firing
-
-# ── RightsizingPolicy: how aggressively to recommend / auto-apply ──
-apiVersion: kubehero.io/v1
+apiVersion: kubehero.kubehero.io/v1
 kind: RightsizingPolicy
-metadata: { name: non-prod-auto }
+metadata: { name: shop-rightsizing, namespace: kubehero-system }
 spec:
   scope:
-    namespaceSelector: { matchLabels: { env: dev } }
-  mode: automatic        # automatic | suggest | shadow
+    namespaceSelector: { matchLabels: { kubehero.io/rightsizing: enabled } }
+  mode: recommend            # recommend | shadow | apply
   safety:
-    minReplicas: 1
-    p95HeadroomPct: 40
-    observationWindow: 14d
-    maxChangePerDay: 3
+    observationWindow: 7d
+    p95HeadroomPct: 15
+    maxChangePerDay: 1
+    minReplicas: 2
 ```
 
-The operator is paranoid by design:
-- Every action has a **dry-run mode**, enabled by default.
-- Hard-stop escalations require `humanArm: true` in spec, unless disabled at org level (requires admin).
-- All actions are reversible; every `pod.evict` is logged with the restored pod spec attached, so an operator can `kubehero undo <audit-id>` within the cooldown window.
+- **RightsizingPolicy** — `recommend` writes per-container recommendations into status; `shadow` records the changes it *would* make (and audits them); `apply` patches requests only when the policy is armed, confidence is sufficient, the step is bounded, the workload isn't mid-rollout, no VPA owns it, and memory never goes below observed max or down after OOM kills. Previous resources are recorded so `kubehero undo` restores them.
+- **BudgetPolicy / CeilingPolicy** — burn-rate triggered escalations (`alert` → `hpa.cap` → `pod.evict` → `nodepool.cordon`), dry-run by default, `humanArm: true` by default, every action reversible within the cooldown and audited.
 
 ### 3.4 Advisor (Go, Connect-RPC)
 
-The agentic layer. It reads the control plane's telemetry and answers the question the raw dashboards don't: *what changed, why, and what should I do about it?* Output is a briefing — a headline, a full markdown report, a TTS-ready spoken script — plus a set of **proposed** actions, each carrying a ready-to-apply policy CRD manifest. Served over Connect-RPC (`GetBriefing`, `ListAdvice`, default `:8083`) to the dashboard's Advisor page and the CLI.
+The agentic layer, **read-only by construction**: its only inputs are the control plane's read RPCs; it holds no Kubernetes credentials and calls no mutation RPCs.
 
-**Three brains, one contract.** Chosen at startup, degrading gracefully:
+- **Briefings** — headline, markdown report, TTS-ready script (the dashboard reads it aloud with the browser's SpeechSynthesis), and proposed actions.
+- **Investigations** (`Investigate` / `InvestigateStream`) — "why did checkout's spend jump?" runs a bounded tool loop over allocation, anomalies, LogQL queries and patterns, flamegraph summaries, the service map, network costs, alerts and rightsizing, and returns an answer that cites its evidence with deep links, plus proposals.
+- **Brains** — Claude (bring your own Anthropic API key; adaptive thinking; server-side refusal fallbacks) with a deterministic rules brain as the offline default and the fallback on any error. Without a key nothing leaves the cluster.
+- **Guardrail** — every proposal from any brain is validated: whitelisted action kinds, finite non-negative impact, and a manifest that must parse to a BudgetPolicy / CeilingPolicy / RightsizingPolicy. Anything else is downgraded to investigate-only. Proposals are applied by humans through the operator's arming flow.
 
-- **llm** — Claude via `anthropic-sdk-go`, active when `ANTHROPIC_API_KEY` is set. Any failure — API down, timeout, unparseable output — falls back to rules, so briefings never 500 because Anthropic is down.
-- **rules** — deterministic: same snapshot in, same briefing out. The offline default and what the tests exercise.
-- **demo** — with no `CONTROL_PLANE_URL` the advisor runs over a built-in fixture and stamps every briefing `source: "demo"`, so nobody mistakes it for real data.
+### 3.5 CLI and MCP server
 
-**The guardrail is the point.** Every proposed action passes the same validation regardless of which brain produced it: action kinds are whitelisted (`rightsize.requests`, `ceiling.arm`, `nodepool.consolidate`, `workload.investigate`), impact numbers must be finite and ≥ 0, and the attached `crd_yaml` must parse to a `BudgetPolicy` / `CeilingPolicy` / `RightsizingPolicy`. Anything else is downgraded to an investigate-only proposal with no manifest — never silently passed through as something applyable.
+`kubehero` covers every surface from a terminal — `cost`, `logs` (with `-f` live tail and `--patterns`), `profile top|flame`, `network`, `rightsize`, `alerts`, `ask`, `cap --arm`, `undo` — and `kubehero mcp` serves the same read-only tools over the Model Context Protocol (stdio or streamable HTTP) so Claude and other agents can query a fleet safely.
 
-**Read-only by design.** The advisor's only inputs are the control plane's read RPCs (`ListClusters`, `ListWasteRecommendations`, `ListAnomalies`, `GetTeamSpend`, `GetBurnRate`). It never talks to the Kubernetes API and never calls mutation RPCs. Applying a proposal is a human act, through the operator's existing arming flow. Advisor proposes · humans arm · operator executes.
+### 3.6 Dashboard (Next.js 16)
 
-**Cache**: briefings are held in a 10-minute in-memory TTL cache per cluster + window, so repeated dashboard loads don't re-bill the LLM tier.
+Server components fetch over Connect; streaming endpoints (log tail, investigations) are proxied as SSE. Sign-in is token-based: each user acts with their own token and role (`WhoAmI`). Every page degrades to labelled demo data when a signal isn't configured. Explorers: overview, allocation, rightsizing, logs (LogQL, volume, patterns, live tail), profiles (flamegraph, diff, top functions), network map, alerts (rules, silences, test), Ask, advisor briefings with voice, budgets and ceilings, posture, GPU and capacity, and a per-workload correlation page.
 
-### 3.5 Dashboard (Next.js 15)
+### 3.7 Pricing engine
 
-Deployed at `app.kubehero.io` (cloud) or behind the customer's ingress (self-hosted).
-
-Stack:
-- Next.js 15 (server components where possible; client for live data panels)
-- TanStack Query for async state, TanStack Table for data grids
-- **ECharts** for time-series (Recharts is too limited for the density we need; Observable Plot considered for future)
-- WebSocket subscription for live metrics (via Connect-RPC streams)
-- Same monospace aesthetic as marketing — continuity is a feature
-
-Key screens:
-1. **Fleet** — all clusters, at-a-glance health + cost delta
-2. **Cluster** — node grid (same visualizer from marketing, but with real data + drill-in)
-3. **Waste** — ranked list of recoverable dollars, with one-click fix / rightsize
-4. **GPU Panel** — dedicated view for GPU/TPU utilization with per-process breakdown
-5. **Budgets** — CRUD for BudgetPolicy CRDs (visual editor that writes YAML)
-6. **Ceiling Log** — audit trail of every policy firing, reversible
-7. **Advisor** — the daily briefing (with voice playback via the browser's SpeechSynthesis API — zero external TTS deps) + the proposed-action queue
-8. **Org settings** — SSO, RBAC, integrations
-
-### 3.6 CLI (`kubehero`)
-
-A Go binary. Same API as the dashboard. For ops folks who live in a terminal (i.e. our audience).
-
-```bash
-kubehero cluster list
-kubehero scan --cluster prod-use1 --report waste
-kubehero rightsize --apply --dry-run=false vectordb-ingress
-kubehero budget apply -f budgets/prod.yaml
-kubehero cap --policy prod-hard-ceiling --arm
-kubehero undo <audit-id>
-```
-
-Distribution: `brew install kubehero`, `apt`, `yum`, single static binary on GitHub Releases.
-
-### 3.7 Pricing Engine
-
-Serves per-SKU quotes (`Quote` RPC) from a layered catalog: an in-memory cache first, then the cloud's **live pricing API** on a miss, then the static built-in table when the live source fails or isn't wired:
-
-- AWS EC2 public pricing + Spot (AWS Pricing API)
-- GCP Compute pricing (Cloud Billing Catalog — needs `GCP_BILLING_API_KEY`; static table otherwise)
-- Azure VM pricing + Spot (Azure Retail Prices API)
-
-A quote never fails because a cloud API is down — it just gets staler. Normalizes to a canonical cost-per-second-per-pod given a node's actual SKU and the pod's share of that node's resources.
-
-**Non-obvious detail**: we need to handle *mid-month reservations*. If a customer buys a 1-year Savings Plan mid-month, all attributed cost-per-pod for covered usage drops retroactively in the UI. This is where most cost tools quietly fail.
+`PricingService.Quote` over a layered catalog: in-memory cache → the cloud's live price API (AWS Pricing, GCP Cloud Billing Catalog, Azure Retail Prices) → a static built-in table, so a quote never fails because a cloud API is down.
 
 ---
 
-## 4. Deployment modes
+## 4. Deployment
 
-### 4.1 Full stack (single cluster)
-
-- Single `helm install kubehero kubehero/kubehero` installs everything: Collector + Control Plane + PG + ClickHouse + Operator + Advisor + Dashboard.
-- Air-gap capable — all images mirrorable to your registry, no phone-home.
-- No tiers, no gating: every CRD, the CLI, the dashboard, SSO, RBAC, and audit export are all included.
-
-### 4.2 Federated collector (multi-cluster)
-
-- Run only the **Collector DaemonSet** in a workload cluster and point it at a control plane you operate in a hub cluster.
-- Collector authenticates with a per-cluster credential (issued via `kubehero cluster add`).
-- Telemetry streams to your own hub endpoint — nothing leaves infrastructure you control.
-- Same CRDs, same CLI, same dashboard across every registered cluster.
+- **One chart, real data from minute one.** `helm install kubehero oci://ghcr.io/kubehero-io/charts/kubehero -n kubehero-system --create-namespace` installs every component plus single-replica Postgres 18 and ClickHouse 26.8 LTS (official images, persistent volumes). Production installs point at managed stores with a DSN Secret (`values.production.yaml`).
+- **Federated collectors.** Run collector + operator only in workload clusters (`controlPlane.enabled=false`, `controlPlane.url`, `cluster.tokenSecret` from `kubehero cluster add`) and one control plane in a hub.
+- **Air-gapped.** Every image mirrors to your registry (`values.airgap.yaml`); no phone-home.
+- **Local.** `docker compose up` runs the stack with a synthetic three-cluster fleet streamed through the real ingest APIs; `infra/demo/e2e-kind.sh` installs the real chart on kind and asserts every signal end to end.
 
 ---
 
 ## 5. Security & trust
 
-Non-negotiable commitments:
-
-1. **No telemetry leaves your cluster.** Ever. Even "anonymous product analytics" require explicit opt-in.
-2. **Collector is read-only by default.** Enforcement requires a separate `RightsizingPolicy` CRD you apply yourself. Nothing can push changes into your cluster from outside.
-3. **All policy actions are reversible within cooldown** (default 10m). Every eviction logs the pod spec so it can be restored.
-4. **mTLS end-to-end** for collector ↔ ingest telemetry. Certs rotated weekly. `cert-manager` handles it automatically.
-5. **Audit log append-only**, exportable to any SIEM via syslog, webhook, or S3 dump.
-6. **Runs inside your own compliance boundary.** Everything is self-hosted, so KubeHero inherits your cluster's controls — there's no third-party data processor to certify. The one optional exception is the advisor's LLM tier: set `ANTHROPIC_API_KEY` and briefing inputs (the telemetry snapshot) go to Anthropic's API. Leave it unset and nothing ever leaves — the deterministic rules brain makes no external calls.
-7. **The advisor cannot act.** It has no Kubernetes credentials and no mutation RPCs. Every LLM-proposed action is validated against a CRD whitelist and downgraded to investigate-only if it doesn't conform; applying anything still goes through the human arming flow.
+1. **No telemetry leaves your infrastructure.** The only optional exception is the advisor's LLM brain: with an Anthropic key set, the telemetry snapshot and tool results it reasons over go to Anthropic's API. Leave it unset and nothing leaves.
+2. **Read-only collection.** The collector has no write permissions on customer resources. eBPF requires a privileged container on each node — scoped to reading; the programs never drop or alter traffic.
+3. **Guarded mutation only.** The operator is the only component that changes workloads, only through policy CRDs, only when armed, bounded per step and per day, audited, reversible.
+4. **The advisor cannot act.** No Kubernetes credentials, no mutation RPCs, CRD-whitelisted proposals.
+5. **Auth on by default** in the chart; per-cluster tokens stored as hashes; OIDC with signature verification; audit rows HMAC-signed.
+6. **Supply chain.** Images are signed with cosign (keyless), ship SPDX SBOM attestations, and are scanned with Trivy on release.
 
 ---
 
-## 6. Roadmap
+## 6. Honest limits
 
-Shipped today: AKS / GKE / EKS support; the collector with measured utilisation from the kubelet Summary API; the control plane with z-score spend-anomaly detection, burn rate, and an explicit demo-mode flag (`KUBEHERO_DEMO_MODE=false` fails loudly instead of serving fixtures); the operator with reversible enforcement; live cloud pricing in the serve path with a static-catalog fallback; the advisor (llm / rules / demo briefing tiers behind one guardrail); the CLI; the dashboard with voice briefings; SSO/RBAC/audit; the Helm chart; and reference Terraform for GKE + Cloud SQL + ClickHouse.
-
-Directions we're exploring next (undated, contributions welcome):
-
-- eBPF probes for 1-second, cgroup-accurate burst attribution (the collector's build-tag stubs are waiting)
-- GPU/TPU telemetry (DCGM / MIG / `libtpu`)
-- Multi-cluster federation improvements
-- ML-driven rightsizing recommendations
-- Budget-aware scheduler plugin
-- Serverless-container support (ECS / Cloud Run)
+- eBPF telemetry needs Linux ≥ 5.8 with cgroup v2 (the default on current AKS, GKE and EKS node images). User-space stacks rely on frame pointers — excellent for Go, Rust and the JVM with `-XX:+PreserveFramePointer`; C/C++ built without frame pointers yields truncated stacks, and JIT frames without perf maps show as `[unknown]`.
+- Allocation is an estimate reconciled to node prices (list or pricing-engine), not your cloud invoice; commitments and discounts are not yet replayed onto allocations.
+- KubeHero keeps Prometheus as the metrics TSDB (it exposes metrics, ships dashboards and rules) and does not store distributed traces; trace ids in logs link out.
 
 ---
 
 ## 7. What we are explicitly NOT building
 
-Staying focused is the job. We will not:
-
-- Rebuild Grafana. We expose Prometheus-compatible metrics for anyone who wants custom dashboards. Our dashboard is opinionated, not general.
-- Rebuild Datadog APM. Spans, traces, logs — out of scope. Integrate with your existing stack.
-- Chase every cloud. AKS/GKE/EKS only for now. Oracle/IBM/Alibaba when someone contributes support.
-- Build a CMDB. Reading cluster inventory is a side effect, not a product.
-- Automate what shouldn't be automated. Spend ceiling needs `humanArm: true` by default. We optimize for *operators not getting fired*, not for magical self-healing.
+- A general-purpose metrics database — Prometheus / Mimir do that well; KubeHero integrates.
+- A tracing backend (yet) — OTLP traces are a direction, not a feature.
+- Automation that isn't armed by a human. Guardrails first, always.
