@@ -161,7 +161,7 @@ func (r *RightsizingPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err != nil {
 		// Transient (API server) failure: keep the last good status and
 		// retry with backoff.
-		log.Error(err, "rightsizing evaluation failed")
+		log.Error(err, "Failed to evaluate RightsizingPolicy")
 		return ctrl.Result{}, err
 	}
 	r.writeEvaluation(ctx, &rp, spec, ev, now)
@@ -331,7 +331,7 @@ func (r *RightsizingPolicyReconciler) evaluate(
 			Limit:       recommendationLimit,
 		})
 		if err != nil {
-			logf.FromContext(ctx).Error(err, "ListRightsizing failed", "namespace", ns)
+			logf.FromContext(ctx).Error(err, "Failed to list rightsizing recommendations", "namespace", ns)
 			failed = append(failed, ns)
 			continue
 		}
@@ -560,7 +560,7 @@ func (r *RightsizingPolicyReconciler) applyPlan(
 	}
 	if err := r.Patch(ctx, wp.W.Obj, client.RawPatch(types.StrategicMergePatchType, body),
 		client.FieldOwner(FieldManager)); err != nil {
-		log.Error(err, "rightsizing patch failed")
+		log.Error(err, "Failed to patch workload resources")
 		markFailed(passing, err)
 		return false
 	}
@@ -569,7 +569,7 @@ func (r *RightsizingPolicyReconciler) applyPlan(
 		cp.Change.Outcome = kubeherov1.ChangeOutcomeApplied
 		cp.Change.ChangeID = changeID
 	}
-	log.Info("rightsizing applied", "changeId", changeID, "containers", len(passing), "savingsUsdMonth", money(savings))
+	log.Info("Applied rightsizing change", "changeId", changeID, "containers", len(passing), "savingsUsdMonth", money(savings))
 
 	// Audit is best effort: the change already happened and is fully
 	// recoverable from the workload annotation even if the cp is down.
@@ -593,7 +593,7 @@ func (r *RightsizingPolicyReconciler) applyPlan(
 			"undo":            "kubehero undo " + changeID,
 		},
 	}); err != nil {
-		log.Error(err, "failed to emit rightsize.apply audit event", "changeId", changeID)
+		log.Error(err, "Failed to emit rightsize.apply audit event", "changeId", changeID)
 	}
 
 	if r.Recorder != nil {
@@ -715,7 +715,7 @@ func (r *RightsizingPolicyReconciler) emitShadow(ctx context.Context, rp *kubehe
 			"savingsUsdMonth": savings,
 		},
 	}); err != nil {
-		logf.FromContext(ctx).Error(err, "failed to emit rightsize.shadow audit event")
+		logf.FromContext(ctx).Error(err, "Failed to emit rightsize.shadow audit event")
 	}
 }
 
