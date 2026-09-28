@@ -24,6 +24,10 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
+        # distroless nonroot; explicit so runAsNonRoot is verifiable
+        # whatever USER the image declares.
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       {{- with (include "kubehero.priorityClassName" .) }}

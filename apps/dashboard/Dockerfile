@@ -48,7 +48,9 @@ COPY --from=build --chown=65532:65532 /repo/apps/dashboard/.next/standalone ./
 COPY --from=build --chown=65532:65532 /repo/apps/dashboard/.next/static ./apps/dashboard/.next/static
 
 EXPOSE 3001
-USER nonroot
+# Numeric, like every KubeHero image: with runAsNonRoot the kubelet can
+# only verify a numeric user (65532 is distroless's nonroot).
+USER 65532:65532
 # distroless/nodejs has `node` as the entrypoint; pass server.js as
 # the argument.
 CMD ["apps/dashboard/server.js"]
