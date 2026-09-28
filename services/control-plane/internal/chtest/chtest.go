@@ -7,7 +7,8 @@
 // The server named by KUBEHERO_TEST_CLICKHOUSE_URL is shared by every
 // test package (and other engineers' suites), and `go test ./...` runs
 // packages in parallel — so each caller names its own database, which
-// is emptied and migrated here. Tests skip when the variable is unset.
+// is emptied and migrated here and dropped when the test ends. Tests
+// skip when the variable is unset.
 package chtest
 
 import (
@@ -60,6 +61,20 @@ func Open(t testing.TB, name string) *DB {
 	// name is validated above; identifiers cannot be bound.
 	if _, err := admin.ExecContext(ctx, "CREATE DATABASE IF NOT EXISTS "+name); err != nil {
 		t.Fatal(err)
+	}
+	// The test server is shared and disk is tight: drop the database
+	// when the test ends (cleanups run last-in-first-out, so this runs
+	// after the connections below are closed). KUBEHERO_TEST_KEEP_DB=1
+	// keeps it for debugging.
+	if os.Getenv("KUBEHERO_TEST_KEEP_DB") == "" {
+		t.Cleanup(func() {
+			db, err := sql.Open("clickhouse", base)
+			if err != nil {
+				return
+			}
+			defer db.Close() //nolint:errcheck
+			_, _ = db.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+name+" SYNC")
+		})
 	}
 	rows, err := admin.QueryContext(ctx,
 		`SELECT name, engine FROM system.tables WHERE database = ? ORDER BY engine = 'MaterializedView' DESC`, name)
