@@ -62,6 +62,10 @@ func (c *ClusterConfig) defaults() {
 const (
 	maxWarningStates = 20_000
 	maxPodLookups    = 10_000
+	// maxPendingPerScan bounds one scan's output: a batch system with
+	// tens of thousands of queued pods would otherwise emit them all
+	// every re-emit window. The oldest pending pods are reported first.
+	maxPendingPerScan = 5_000
 )
 
 // ClusterWatcher runs the cluster-scoped event sources. Run it only on
@@ -155,8 +159,11 @@ func (w *ClusterWatcher) ScanPending(ctx context.Context) {
 	now := w.now()
 	still := map[types.UID]bool{}
 	var out []*kuberov1.ClusterEvent
-	for i := range list.Items {
-		p := &list.Items[i]
+	items := list.Items
+	sort.Slice(items, func(i, j int) bool { return items[i].CreationTimestamp.Before(&items[j].CreationTimestamp) })
+	capped := 0
+	for i := range items {
+		p := &items[i]
 		if p.Status.Phase != corev1.PodPending || p.Spec.NodeName != "" {
 			continue
 		}
@@ -168,8 +175,15 @@ func (w *ClusterWatcher) ScanPending(ctx context.Context) {
 		if last, ok := w.pending[p.UID]; ok && now.Sub(last) < w.cfg.PendingReemit {
 			continue
 		}
+		if len(out) >= maxPendingPerScan {
+			capped++
+			continue
+		}
 		w.pending[p.UID] = now
 		out = append(out, w.pendingEvent(ctx, now, p, cond))
+	}
+	if capped > 0 {
+		w.cfg.Logger.Warn("more unschedulable pods than one scan reports — the rest follow in later scans", "reported", len(out), "deferred", capped)
 	}
 	for uid := range w.pending {
 		if !still[uid] {

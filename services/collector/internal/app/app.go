@@ -7,6 +7,12 @@
 // shutdown that drains the ship queues before exiting and only then
 // checkpoints log offsets, so a rolling restart neither loses nor
 // duplicates what was already read.
+//
+// Memory budget during a control-plane outage (queues full, oldest
+// dropped beyond): cost 8 MiB (~20 min of 5s scans on a busy node),
+// usage 4 MiB, events 4 MiB, logs --logs-max-buffer-bytes (64 MiB),
+// profiles 16 MiB, flows 16 MiB — about 112 MiB on top of the ~50 MiB
+// steady state, so a 256–512 MiB limit never OOMs from backpressure.
 package app
 
 import (
@@ -221,7 +227,7 @@ func (a *App) run(ctx context.Context) error {
 	// ── cost ──────────────────────────────────────────────────────────
 	var emitCost func(*kuberov1.IngestPodCostRequest)
 	if a.ship != nil {
-		q := ship.NewQueue(ship.QueueConfig{Signal: "cost", MaxItems: 50_000, MaxBytes: 16 << 20, Timeout: 10 * time.Second}, a.ship.SendPodCost, a.log)
+		q := ship.NewQueue(ship.QueueConfig{Signal: "cost", MaxItems: 50_000, MaxBytes: 8 << 20, Timeout: 10 * time.Second}, a.ship.SendPodCost, a.log)
 		a.startQueue(ctx, &wg, q.Run, q.Flush)
 		emitCost = func(r *kuberov1.IngestPodCostRequest) {
 			q.Enqueue(ship.Batch[*kuberov1.IngestPodCostRequest]{Req: r, Items: len(r.Samples) + len(r.Nodes), Bytes: proto.Size(r)})
@@ -243,7 +249,7 @@ func (a *App) run(ctx context.Context) error {
 		}
 		var profileQ *ship.Queue[*kuberov1.IngestProfilesRequest]
 		if a.cfg.Profiles.Enabled || (a.cfg.EBPF.Enabled && a.cfg.EBPF.Profiler) {
-			profileQ = ship.NewQueue(ship.QueueConfig{Signal: "profiles", MaxItems: 20_000, MaxBytes: 32 << 20, Timeout: 30 * time.Second}, a.ship.SendProfiles, a.log)
+			profileQ = ship.NewQueue(ship.QueueConfig{Signal: "profiles", MaxItems: 20_000, MaxBytes: 16 << 20, Timeout: 30 * time.Second}, a.ship.SendProfiles, a.log)
 			a.startQueue(ctx, &wg, profileQ.Run, profileQ.Flush)
 		}
 		if a.cfg.Profiles.Enabled {
@@ -303,7 +309,7 @@ func (a *App) goLoop(ctx context.Context, wg *sync.WaitGroup, f func(context.Con
 }
 
 func (a *App) startUsage(ctx context.Context, wg *sync.WaitGroup, owners *kube.OwnerResolver, stats kubeletstats.Provider) {
-	q := ship.NewQueue(ship.QueueConfig{Signal: "usage", MaxItems: 50_000, MaxBytes: 16 << 20}, a.ship.SendUsage, a.log)
+	q := ship.NewQueue(ship.QueueConfig{Signal: "usage", MaxItems: 50_000, MaxBytes: 4 << 20}, a.ship.SendUsage, a.log)
 	a.startQueue(ctx, wg, q.Run, q.Flush)
 	sampler := usage.New(usage.Config{
 		ClusterID: a.cfg.ClusterID, NodeName: a.cfg.NodeName, Interval: a.cfg.UsageInterval, Logger: a.log,
@@ -316,7 +322,7 @@ func (a *App) startUsage(ctx context.Context, wg *sync.WaitGroup, owners *kube.O
 // startEvents runs node-local status detection on every collector and
 // the cluster-scoped sources on the elected leader only.
 func (a *App) startEvents(ctx context.Context, wg *sync.WaitGroup, owners *kube.OwnerResolver) {
-	q := ship.NewQueue(ship.QueueConfig{Signal: "events", MaxItems: 20_000, MaxBytes: 16 << 20}, a.ship.SendEvents, a.log)
+	q := ship.NewQueue(ship.QueueConfig{Signal: "events", MaxItems: 20_000, MaxBytes: 4 << 20}, a.ship.SendEvents, a.log)
 	a.startQueue(ctx, wg, q.Run, q.Flush)
 	batcher := events.NewBatcher(a.cfg.ClusterID, 5*time.Second, func(r *kuberov1.IngestEventsRequest) {
 		q.Enqueue(ship.Batch[*kuberov1.IngestEventsRequest]{Req: r, Items: len(r.Events), Bytes: proto.Size(r)})
@@ -407,7 +413,7 @@ func (a *App) startEBPF(ctx context.Context, wg *sync.WaitGroup, owners *kube.Ow
 		a.log.Warn("eBPF resolver setup failed — kernel telemetry disabled", "err", err)
 		return
 	}
-	flowQ := ship.NewQueue(ship.QueueConfig{Signal: "flows", MaxItems: 200_000, MaxBytes: 32 << 20, Timeout: 20 * time.Second}, a.ship.SendFlows, a.log)
+	flowQ := ship.NewQueue(ship.QueueConfig{Signal: "flows", MaxItems: 200_000, MaxBytes: 16 << 20, Timeout: 20 * time.Second}, a.ship.SendFlows, a.log)
 	a.startQueue(ctx, wg, flowQ.Run, flowQ.Flush)
 
 	err = ebpf.Start(ectx, ebpf.Config{

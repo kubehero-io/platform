@@ -40,6 +40,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/pprof/profile"
 	corev1 "k8s.io/api/core/v1"
@@ -481,6 +482,11 @@ func stackFrames(smp *profile.Sample) []string {
 			}
 			if len(name) > maxFrameLen {
 				name = name[:maxFrameLen]
+			}
+			if !utf8.ValidString(name) {
+				// Symbol tables are arbitrary bytes; proto strings must be
+				// UTF-8 or the whole request fails to marshal.
+				name = strings.ToValidUTF8(name, "\uFFFD")
 			}
 			frames = append(frames, name)
 		}

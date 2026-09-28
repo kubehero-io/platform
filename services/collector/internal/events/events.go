@@ -36,6 +36,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/proto"
 
@@ -113,7 +114,13 @@ func cloneEvent(e *kuberov1.ClusterEvent) *kuberov1.ClusterEvent {
 	return proto.Clone(e).(*kuberov1.ClusterEvent)
 }
 
+// truncate bounds free text copied from Kubernetes and guarantees valid
+// UTF-8: a container's termination message is arbitrary bytes, and one
+// invalid string would make the whole IngestEvents request unmarshalable.
 func truncate(s string, n int) string {
+	if !utf8.ValidString(s) {
+		s = strings.ToValidUTF8(s, "\uFFFD")
+	}
 	if len(s) <= n {
 		return s
 	}

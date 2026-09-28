@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -165,5 +166,23 @@ func TestInitContainersAndCleanup(t *testing.T) {
 	d.Detect(context.Background(), time.Now())
 	if len(d.restarts) != 0 || len(d.emitted) != 0 {
 		t.Fatalf("state not cleaned: %d restarts, %d emitted", len(d.restarts), len(d.emitted))
+	}
+}
+
+func TestRestartTimestampAndInvalidUTF8(t *testing.T) {
+	finished := time.Date(2026, 9, 28, 9, 59, 30, 0, time.UTC)
+	st := running("app", 1, "Error", 1)
+	st.LastTerminationState.Terminated.FinishedAt = metav1.NewTime(finished)
+	st.LastTerminationState.Terminated.Message = "bad bytes \xff\xfe here"
+	in := (&inv{}).set(pod(running("app", 0, "", 0)))
+	d := NewStatusDetector(in, owners{})
+	d.Detect(context.Background(), time.Now())
+	in.set(pod(st))
+	evs := d.Detect(context.Background(), time.Now())
+	if len(evs) != 1 || evs[0].TsUnixMs != finished.UnixMilli() {
+		t.Fatalf("restart event ts = %v, want finishedAt", evs)
+	}
+	if _, err := proto.Marshal(evs[0]); err != nil {
+		t.Fatalf("event with a binary termination message must marshal: %v", err)
 	}
 }

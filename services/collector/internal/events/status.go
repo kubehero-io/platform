@@ -150,7 +150,11 @@ func (d *StatusDetector) container(now time.Time, key containerKey, st *corev1.C
 		// the same key, so the OOM is counted once.
 		occ := occurrence{containerKey: key, kind: kind, restart: st.RestartCount - 1}
 		if d.remember(occ) {
-			out = append(out, mk(kind, severity, reason, msg, delta, attrs))
+			ev := mk(kind, severity, reason, msg, delta, attrs)
+			if term != nil && !term.FinishedAt.IsZero() {
+				ev.TsUnixMs = term.FinishedAt.UnixMilli() // when it died, not when we noticed
+			}
+			out = append(out, ev)
 		}
 	}
 
