@@ -1,0 +1,56 @@
+name: e2e
+
+# The real thing on a 3-node kind cluster: build every image, helm install
+# the chart (embedded Postgres + ClickHouse, auth on), run a small shop and
+# assert cost, logs, profiles, rightsizing and eBPF flows through the
+# public API. See infra/demo/e2e-kind.sh.
+
+on:
+  push: { branches: [main] }
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/**"
+      - "apps/dashboard/**"
+      - "cli/**"
+      - "packages/**"
+      - "deploy/helm/**"
+      - "infra/demo/**"
+      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind:
+    name: kind — helm install + live signals
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.33.0
+          install_only: true
+      - name: e2e
+        run: ./infra/demo/e2e-kind.sh
+      - name: diagnostics
+        if: failure()
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl get pods -A -o wide || true
+          kubectl -n kubehero-system get events --sort-by=.lastTimestamp | tail -100 || true
+          for w in $(kubectl -n kubehero-system get deploy,statefulset,daemonset -o name 2>/dev/null); do
+            echo "::group::logs $w"
+            kubectl -n kubehero-system logs "$w" --all-containers --tail=300 || true
+            echo "::endgroup::"
+          done
+          kubectl -n shop get pods -o wide || true

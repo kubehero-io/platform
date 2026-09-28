@@ -66,6 +66,9 @@ ok "images built + loaded"
 
 # ─── 3. chart ────────────────────────────────────────────────────────────
 step "installing the chart (embedded stores, auth required)"
+# The optional subcharts (all off by default) aren't vendored, and helm
+# refuses to install a chart whose declared dependencies are missing.
+helm dependency update "$CHART" >/dev/null
 helm upgrade --install kubehero "$CHART" -n "$NS" --create-namespace \
   --set image.registry="" --set image.repository=kubehero --set image.tag="$TAG" \
   --set image.pullPolicy=IfNotPresent \
