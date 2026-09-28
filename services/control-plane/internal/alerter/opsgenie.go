@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -19,7 +20,8 @@ import (
 //
 // `region=eu` switches the endpoint to api.eu.opsgenie.com. Severity maps
 // to OpsGenie priority: info→P5, warning→P3, critical→P1 (overridable
-// via the `priority` query param).
+// via the `priority` query param). A resolved Message closes the alert
+// by alias (POST /v2/alerts/{alias}/close?identifierType=alias).
 type OpsGenie struct {
 	// Endpoint overrides the alerts API URL. Empty means: pick by region
 	// query param. Tests inject an httptest URL.
@@ -46,6 +48,9 @@ func (o OpsGenie) Send(ctx context.Context, channel string, m Message) error {
 		return fmt.Errorf("opsgenie: empty api key")
 	}
 
+	if m.Resolved() && m.Source != "" {
+		return o.close(ctx, apiKey, qs.Get("region"), m)
+	}
 	priority := qs.Get("priority")
 	if priority == "" {
 		priority = ogPriority(m.Severity)
@@ -81,12 +86,23 @@ func (o OpsGenie) Send(ctx context.Context, channel string, m Message) error {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("opsgenie: %w", err)
+		return fmt.Errorf("opsgenie: %w", sanitize(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("opsgenie: http %d: %s", resp.StatusCode, bytes.TrimSpace(b))
+	}
+	return nil
+}
+
+// close resolves the alert created with alias = Message.Source.
+func (o OpsGenie) close(ctx context.Context, apiKey, region string, m Message) error {
+	endpoint := o.endpoint(region) + "/" + url.PathEscape(m.Source) + "/close?identifierType=alias"
+	h := http.Header{}
+	h.Set("Authorization", "GenieKey "+apiKey)
+	if err := postJSON(ctx, endpoint, map[string]any{"source": "kubehero", "note": truncate(m.Title, 1000)}, h); err != nil {
+		return fmt.Errorf("opsgenie: %w", err)
 	}
 	return nil
 }
