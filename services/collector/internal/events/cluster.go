@@ -83,6 +83,8 @@ type ClusterWatcher struct {
 	nodeConds map[string]bool         // node/type/transition already reported
 	pods      map[types.UID]podLookup // Warning-event pod → ref
 	nodes     cache.Store
+	// nodeSyncWait bounds the initial wait for the node informer.
+	nodeSyncWait time.Duration
 }
 
 type warnState struct {
@@ -108,10 +110,27 @@ func NewClusterWatcher(cfg ClusterConfig, client kubernetes.Interface, owners Ow
 		warnings:  map[types.UID]*warnState{},
 		nodeConds: map[string]bool{},
 		pods:      map[types.UID]podLookup{},
+
+		nodeSyncWait: 10 * time.Second,
 	}
 }
 
 // Run blocks until ctx ends (leadership lost or shutdown).
+// timeoutCh closes after d or when ctx ends.
+func timeoutCh(ctx context.Context, d time.Duration) <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+		case <-t.C:
+		}
+	}()
+	return ch
+}
+
 func (w *ClusterWatcher) Run(ctx context.Context) {
 	factory := informers.NewSharedInformerFactory(w.client, 0)
 	nodeInf := factory.Core().V1().Nodes().Informer()
@@ -125,11 +144,13 @@ func (w *ClusterWatcher) Run(ctx context.Context) {
 		w.watchWarnings(ctx)
 	}()
 
-	synced := cache.WaitForCacheSync(ctx.Done(), nodeInf.HasSynced)
+	// Don't block on the node informer: without nodes list/watch RBAC it
+	// never syncs, and the pending-pod scan must not depend on it.
+	cache.WaitForCacheSync(timeoutCh(ctx, w.nodeSyncWait), nodeInf.HasSynced)
 	t := time.NewTicker(w.cfg.Interval)
 	defer t.Stop()
 	for {
-		if synced {
+		if nodeInf.HasSynced() {
 			w.ScanNodes()
 		}
 		w.ScanPending(ctx)
@@ -338,6 +359,7 @@ func (w *ClusterWatcher) watchWarnings(ctx context.Context) {
 	cutoff := w.now().Add(-w.cfg.Lookback)
 	rv := ""
 	backoff := time.Second
+	forbiddenLogged := false
 	for ctx.Err() == nil {
 		var err error
 		if rv == "" {
@@ -359,13 +381,24 @@ func (w *ClusterWatcher) watchWarnings(ctx context.Context) {
 			continue
 		}
 		metrics.ScanErrors.With("warning_events", "watch").Inc()
-		w.cfg.Logger.Warn("watching Warning events failed — retrying", "err", err, "retry_in", backoff.String())
+		wait := backoff
+		if apierrors.IsForbidden(err) {
+			// Missing RBAC won't fix itself quickly: say so once, retry slowly.
+			if !forbiddenLogged {
+				forbiddenLogged = true
+				w.cfg.Logger.Warn("cannot list/watch events — Warning-event signals (evictions, node OOMs, …) disabled until the collector ClusterRole grants list+watch on events",
+					"err", err)
+			}
+			wait = 5 * time.Minute
+		} else {
+			w.cfg.Logger.Warn("watching Warning events failed — retrying", "err", err, "retry_in", backoff.String())
+			backoff = min(backoff*2, time.Minute)
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(backoff):
+		case <-time.After(wait):
 		}
-		backoff = min(backoff*2, time.Minute)
 		rv = ""
 	}
 }

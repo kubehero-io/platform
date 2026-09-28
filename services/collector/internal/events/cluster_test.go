@@ -11,10 +11,14 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 
 	kuberov1 "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1"
@@ -307,5 +311,39 @@ func TestTruncate(t *testing.T) {
 	}
 	if truncate("abc", 5) != "abc" {
 		t.Fatal("short strings unchanged")
+	}
+}
+
+// Without nodes RBAC the node informer never syncs; pending pods must
+// still be reported. Without events RBAC the watcher backs off quietly.
+func TestClusterWatcherDegradesWithoutRBAC(t *testing.T) {
+	cs := fake.NewSimpleClientset(pendingPod("train-0", true))
+	forbid := func(resource string) {
+		cs.PrependReactor("list", resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: resource}, "", nil)
+		})
+	}
+	forbid("nodes")
+	forbid("events")
+	s := &sink{}
+	w := NewClusterWatcher(ClusterConfig{Interval: 20 * time.Millisecond, Logger: slog.New(slog.DiscardHandler)}, cs, owners{}, s.add)
+	w.nodeSyncWait = 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { w.Run(ctx); close(done) }()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		n := len(s.evs)
+		s.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if evs := s.take(); len(evs) != 1 || evs[0].Kind != KindUnschedulable {
+		t.Fatalf("pending scan without node/event RBAC = %v", kinds(evs))
 	}
 }
