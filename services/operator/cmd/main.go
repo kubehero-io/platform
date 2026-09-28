@@ -282,9 +282,24 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "CeilingPolicy")
 		os.Exit(1)
 	}
+	// Rightsizing: recommendations come from the control plane's
+	// CostService.ListRightsizing (same URL + bearer token as above).
+	// Without a control plane, policies report DataAvailable=False and
+	// never mutate anything. CLUSTER_LABELS ("env=prod,cloud=aws") feeds
+	// spec.scope.clusterSelector.
+	var rightsizingSource controller.RightsizingSource
+	if cpURL != "" {
+		rightsizingSource = controller.NewControlPlaneRightsizing(cpURL, cpToken)
+	}
 	if err := (&controller.RightsizingPolicyReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		APIReader:     mgr.GetAPIReader(),
+		Source:        rightsizingSource,
+		Audit:         auditEmitter,
+		Recorder:      mgr.GetEventRecorder("kubehero-operator"),
+		ClusterID:     os.Getenv("CLUSTER_ID"),
+		ClusterLabels: controller.ParseClusterLabels(os.Getenv("CLUSTER_LABELS"), os.Getenv("CLUSTER_ID")),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "RightsizingPolicy")
 		os.Exit(1)

@@ -6,4 +6,20 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: rightsizingpolicy-sample
 spec:
-  # TODO(user): Add fields here
+  # Namespaces labelled env=dev; unset selects nothing, {} selects every
+  # non-system namespace.
+  scope:
+    namespaceSelector:
+      matchLabels:
+        env: dev
+  # recommend → status only · shadow → audited dry run · apply → patches
+  # requests once the policy is armed (`kubehero cap --arm`).
+  mode: shadow
+  targetUtilization: 70
+  minConfidence: medium
+  adjustLimits: false
+  exclude: ["postgres"]
+  safety:
+    minReplicas: 2
+    observationWindow: "14d"
+    maxChangePerDay: 1
