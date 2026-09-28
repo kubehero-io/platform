@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -109,24 +110,41 @@ func anomalyZThreshold(log *slog.Logger) float64 {
 
 func serve(parent context.Context, addr string) error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	var err error
 
 	// ─── storage ──────────────────────────────────────────────────────────
 	// Both are optional on startup — the control-plane degrades gracefully
 	// to read-only-stub mode when env is missing (useful for docs builds,
 	// integration testing, and the kind demo profile that runs without
 	// persistent stores).
-	pg, err := db.Open(parent, log, db.Options{URL: os.Getenv("DATABASE_URL")})
-	if err != nil {
-		log.Warn("postgres unavailable, running in stub mode", "err", err)
-	} else {
+	// A store whose URL is set must come up: on a fresh install the
+	// database pod is often still starting, so retry with backoff for
+	// KUBEHERO_STORE_WAIT (default 2m) and then exit non-zero so the
+	// orchestrator restarts us — never silently fall back to stub mode
+	// with a configured store.
+	storeWait := durationEnv(log, "KUBEHERO_STORE_WAIT", 2*time.Minute)
+	var pg, ch *sql.DB
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		pg, err = openWithRetry(parent, log, "postgres", storeWait, func(ctx context.Context) (*sql.DB, error) {
+			return db.Open(ctx, log, db.Options{URL: url})
+		})
+		if err != nil {
+			return err
+		}
 		defer pg.Close()
-	}
-
-	ch, err := clickhouse.Open(parent, log, clickhouse.Options{DSN: os.Getenv("CLICKHOUSE_URL")})
-	if err != nil {
-		log.Warn("clickhouse unavailable, running in stub mode", "err", err)
 	} else {
+		log.Warn("DATABASE_URL unset — no Postgres (clusters, policies, audit and alert rules are not persisted)")
+	}
+	if dsn := os.Getenv("CLICKHOUSE_URL"); dsn != "" {
+		ch, err = openWithRetry(parent, log, "clickhouse", storeWait, func(ctx context.Context) (*sql.DB, error) {
+			return clickhouse.Open(ctx, log, clickhouse.Options{DSN: dsn})
+		})
+		if err != nil {
+			return err
+		}
 		defer ch.Close()
+	} else {
+		log.Warn("CLICKHOUSE_URL unset — no time-series store (cost, logs, profiles, flows are not stored)")
 	}
 
 	fixturesOff := demoFixturesDisabled()
@@ -312,4 +330,41 @@ func migrateCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// openWithRetry calls open until it succeeds, ctx ends, or maxWait
+// elapses, backing off from 1s to 10s between attempts.
+func openWithRetry(ctx context.Context, log *slog.Logger, name string, maxWait time.Duration, open func(context.Context) (*sql.DB, error)) (*sql.DB, error) {
+	deadline := time.Now().Add(maxWait)
+	backoff := time.Second
+	for attempt := 1; ; attempt++ {
+		conn, err := open(ctx)
+		if err == nil {
+			return conn, nil
+		}
+		if time.Now().Add(backoff).After(deadline) {
+			return nil, fmt.Errorf("%s unavailable after %s (%d attempts): %w", name, maxWait, attempt, err)
+		}
+		log.Warn("store not ready, retrying", "store", name, "attempt", attempt, "in", backoff.String(), "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, 10*time.Second)
+	}
+}
+
+// durationEnv parses a Go duration from env, falling back to def.
+func durationEnv(log *slog.Logger, key string, def time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		log.Warn("invalid duration, using default", "env", key, "value", raw, "default", def.String())
+		return def
+	}
+	return d
 }
