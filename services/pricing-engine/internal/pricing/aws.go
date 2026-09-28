@@ -53,7 +53,9 @@ type AWS struct {
 	// next attempt, so a provider outage isn't hammered. Default 5m.
 	RetryAfter time.Duration
 	// MaxWait is how long Quote waits for a region that is still
-	// downloading before returning ErrWarming. Default 15s.
+	// downloading before returning ErrWarming — short, so callers with
+	// tight deadlines (the collector allows 5s) get the static fallback
+	// rather than a timeout. Default 2s.
 	MaxWait time.Duration
 
 	mu      sync.Mutex
@@ -74,7 +76,7 @@ const (
 	awsDefaultEndpoint     = "https://pricing.us-east-1.amazonaws.com"
 	awsDefaultFetchTimeout = 5 * time.Minute
 	awsDefaultRetryAfter   = 5 * time.Minute
-	awsDefaultMaxWait      = 15 * time.Second
+	awsDefaultMaxWait      = 2 * time.Second
 )
 
 func NewAWS() *AWS { return &AWS{} }

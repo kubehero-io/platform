@@ -22,7 +22,7 @@ func NewStatic(cloud Cloud) *Static {
 	switch cloud {
 	case CloudAWS:
 		s.table["m5.large|us-east-1|on-demand"] = 0.096
-		s.table["p4d.24xlarge|us-east-1|on-demand"] = 32.77
+		s.table["p4d.24xlarge|us-east-1|on-demand"] = 21.9576 // after AWS's 2025 P4d price cut
 		s.table["m5.large|us-east-1|spot"] = 0.029
 	case CloudGCP:
 		s.table["n2-standard-4|us-central1|on-demand"] = 0.194
