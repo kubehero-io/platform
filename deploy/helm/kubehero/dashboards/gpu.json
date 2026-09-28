@@ -1,15 +1,25 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "panels": [
     {
       "type": "heatmap",
-      "title": "GPU utilization heatmap",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "title": "GPU workloads \u2014 $/hour",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "targets": [
         {
-          "expr": "kubehero_pod_gpu_util_ratio",
+          "expr": "sum by (cluster, namespace, workload, gpu_kind) (avg_over_time(kubehero_pod_cost_usd_per_second{gpu_kind!=\"\"}[5m])) * 3600",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -17,28 +27,54 @@
     },
     {
       "type": "table",
-      "title": "Per-GPU idle-hour cost",
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "title": "GPU spend per team ($/month, top 20)",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "targets": [
         {
-          "expr": "topk(20, kubehero:team_gpu_idle_cost_usd:rate1h) * 24 * 30",
+          "expr": "topk(20, sum by (team) (avg_over_time(kubehero_pod_cost_usd_per_second{gpu_kind!=\"\"}[5m])) * 3600) * 24 * 30",
           "legendFormat": "{{team}}",
           "refId": "A",
           "instant": true,
           "format": "table"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
     }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["kubehero", "gpu"],
-  "templating": { "list": [{ "name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus" }] },
-  "time": { "from": "now-24h", "to": "now" },
-  "title": "KubeHero — GPU panel",
+  "tags": [
+    "kubehero",
+    "gpu"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "title": "KubeHero \u2014 GPU panel",
   "uid": "kubehero-gpu",
   "version": 1
 }

@@ -60,7 +60,7 @@ spec:
             - --ebpf-profiler={{ $c.ebpf.profiler }}
             - --ebpf-profile-hz={{ $c.ebpf.profileHz }}
             - --cgroup-root=/sys/fs/cgroup
-            - --profile-scrape={{ $c.profiling.scrape }}
+            - --profiles={{ $c.profiling.scrape }}
             - --profile-interval={{ $c.profiling.interval }}
             - --usage-interval={{ $c.usageInterval }}
             - --events={{ $c.events }}
@@ -74,6 +74,8 @@ spec:
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
             - name: POD_NAMESPACE
               valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: GOMEMLIMIT
+              valueFrom: { resourceFieldRef: { resource: limits.memory, divisor: "1" } }
             - name: CLUSTER_ID
               value: {{ .Values.cluster.id | default .Release.Name | quote }}
             - name: CONTROL_PLANE_URL
@@ -94,13 +96,17 @@ spec:
             - name: http
               containerPort: {{ $c.service.port }}
           readinessProbe:
-            httpGet: { path: /healthz, port: http }
+            httpGet: { path: /readyz, port: http }
             periodSeconds: 10
           livenessProbe:
             httpGet: { path: /healthz, port: http }
             initialDelaySeconds: 20
             periodSeconds: 30
           securityContext:
+            # Root inside the container: pod log files and the checkpoint
+            # directory on the host are root-owned (the image's default
+            # user is 65532).
+            runAsUser: 0
             {{- if $c.ebpf.enabled }}
             # Loading BPF programs, perf events and attaching to the root
             # cgroup require a privileged container.
@@ -108,8 +114,7 @@ spec:
             readOnlyRootFilesystem: true
             {{- else }}
             # Logs + kubelet stats only: read-only root, no privileges
-            # beyond reading host log files (root group).
-            runAsUser: 0
+            # beyond reading host log files.
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
