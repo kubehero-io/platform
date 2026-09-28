@@ -41,8 +41,35 @@ func main() {
 	}
 }
 
+// saNamespaceFile is mounted into every pod with a service account token.
+var saNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+// podNamespace is POD_NAMESPACE, else — in a cluster whose manifest
+// doesn't set it — the service account's namespace, so leader election
+// still has somewhere to put its Lease instead of every collector
+// running cluster-scoped duties. "" only outside a cluster.
+func podNamespace() string {
+	if ns := strings.TrimSpace(os.Getenv("POD_NAMESPACE")); ns != "" {
+		return ns
+	}
+	if raw, err := os.ReadFile(saNamespaceFile); err == nil {
+		return strings.TrimSpace(string(raw))
+	}
+	return ""
+}
+
+// podName is POD_NAME, else the hostname (a pod's hostname defaults to
+// its name).
+func podName() string {
+	if n := strings.TrimSpace(os.Getenv("POD_NAME")); n != "" {
+		return n
+	}
+	h, _ := os.Hostname()
+	return h
+}
+
 func defaultExcludes() []string {
-	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+	if ns := podNamespace(); ns != "" {
 		return []string{ns}
 	}
 	return nil
@@ -64,9 +91,12 @@ Environment:
                        Unset = ALL-NODES mode for local development: one process
                        prices the whole cluster (double-counts if run as a DaemonSet).
   POD_NAME             This pod's name (downward API: metadata.name); the identity
-                       for leader election.
+                       for leader election. Default: the hostname.
   POD_NAMESPACE        This pod's namespace (downward API: metadata.namespace);
-                       where the "kubehero-collector" Lease lives.
+                       where the "kubehero-collector" Lease lives. Default: the
+                       service account's namespace. Outside a cluster (no
+                       namespace at all) this process runs cluster-scoped duties
+                       itself.
   CLUSTER_ID           Cluster slug or UUID stamped on every request.
   CONTROL_PLANE_URL    Control plane base URL, e.g. http://kubehero-control-plane:8080.
                        Unset = nothing is shipped (cost is still exposed on /metrics).
@@ -88,8 +118,8 @@ func serveCmd() *cobra.Command {
 		Long:  serveLong,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg.NodeName = os.Getenv("NODE_NAME")
-			cfg.PodName = os.Getenv("POD_NAME")
-			cfg.PodNamespace = os.Getenv("POD_NAMESPACE")
+			cfg.PodName = podName()
+			cfg.PodNamespace = podNamespace()
 			cfg.ClusterID = os.Getenv("CLUSTER_ID")
 			cfg.ControlPlaneURL = strings.TrimSpace(os.Getenv("CONTROL_PLANE_URL"))
 			cfg.ControlPlaneToken = strings.TrimSpace(os.Getenv("CONTROL_PLANE_TOKEN"))
