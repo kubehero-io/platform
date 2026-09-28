@@ -537,3 +537,50 @@ func TestTailBurstCatchUp(t *testing.T) {
 		}
 	}
 }
+
+// Paging with tiny pages, lines sharing timestamps across page edges
+// and a Go-side filter returns exactly what one big page returns.
+func TestSelectLinesPaging(t *testing.T) {
+	var rows []Row
+	for i := 0; i < 200; i++ {
+		ts := t0.Add(-time.Hour + time.Duration(i/4)*time.Second) // 4 lines per timestamp
+		rows = append(rows, Row{TS: ts.UnixNano(), Labels: map[string]string{"app": "a", "pod": fmt.Sprintf("p%d", i%4)},
+			Body: fmt.Sprintf(`{"i":%d,"keep":%v}`, i, i%7 == 0)})
+	}
+	big := New(Options{Store: fixedRows(append([]Row(nil), rows...)), Now: func() time.Time { return t0 }})
+	for _, page := range []int{1, 3, 4, 5, 10} {
+		small := New(Options{Store: fixedRows(append([]Row(nil), rows...)), Now: func() time.Time { return t0 }, ScanPageRows: page})
+		for _, fwd := range []bool{false, true} {
+			for _, q := range []string{`{app="a"} | json | keep="true"`, `{app="a"}`} {
+				p := QueryParams{Query: q, Start: t0.Add(-2 * time.Hour), End: t0, Limit: 25, Forward: fwd}
+				want, err := big.Query(context.Background(), p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := small.Query(context.Background(), p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wk, gk := map[string]bool{}, map[string]bool{}
+				for _, l := range want.Lines {
+					wk[fmt.Sprint(l.TS, l.Body)] = true
+				}
+				for _, l := range got.Lines {
+					k := fmt.Sprint(l.TS, l.Body)
+					if gk[k] {
+						t.Fatalf("page %d fwd=%v %s: duplicate line %s", page, fwd, q, k)
+					}
+					gk[k] = true
+				}
+				if len(got.Lines) != len(want.Lines) || len(wk) != len(gk) {
+					t.Fatalf("page %d fwd=%v %s: %d lines, want %d", page, fwd, q, len(got.Lines), len(want.Lines))
+				}
+				for k := range wk {
+					if !gk[k] {
+						t.Fatalf("page %d fwd=%v %s: missing %s", page, fwd, q, k)
+					}
+				}
+			}
+		}
+	}
+}

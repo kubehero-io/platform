@@ -57,6 +57,9 @@ type Options struct {
 	MaxScanRows int
 	// PatternSample is how many lines GetLogPatterns mines (default 50 000).
 	PatternSample int
+	// ScanPageRows caps rows per ClickHouse read of a log query
+	// (default 20 000).
+	ScanPageRows int
 	// Tail polling: interval (1s), overlap for late lines (5s),
 	// lines per poll (5000) and per message (500), maximum duration (1h).
 	TailPoll        time.Duration
@@ -94,6 +97,9 @@ func New(o Options) *Engine {
 	}
 	if e.opts.PatternSample <= 0 {
 		e.opts.PatternSample = 50_000
+	}
+	if e.opts.ScanPageRows <= 0 {
+		e.opts.ScanPageRows = 20_000
 	}
 	if e.opts.TailPoll <= 0 {
 		e.opts.TailPoll = time.Second
@@ -318,9 +324,15 @@ func (e *Engine) Query(ctx context.Context, p QueryParams) (*QueryResult, error)
 }
 
 // selectLines finds up to limit lines, newest first unless forward.
-// The range is read in chunks growing from 15 minutes so "the latest
-// 100 lines" of a busy week touches only the latest chunk. Pipelines
-// SQL cannot express run in Go on each row, bounded by MaxScanRows.
+//
+// The range is read in chunks growing from 15 minutes, so "the latest
+// 100 lines" of a busy week touches only the latest chunk. Within a
+// chunk, rows arrive in pages of at most ScanPageRows (keyset
+// pagination on ts): ClickHouse never has to keep a huge ORDER BY … LIMIT
+// buffer, and the scan stops as soon as enough lines matched. Lines
+// sharing the page-edge timestamp are re-read by the next page and
+// de-duplicated on (ts, pod, body hash). Pipelines SQL cannot express
+// run in Go on each row, bounded overall by MaxScanRows.
 func (e *Engine) selectLines(ctx context.Context, sel *logql.LogSelectorExpr, from, to int64, limit int, forward bool) ([]Line, Stats, error) {
 	plan := logql.PlanSelector(sel)
 	pipe := logql.NewPipeline(plan.Stages)
@@ -336,26 +348,9 @@ func (e *Engine) selectLines(ctx context.Context, sel *logql.LogSelectorExpr, fr
 		} else {
 			cFrom, cTo = max(lo, hi-width), hi
 		}
-		want := budget
-		if plan.Exact() {
-			want = min(budget, limit-len(out))
-		}
-		got := 0
-		ss, err := e.store.Scan(ctx, ScanRequest{Selector: sel, Plan: plan, From: cFrom, To: cTo, Forward: forward, Max: want},
-			func(r Row) bool {
-				got++
-				line, labels, ok := pipe.Process(r.TS, r.Body, r.Labels)
-				if ok {
-					out = append(out, Line{TS: r.TS, Body: line, Labels: logql.SeriesLabels(labels, nil), TraceID: r.TraceID})
-				}
-				return len(out) < limit
-			})
-		st.RowsScanned += ss.Rows
-		st.BytesScanned += ss.Bytes
-		if err != nil {
+		if err := e.scanChunk(ctx, sel, plan, pipe, cFrom, cTo, forward, limit, &budget, &out, &st); err != nil {
 			return nil, st, err
 		}
-		budget -= got
 		if forward {
 			lo = cTo
 		} else {
@@ -364,6 +359,85 @@ func (e *Engine) selectLines(ctx context.Context, sel *logql.LogSelectorExpr, fr
 		width *= 2
 	}
 	return out, st, nil
+}
+
+// scanChunk pages through [from, to) until the chunk is exhausted, the
+// result is full or the row budget is spent.
+func (e *Engine) scanChunk(ctx context.Context, sel *logql.LogSelectorExpr, plan *logql.Plan, pipe *logql.Pipeline,
+	from, to int64, forward bool, limit int, budget *int, out *[]Line, st *Stats) error {
+	seen := map[tailKey]struct{}{} // lines at the current page-edge timestamp
+	var edgeTS int64 = -1
+	// consume processes one row unless an earlier page already did.
+	consume := func(r Row) (fresh bool) {
+		k := tailKey{ts: r.TS, pod: r.Labels["pod"], body: hashString(r.Body)}
+		if r.TS != edgeTS {
+			edgeTS, seen = r.TS, map[tailKey]struct{}{}
+		}
+		if _, dup := seen[k]; dup {
+			return false
+		}
+		seen[k] = struct{}{}
+		line, labels, ok := pipe.Process(r.TS, r.Body, r.Labels)
+		if ok {
+			*out = append(*out, Line{TS: r.TS, Body: line, Labels: logql.SeriesLabels(labels, nil), TraceID: r.TraceID})
+		}
+		return true
+	}
+	scan := func(from, to int64, max int, fn func(Row) bool) error {
+		ss, err := e.store.Scan(ctx, ScanRequest{Selector: sel, Plan: plan, From: from, To: to, Forward: forward, Max: max}, fn)
+		st.RowsScanned += ss.Rows
+		st.BytesScanned += ss.Bytes
+		return err
+	}
+	for len(*out) < limit && *budget > 0 && from < to {
+		want := min(*budget, e.opts.ScanPageRows)
+		if plan.Exact() {
+			want = min(want, limit-len(*out))
+		}
+		got, fresh := 0, 0
+		var last int64
+		if err := scan(from, to, want, func(r Row) bool {
+			got++
+			last = r.TS
+			if consume(r) {
+				fresh++
+			}
+			return len(*out) < limit
+		}); err != nil {
+			return err
+		}
+		*budget -= got
+		if got < want || len(*out) >= limit {
+			return nil // chunk exhausted, or done
+		}
+		if fresh == 0 {
+			// One timestamp holds more lines than a page: read it whole
+			// (bounded by the budget), then step past it.
+			n := 0
+			if err := scan(last, last+1, *budget, func(r Row) bool {
+				n++
+				consume(r)
+				return len(*out) < limit
+			}); err != nil {
+				return err
+			}
+			*budget -= n
+			if forward {
+				from = last + 1
+			} else {
+				to = last
+			}
+			continue
+		}
+		// More rows remain: continue from the last timestamp, inclusive,
+		// so its other lines are not lost (consume skips the ones seen).
+		if forward {
+			from = last
+		} else {
+			to = last + 1
+		}
+	}
+	return nil
 }
 
 // QueryMetric implements signals.LogMetricQuerier for alert rules.
