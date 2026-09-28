@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight, KeyRound, ShieldAlert } from "lucide-react";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { authMode } from "@/lib/auth-mode";
+import { sessionSecretConfigured } from "@/lib/session-crypto";
 import { whoAmI } from "@/lib/api/client";
 import { signIn, signInAnonymous, signInWithToken } from "./actions";
 
@@ -19,6 +20,7 @@ const ERRORS: Record<string, string> = {
   auth_required: "The control plane requires a token.",
   token_required: "This dashboard signs in with an access token.",
   wrong_mode: "That sign-in method is not enabled here.",
+  no_session_secret: "Sign-in is disabled: the server has no KUBEHERO_SESSION_SECRET. Ask your operator to set it.",
 };
 
 const REASONS: Record<string, string> = {
@@ -37,7 +39,9 @@ export default async function LoginPage({
   const { next, error, reason } = await searchParams;
   const mode = authMode();
   const nextPath = typeof next === "string" ? next : "/overview";
-  const errorText = error ? ERRORS[error] : undefined;
+  // Say so up front rather than after someone pastes a token.
+  const misconfigured = mode === "token" && !sessionSecretConfigured();
+  const errorText = error ? ERRORS[error] : misconfigured ? ERRORS.no_session_secret : undefined;
   const reasonText = reason ? REASONS[reason] : undefined;
 
   if (mode === "demo") {

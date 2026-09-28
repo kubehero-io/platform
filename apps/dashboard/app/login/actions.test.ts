@@ -67,6 +67,17 @@ describe("token sign-in", () => {
     vi.stubEnv("KUBEHERO_DASHBOARD_AUTH", "token");
   });
 
+  it("refuses to sign in (without calling the control plane) when production has no session secret", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("KUBEHERO_SESSION_SECRET", "");
+    const mock = stubWhoAmI(() => ({ status: 200, body: { subject: "key:1", role: "admin", authRequired: true } }));
+    const to = await redirectOf(signInWithToken(form({ token: "good-token", next: "/logs" })));
+    expect(to).toContain("error=no_session_secret");
+    expect(mock).not.toHaveBeenCalled();
+    expect(jar.has("kh_session")).toBe(false);
+    expect(await redirectOf(signInAnonymous(form({})))).toContain("error=no_session_secret");
+  });
+
   it("validates with WhoAmI and stores the encrypted token + role", async () => {
     const mock = stubWhoAmI((auth) =>
       auth === "Bearer good-token"

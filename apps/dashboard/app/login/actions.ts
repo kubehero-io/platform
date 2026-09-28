@@ -14,6 +14,7 @@ import { authMode, warnIfDemoOverridden } from "@/lib/auth-mode";
 import { whoAmI } from "@/lib/api/client";
 import { normalizeRole } from "@/lib/roles";
 import { orgFromEmail, setSession, TOKEN_MAX_AGE } from "@/lib/session";
+import { sessionSecretConfigured } from "@/lib/session-crypto";
 
 /** API keys are ~32–64 chars, OIDC ID tokens a few KiB; anything bigger is junk. */
 const MAX_TOKEN_CHARS = 8192;
@@ -64,6 +65,7 @@ export async function signUp(formData: FormData) {
 export async function signInWithToken(formData: FormData) {
   const next = safeNextPath(String(formData.get("next") || "/overview"));
   if (authMode() !== "token") redirect(loginUrl("wrong_mode", next));
+  if (!sessionSecretConfigured()) redirect(loginUrl("no_session_secret", next));
 
   let token = String(formData.get("token") || "").trim();
   if (/^bearer\s+/i.test(token)) token = token.replace(/^bearer\s+/i, "").trim();
@@ -110,6 +112,7 @@ export async function signInWithToken(formData: FormData) {
 export async function signInAnonymous(formData: FormData) {
   const next = safeNextPath(String(formData.get("next") || "/overview"));
   if (authMode() !== "token") redirect(loginUrl("wrong_mode", next));
+  if (!sessionSecretConfigured()) redirect(loginUrl("no_session_secret", next));
 
   const res = await whoAmI({ credential: { header: null, source: "none" } });
   if (!res.ok) {

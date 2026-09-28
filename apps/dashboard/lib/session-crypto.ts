@@ -29,11 +29,13 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
+import { authMode } from "./auth-mode";
 import type { Session } from "./session";
 
 // DEV FALLBACK — NOT A SECRET. Used only when KUBEHERO_SESSION_SECRET is
-// unset so local dev works out of the box. Every real deployment must set
-// KUBEHERO_SESSION_SECRET; production logs a loud warning without it.
+// unset so local dev and the demo work out of the box. A production
+// server in token mode refuses it (see sessionSecret); a production demo
+// logs a loud warning.
 const DEV_FALLBACK_SECRET = "kubehero-insecure-dev-secret-set-KUBEHERO_SESSION_SECRET";
 
 const VERSION = 0x02;
@@ -46,16 +48,43 @@ const MAX_COOKIE_CHARS = 4096;
 
 let warnedMissingSecret = false;
 
-export function sessionSecret(): string {
-  const s = process.env.KUBEHERO_SESSION_SECRET?.trim();
+type Env = Record<string, string | undefined>;
+
+export class SessionSecretMissingError extends Error {
+  constructor() {
+    super("KUBEHERO_SESSION_SECRET is not set: token sign-in is disabled until it is");
+    this.name = "SessionSecretMissingError";
+  }
+}
+
+/**
+ * The key material for session cookies. In production token mode a
+ * missing secret is a hard error: those cookies carry the user's
+ * control-plane credential, and sealing them with a key published in
+ * this file would be no sealing at all.
+ */
+export function sessionSecret(env: Env = process.env): string {
+  const s = env.KUBEHERO_SESSION_SECRET?.trim();
   if (s) return s;
-  if (process.env.NODE_ENV === "production" && !warnedMissingSecret) {
-    console.warn(
-      "[session] KUBEHERO_SESSION_SECRET is not set — falling back to the insecure dev key. Set it in production.",
-    );
-    warnedMissingSecret = true;
+  if (env.NODE_ENV === "production") {
+    if (authMode(env) === "token") throw new SessionSecretMissingError();
+    if (!warnedMissingSecret) {
+      console.warn(
+        "[session] KUBEHERO_SESSION_SECRET is not set — demo sessions use the insecure dev key. Set it in production.",
+      );
+      warnedMissingSecret = true;
+    }
   }
   return DEV_FALLBACK_SECRET;
+}
+
+export function sessionSecretConfigured(env: Env = process.env): boolean {
+  try {
+    sessionSecret(env);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 type Keys = { enc: Buffer; mac: Buffer };
@@ -89,14 +118,20 @@ export function signSession(session: Session, key: string = sessionSecret()): st
 
 // Invalid, tampered, legacy (v1 / unsigned) or undecryptable cookies all
 // return null — callers treat that as logged-out.
-export function verifySession(raw: string, key: string = sessionSecret()): Session | null {
+export function verifySession(raw: string, key?: string): Session | null {
   if (!raw || raw.length > MAX_COOKIE_CHARS) return null;
+  let secret: string;
+  try {
+    secret = key ?? sessionSecret();
+  } catch {
+    return null; // misconfigured: nobody is signed in
+  }
   const parts = raw.split(".");
   if (parts.length !== 2) return null;
   const [payload, sig] = parts;
   if (!payload || !sig) return null;
 
-  const { enc, mac } = deriveKeys(key);
+  const { enc, mac } = deriveKeys(secret);
   const expected = createHmac("sha256", mac).update(payload).digest();
   const given = Buffer.from(sig, "base64url");
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) {

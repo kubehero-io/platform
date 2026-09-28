@@ -2,8 +2,15 @@
 // Copyright (c) KubeHero contributors
 
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { isSession, signSession, verifySession } from "./session-crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  isSession,
+  SessionSecretMissingError,
+  sessionSecret,
+  sessionSecretConfigured,
+  signSession,
+  verifySession,
+} from "./session-crypto";
 import type { Session } from "./session";
 
 const KEY = "test-secret-key";
@@ -117,5 +124,41 @@ describe("isSession", () => {
     expect(isSession({ ...SESSION, token: 42 })).toBe(false);
     expect(isSession({ ...SESSION, expiresAt: "soon" })).toBe(false);
     expect(isSession({ ...SESSION, mode: "token", role: "viewer", token: "x" })).toBe(true);
+  });
+});
+
+describe("sessionSecret", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("uses KUBEHERO_SESSION_SECRET when set", () => {
+    expect(sessionSecret({ KUBEHERO_SESSION_SECRET: " s3cret ", NODE_ENV: "production", KUBEHERO_DASHBOARD_AUTH: "token" })).toBe("s3cret");
+  });
+
+  it("refuses the published dev key in production token mode", () => {
+    expect(() => sessionSecret({ NODE_ENV: "production", KUBEHERO_DASHBOARD_AUTH: "token" })).toThrow(SessionSecretMissingError);
+    // Token mode implied by a configured control plane.
+    expect(() => sessionSecret({ NODE_ENV: "production", CONTROL_PLANE_URL: "http://cp:8080" })).toThrow(SessionSecretMissingError);
+    expect(sessionSecretConfigured({ NODE_ENV: "production", CONTROL_PLANE_URL: "http://cp:8080" })).toBe(false);
+  });
+
+  it("allows the dev key for a production demo (with a warning) and in development", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(sessionSecretConfigured({ NODE_ENV: "production" })).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(sessionSecretConfigured({ NODE_ENV: "development", KUBEHERO_DASHBOARD_AUTH: "token" })).toBe(true);
+  });
+
+  it("treats every cookie as signed-out when the secret is missing in production token mode", () => {
+    const cookie = signSession(SESSION, "whatever");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("KUBEHERO_DASHBOARD_AUTH", "token");
+    vi.stubEnv("KUBEHERO_SESSION_SECRET", "");
+    expect(() => signSession(SESSION)).toThrow(SessionSecretMissingError);
+    expect(verifySession(cookie)).toBeNull();
+    // Even one minted with the published fallback key.
+    expect(verifySession(signSession(SESSION, "kubehero-insecure-dev-secret-set-KUBEHERO_SESSION_SECRET"))).toBeNull();
   });
 });
