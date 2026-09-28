@@ -70,11 +70,11 @@ type Options struct {
 
 // Engine is the log query engine.
 type Engine struct {
-	store  Store
-	demo   bool
-	opts   Options
-	now    func() time.Time
-	log    *slog.Logger
+	store Store
+	demo  bool
+	opts  Options
+	now   func() time.Time
+	log   *slog.Logger
 }
 
 // New builds an engine; see Options for defaults.
@@ -703,4 +703,74 @@ func (e *Engine) Series(ctx context.Context, selectors []string, cluster string,
 		}
 	}
 	return out, nil
+}
+
+// GroupTotal is one group's line and byte totals.
+type GroupTotal struct {
+	Labels map[string]string
+	Lines  int64
+	Bytes  int64
+}
+
+// VolumeTotals returns exact line and byte totals per value of groupBy
+// ("" = one total) over exactly [start, end), largest first.
+func (e *Engine) VolumeTotals(ctx context.Context, query, cluster, groupBy string, start, end time.Time) ([]GroupTotal, error) {
+	if err := e.ready(); err != nil {
+		return nil, err
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		q = "{}"
+	}
+	sel, err := logql.ParseLogSelector(q)
+	if err != nil {
+		return nil, err
+	}
+	if err := scopeCluster(sel, cluster); err != nil {
+		return nil, err
+	}
+	if groupBy != "" && !logschema.ValidLabelName(groupBy) {
+		return nil, badRequest("%q is not a valid label name", groupBy)
+	}
+	start, end, err = e.timeRange(start, end, DefaultRange)
+	if err != nil {
+		return nil, err
+	}
+	from, to := start.UnixNano(), end.UnixNano()
+	if to <= from {
+		return nil, nil
+	}
+	cells, _, err := e.store.Volume(ctx, VolumeRequest{
+		Selector: sel, Plan: logql.PlanSelector(sel), From: from, To: to, Step: to - from, GroupBy: groupBy, MaxScanned: e.opts.MaxScanRows,
+	})
+	if err != nil {
+		return nil, err
+	}
+	byGroup := map[string]*GroupTotal{}
+	var out []*GroupTotal
+	for _, c := range cells {
+		g, ok := byGroup[c.Group]
+		if !ok {
+			labels := map[string]string{}
+			if groupBy != "" && c.Group != "" {
+				labels[groupBy] = c.Group
+			}
+			g = &GroupTotal{Labels: labels}
+			byGroup[c.Group] = g
+			out = append(out, g)
+		}
+		g.Lines += int64(c.Lines)
+		g.Bytes += int64(c.Bytes)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Bytes != out[j].Bytes {
+			return out[i].Bytes > out[j].Bytes
+		}
+		return logql.LabelsKey(out[i].Labels) < logql.LabelsKey(out[j].Labels)
+	})
+	res := make([]GroupTotal, len(out))
+	for i, g := range out {
+		res[i] = *g
+	}
+	return res, nil
 }
