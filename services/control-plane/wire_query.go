@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -53,6 +54,10 @@ func wireQuery(ctx context.Context, mux *http.ServeMux, d wireDeps, logs signals
 	log := d.Log
 	if log == nil {
 		log = slog.Default()
+	} else {
+		// Query packages that log without an injected logger (the store-
+		// backed ControlPlane RPCs) must emit the same JSON.
+		slog.SetDefault(log)
 	}
 	names := clusters.NewResolver(d.PG, log)
 
@@ -96,7 +101,7 @@ func wireQuery(ctx context.Context, mux *http.ServeMux, d wireDeps, logs signals
 		src.Spend = &clickhouse.SpendAnomalyProvider{DB: d.CH, ZThreshold: anomalyZThreshold(log)}
 	}
 	engine := &alerts.Engine{Store: alertStore, Sources: src, Notifier: router, Leader: leader, Log: log,
-		DashboardURL: strings.TrimSpace(os.Getenv("KUBEHERO_DASHBOARD_URL"))}
+		DashboardURL: dashboardURL(log)}
 	mux.Handle(kuberov1connect.NewAlertsServiceHandler(&alerts.Service{Store: alertStore, Sources: src, Engine: engine,
 		Channels: router, Demo: d.CH == nil && !d.DemoFixturesDisabled}, d.Handler...))
 	go engine.Run(ctx)
@@ -113,4 +118,20 @@ func wireQuery(ctx context.Context, mux *http.ServeMux, d wireDeps, logs signals
 		"clickhouse", d.CH != nil, "postgres", d.PG != nil, "logs_engine", logs != nil,
 		"alert_store", map[bool]string{true: "postgres", false: "memory"}[alertStore.Persistent()],
 		"opencost", strings.Join(opencost.Paths, ","), "focus", focus.Path)
+}
+
+// dashboardURL reads KUBEHERO_DASHBOARD_URL; anything but an absolute
+// http(s) URL is ignored with a warning (notifications then carry no
+// deep link rather than a broken one).
+func dashboardURL(log *slog.Logger) string {
+	raw := strings.TrimSpace(os.Getenv("KUBEHERO_DASHBOARD_URL"))
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		log.Warn("ignoring KUBEHERO_DASHBOARD_URL: want an absolute http(s) URL", "value", raw)
+		return ""
+	}
+	return strings.TrimSuffix(u.String(), "/")
 }

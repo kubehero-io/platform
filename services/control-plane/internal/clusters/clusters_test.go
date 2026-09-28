@@ -84,4 +84,7 @@ func TestScope(t *testing.T) {
 	if RequireFleet(tok) == nil {
 		t.Fatal("fleet read must be denied for cluster tokens")
 	}
+	if _, err := Scope(user, snap, string(make([]byte, 300))); err == nil {
+		t.Fatal("oversized cluster ids must be rejected")
+	}
 }

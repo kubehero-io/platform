@@ -29,6 +29,7 @@ import (
 var suffixRE = regexp.MustCompile(`^[a-z0-9_]{1,40}$`)
 
 // Open returns a migrated database, skipping when the env var is unset.
+// The database is dropped again when the test ends.
 func Open(t testing.TB, suffix string) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("KUBEHERO_TEST_POSTGRES_URL")
@@ -62,6 +63,14 @@ func Open(t testing.TB, suffix string) *sql.DB {
 	if err != nil {
 		t.Fatalf("open+migrate %s: %v", name, err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() {
+		_ = conn.Close()
+		admin, err := sql.Open("pgx", dsn)
+		if err != nil {
+			return
+		}
+		defer admin.Close() //nolint:errcheck
+		_, _ = admin.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+	})
 	return conn
 }

@@ -26,7 +26,8 @@ import (
 var suffixRE = regexp.MustCompile(`^[a-z0-9_]{1,40}$`)
 
 // Open returns a migrated database kh_query_<suffix>, skipping the test
-// when KUBEHERO_TEST_CLICKHOUSE_URL is unset.
+// when KUBEHERO_TEST_CLICKHOUSE_URL is unset. The database is dropped
+// again when the test ends (disk on shared test servers is scarce).
 func Open(t testing.TB, suffix string) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("KUBEHERO_TEST_CLICKHOUSE_URL")
@@ -65,7 +66,15 @@ func Open(t testing.TB, suffix string) *sql.DB {
 	if _, err := clickhouse.Migrate(ctx, db); err != nil {
 		t.Fatalf("migrate %s: %v", name, err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		_ = db.Close()
+		admin, err := sql.Open("clickhouse", dsn)
+		if err != nil {
+			return
+		}
+		defer admin.Close() //nolint:errcheck
+		_, _ = admin.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+name+" SYNC")
+	})
 	return db
 }
 

@@ -17,6 +17,9 @@ import (
 	"github.com/kubehero-io/platform/services/control-plane/internal/alerter"
 )
 
+// storeTimeout bounds each round of state reads / writes.
+const storeTimeout = 20 * time.Second
+
 // Notifier delivers messages (alerter.Router).
 type Notifier interface {
 	SendAll(ctx context.Context, channels []string, msg alerter.Message) error
@@ -256,22 +259,31 @@ func (e *Engine) evaluate(ctx context.Context, r *Rule) {
 		return
 	}
 	e.shouldLogError(r.ID, "")
-	prev, err := e.Store.RuleAlerts(ctx, r.ID)
+	// Store calls get their own deadline: a hung Postgres must not park
+	// an evaluation worker forever.
+	sctx, scancel := context.WithTimeout(ctx, storeTimeout)
+	prev, err := e.Store.RuleAlerts(sctx, r.ID)
+	var silences []*Silence
+	if err == nil {
+		if silences, err = e.Store.ListSilences(sctx, false, now); err != nil {
+			e.log().Warn("alerts: loading silences failed; notifying as if none were active", "err", err)
+			err = nil
+		}
+	}
+	scancel()
 	if err != nil {
 		e.log().Warn("alerts: loading alert state failed", "rule", r.Name, "err", err)
 		return
 	}
 	res := Step(r, prev, samples, now)
-	silences, err := e.Store.ListSilences(ctx, false, now)
-	if err != nil {
-		e.log().Warn("alerts: loading silences failed; notifying as if none were active", "err", err)
-	}
 	log := e.notify(ctx, r, res, silences, now)
-	if err := e.Store.SaveAlerts(ctx, r.ID, res.Alerts, res.Deleted); err != nil {
+	wctx, wcancel := context.WithTimeout(ctx, storeTimeout)
+	defer wcancel()
+	if err := e.Store.SaveAlerts(wctx, r.ID, res.Alerts, res.Deleted); err != nil {
 		e.log().Warn("alerts: saving alert state failed", "rule", r.Name, "err", err)
 	}
 	if len(log) > 0 {
-		if err := e.Store.RecordNotifications(ctx, log); err != nil {
+		if err := e.Store.RecordNotifications(wctx, log); err != nil {
 			e.log().Warn("alerts: recording notifications failed", "err", err)
 		}
 	}

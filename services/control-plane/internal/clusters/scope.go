@@ -19,6 +19,9 @@ import (
 // and PermissionDenied when the request names another cluster. Users
 // and API keys (no ClusterID) pass through unchanged.
 func Scope(ctx context.Context, snap *Snapshot, requested string) (string, error) {
+	if len(requested) > maxIDLen {
+		return "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("cluster id longer than %d bytes", maxIDLen))
+	}
 	own := auth.PrincipalFromContext(ctx).ClusterID
 	if own == "" {
 		return requested, nil
@@ -37,6 +40,9 @@ func Scope(ctx context.Context, snap *Snapshot, requested string) (string, error
 	return "", connect.NewError(connect.CodePermissionDenied,
 		fmt.Errorf("cluster-scoped credentials may only read cluster %s", own))
 }
+
+// maxIDLen bounds cluster identifiers (UUIDs, DNS-label slugs, names).
+const maxIDLen = 253
 
 // RequireFleet rejects cluster-scoped credentials on fleet-wide reads
 // that have no cluster parameter to narrow them.
