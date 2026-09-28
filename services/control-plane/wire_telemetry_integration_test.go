@@ -197,9 +197,11 @@ func TestCompatRoundTrips(t *testing.T) {
 	if v := h.db.Count(t, `SELECT sum(value) FROM profile_samples WHERE service = 'checkout'`); v != 42*10_000_000 {
 		t.Fatalf("cpu ns = %d, want 42 samples × 10ms", v)
 	}
-	if n := h.db.Count(t, `SELECT count() FROM profile_stacks FINAL WHERE has(frames, 'json.Marshal')`); n != 1 {
-		t.Fatalf("stack rows = %d", n)
-	}
+	// Stacks and samples flush through separate batchers, so the stacks
+	// can land a flush interval after the samples.
+	eventually(t, "profile stack rows", func() bool {
+		return h.db.Count(t, `SELECT count() FROM profile_stacks FINAL WHERE has(frames, 'json.Marshal')`) == 1
+	})
 }
 
 // Load sanity: 200k lines through the IngestLogs RPC (Connect,
