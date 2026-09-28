@@ -4,6 +4,7 @@
 package ebpf
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,5 +143,31 @@ func TestCgroupIndex(t *testing.T) {
 	now = now.Add(cgroupRescanMax)
 	if _, ok := ix.lookup(late); ok {
 		t.Fatal("deleted cgroup still indexed")
+	}
+}
+
+// BenchmarkCgroupScan rescans a node-sized hierarchy: 300 pods with 3
+// containers each (systemd layout) beside 100 system services.
+func BenchmarkCgroupScan(b *testing.B) {
+	root := b.TempDir()
+	for i := 0; i < 100; i++ {
+		if err := os.MkdirAll(filepath.Join(root, "system.slice", fmt.Sprintf("svc-%d.service", i)), 0o755); err != nil {
+			b.Fatal(err)
+		}
+	}
+	for p := 0; p < 300; p++ {
+		uid := fmt.Sprintf("%08x_0000_4000_8000_%012x", p, p)
+		pod := filepath.Join(root, "kubepods.slice", "kubepods-burstable.slice", "kubepods-burstable-pod"+uid+".slice")
+		for c := 0; c < 3; c++ {
+			if err := os.MkdirAll(filepath.Join(pod, fmt.Sprintf("cri-containerd-%064x.scope", p*3+c)), 0o755); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		if ids := scanCgroups(root); len(ids) != 1200 { // 300 pod-level + 900 containers
+			b.Fatalf("indexed %d cgroups", len(ids))
+		}
 	}
 }
