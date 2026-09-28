@@ -155,9 +155,16 @@ jobs:
             if [ "$os" = windows ]; then (cd dist && zip -qr "$out.zip" "$out"); else tar -C dist -czf "dist/$out.tar.gz" "$out"; fi
           done
           (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
+      - name: release notes from CHANGELOG.md
+        run: |
+          # The "## vX.Y.Z — date" section for this tag, up to the next one.
+          awk -v v="$GITHUB_REF_NAME" 'index($0, "## " v " ") == 1 {on=1; next} on && /^## / {exit} on' \
+            CHANGELOG.md > dist/notes.md
+          [ -s dist/notes.md ] || echo "See [CHANGELOG.md](CHANGELOG.md)." > dist/notes.md
       - name: publish release assets
         uses: softprops/action-gh-release@v2
         with:
+          body_path: dist/notes.md
           files: |
             dist/*.tar.gz
             dist/*.zip
