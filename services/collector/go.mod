@@ -12,6 +12,8 @@ require (
 	k8s.io/client-go v0.35.0
 )
 
+require github.com/fsnotify/fsnotify v1.9.0
+
 require (
 	connectrpc.com/connect v1.20.0
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -49,7 +51,7 @@ require (
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
+	golang.org/x/time v0.14.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect

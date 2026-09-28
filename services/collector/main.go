@@ -40,6 +40,13 @@ func main() {
 	}
 }
 
+func defaultExcludes() []string {
+	if ns := os.Getenv("POD_NAMESPACE"); ns != "" {
+		return []string{ns}
+	}
+	return nil
+}
+
 func versionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
@@ -87,6 +94,9 @@ func serveCmd() *cobra.Command {
 			cfg.ControlPlaneToken = strings.TrimSpace(os.Getenv("CONTROL_PLANE_TOKEN"))
 			cfg.PricingEngineURL = strings.TrimSpace(os.Getenv("PRICING_ENGINE_URL"))
 
+			if cfg.Logs.From != "end" && cfg.Logs.From != "start" {
+				return fmt.Errorf("--logs-from must be end or start, got %q", cfg.Logs.From)
+			}
 			var level slog.Level
 			if err := level.UnmarshalText([]byte(logLevel)); err != nil {
 				return fmt.Errorf("--log-level: %w", err)
@@ -116,5 +126,18 @@ func serveCmd() *cobra.Command {
 	f.BoolVar(&cfg.KubeletInsecureTLS, "kubelet-insecure-tls", false, "skip kubelet serving-certificate verification with --kubelet-url")
 	f.DurationVar(&cfg.KubeletStatsTTL, "kubelet-stats-ttl", 10*time.Second, "reuse a kubelet summary for this long across the cost and usage loops")
 	f.DurationVar(&cfg.ShutdownTimeout, "shutdown-timeout", 10*time.Second, "how long to keep flushing queued data on SIGTERM")
+
+	f.BoolVar(&cfg.Logs.Enabled, "logs", true, "tail container logs from --logs-root and ship them (needs CONTROL_PLANE_URL)")
+	f.StringVar(&cfg.Logs.Root, "logs-root", "/var/log/pods", "kubelet pod log directory (mount read-only)")
+	f.StringVar(&cfg.Logs.PositionsFile, "logs-positions", "/var/lib/kubehero/log-positions.json",
+		"checkpoint of {path, inode, offset} per file, written atomically (mount a writable hostPath so restarts resume)")
+	f.StringVar(&cfg.Logs.From, "logs-from", "end", "where files found on the very first start begin: end | start (files that appear later always begin at the start)")
+	f.Float64Var(&cfg.Logs.RateLimit, "logs-rate-limit", 2000, "per-container line rate limit (lines/s); excess lines are dropped and counted")
+	f.IntVar(&cfg.Logs.Burst, "logs-burst", 4000, "per-container rate-limit burst (lines)")
+	f.StringSliceVar(&cfg.Logs.ExcludeNamespaces, "logs-exclude-namespaces", defaultExcludes(),
+		"namespaces whose logs are never tailed (default: the collector's own $POD_NAMESPACE, to avoid feedback loops)")
+	f.StringSliceVar(&cfg.Logs.PodLabels, "logs-pod-labels", []string{"app", "app.kubernetes.io/name", "version", "app.kubernetes.io/version"},
+		"pod labels copied onto every log entry (keys sanitised to LogQL names, e.g. app_kubernetes_io_name)")
+	f.IntVar(&cfg.Logs.MaxBufferBytes, "logs-max-buffer-bytes", 64<<20, "max log bytes queued in memory while the control plane is slow or down (oldest dropped beyond)")
 	return c
 }

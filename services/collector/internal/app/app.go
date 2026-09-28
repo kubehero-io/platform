@@ -29,6 +29,7 @@ import (
 	"github.com/kubehero-io/platform/services/collector/internal/kube"
 	"github.com/kubehero-io/platform/services/collector/internal/kubeletstats"
 	"github.com/kubehero-io/platform/services/collector/internal/leader"
+	"github.com/kubehero-io/platform/services/collector/internal/logs"
 	"github.com/kubehero-io/platform/services/collector/internal/metrics"
 	"github.com/kubehero-io/platform/services/collector/internal/ship"
 	"github.com/kubehero-io/platform/services/collector/internal/usage"
@@ -67,11 +68,26 @@ type Config struct {
 	LeaderElect bool
 	LeaseName   string
 
+	Logs LogsConfig
+
 	// ShutdownTimeout bounds the final queue flush.
 	ShutdownTimeout time.Duration
 
 	// Client overrides the Kubernetes client (tests).
 	Client kubernetes.Interface
+}
+
+// LogsConfig configures container log tailing.
+type LogsConfig struct {
+	Enabled           bool
+	Root              string
+	PositionsFile     string
+	From              string // end | start
+	RateLimit         float64
+	Burst             int
+	ExcludeNamespaces []string
+	PodLabels         []string
+	MaxBufferBytes    int
 }
 
 // App is a running collector.
@@ -85,7 +101,8 @@ type App struct {
 	scanner *ingest.Scanner
 	ready   atomic.Bool
 
-	flushers []func(context.Context)
+	flushers   []func(context.Context)
+	afterFlush []func()
 }
 
 // Run starts every pipeline and blocks until ctx is cancelled, then
@@ -164,7 +181,7 @@ func (a *App) run(ctx context.Context) error {
 	syncCancel()
 	if err != nil {
 		if ctx.Err() != nil {
-			return a.shutdown(srv, nil)
+			return a.shutdown(srv)
 		}
 		return fmt.Errorf("waiting for the pod/node cache: %w", err)
 	}
@@ -198,6 +215,9 @@ func (a *App) run(ctx context.Context) error {
 		if a.cfg.Events {
 			a.startEvents(ctx, &wg, owners)
 		}
+		if a.cfg.Logs.Enabled {
+			a.startLogs(ctx, &wg, owners)
+		}
 	}
 
 	select {
@@ -205,16 +225,17 @@ func (a *App) run(ctx context.Context) error {
 	case err := <-srvErr:
 		cancel()
 		wg.Wait()
-		return errors.Join(err, a.shutdown(srv, nil))
+		return errors.Join(err, a.shutdown(srv))
 	}
 	a.log.Info("shutting down")
 	wg.Wait()
-	return a.shutdown(srv, nil)
+	return a.shutdown(srv)
 }
 
 // shutdown drains the ship queues (bounded by ShutdownTimeout), runs the
-// post-flush hooks (log checkpoints), and stops the HTTP server.
-func (a *App) shutdown(srv *http.Server, after []func()) error {
+// post-flush hooks (log checkpoints, which must only record what the
+// flush actually delivered), and stops the HTTP server.
+func (a *App) shutdown(srv *http.Server) error {
 	fctx, cancel := context.WithTimeout(context.Background(), a.cfg.ShutdownTimeout)
 	defer cancel()
 	var fw sync.WaitGroup
@@ -223,7 +244,7 @@ func (a *App) shutdown(srv *http.Server, after []func()) error {
 		go func() { defer fw.Done(); f(fctx) }()
 	}
 	fw.Wait()
-	for _, f := range after {
+	for _, f := range a.afterFlush {
 		f()
 	}
 	sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -288,6 +309,33 @@ func (a *App) startEvents(ctx context.Context, wg *sync.WaitGroup, owners *kube.
 			Client: a.kube, Namespace: a.cfg.PodNamespace, Name: a.cfg.LeaseName, Identity: a.cfg.PodName, Logger: a.log,
 		}, duties)
 	})
+}
+
+// startLogs tails /var/log/pods for this node's containers.
+func (a *App) startLogs(ctx context.Context, wg *sync.WaitGroup, owners *kube.OwnerResolver) {
+	lc := a.cfg.Logs
+	maxBuf := lc.MaxBufferBytes
+	if maxBuf <= 0 {
+		maxBuf = 64 << 20
+	}
+	q := ship.NewQueue(ship.QueueConfig{Signal: "logs", MaxItems: 2_000_000, MaxBytes: maxBuf, Timeout: 20 * time.Second}, a.ship.SendLogs, a.log)
+	a.startQueue(ctx, wg, q.Run, q.Flush)
+	tailer := logs.New(logs.Config{
+		Root:              lc.Root,
+		PositionsFile:     lc.PositionsFile,
+		FromStart:         lc.From == "start",
+		RateLimit:         lc.RateLimit,
+		Burst:             lc.Burst,
+		ExcludeNamespaces: lc.ExcludeNamespaces,
+		PodLabels:         lc.PodLabels,
+		ClusterID:         a.cfg.ClusterID,
+		NodeName:          a.cfg.NodeName,
+		Logger:            a.log,
+	}, a.local, owners, func(r *kuberov1.IngestLogsRequest, done func(ship.Outcome)) {
+		q.Enqueue(ship.Batch[*kuberov1.IngestLogsRequest]{Req: r, Items: len(r.Entries), Bytes: proto.Size(r), Done: done})
+	})
+	a.goLoop(ctx, wg, tailer.Run)
+	a.afterFlush = append(a.afterFlush, tailer.Checkpoint)
 }
 
 // tickLoop calls fn every interval until ctx ends.
