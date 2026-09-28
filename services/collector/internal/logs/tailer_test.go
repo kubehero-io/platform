@@ -528,3 +528,46 @@ func TestParsePodDir(t *testing.T) {
 		}
 	}
 }
+
+// cri-dockerd: 0.log is a symlink to the docker json-file log, which
+// docker rotates in its own directory. A rotation while the collector
+// was down must be resumed there, attributed to the right container.
+func TestRestartAfterDockerRotationWhileDown(t *testing.T) {
+	h := newHarness(t)
+	h.addPod("ns", "web-0", "u1", nil)
+	dockerDir := filepath.Join(t.TempDir(), "docker", "abc123")
+	if err := os.MkdirAll(dockerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dockerDir, "abc123-json.log")
+	appendFile(t, target)
+	link := filepath.Join(h.containerDir("ns", "web-0", "u1", "web"), "0.log")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	dj := func(msg string) string {
+		return `{"log":"` + msg + `\n","stream":"stdout","time":"2026-09-28T10:00:00Z"}` + "\n"
+	}
+	stop := h.start(h.config())
+	appendFile(t, target, dj("d-1"), dj("d-2"))
+	h.waitBodies(2)
+	stop(ship.Sent)
+
+	appendFile(t, target, dj("d-3"))
+	if err := os.Rename(target, target+".1"); err != nil { // docker max-size rotation
+		t.Fatal(err)
+	}
+	appendFile(t, target, dj("d-4"))
+	h.reset()
+	stop = h.start(h.config())
+	got := h.waitBodies(2)
+	stop(ship.Sent)
+	wantBodies(t, got, "d", 3, 4)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, e := range h.entries {
+		if e.GetSource().GetPod() != "web-0" || e.GetSource().GetContainer() != "web" {
+			t.Fatalf("entry attributed to %+v", e.GetSource())
+		}
+	}
+}

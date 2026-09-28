@@ -484,7 +484,7 @@ func (t *Tailer) track(path string, initial bool) {
 	case initial && !t.hadPositions && !t.cfg.FromStart:
 		offset = lineAlignedEnd(path, fi.Size())
 	}
-	t.open(path, ino, offset, false)
+	t.open(path, filepath.Dir(path), ino, offset, false)
 }
 
 // resumeRotated finds files the checkpoint remembers by inode whose name
@@ -506,10 +506,9 @@ func (t *Tailer) resumeRotated(cdir string) {
 					"path", path, "offset", p.Offset)
 				continue
 			}
-			tf := t.open(found, p.Inode, p.Offset, true)
-			if tf != nil {
-				tf.path = path // keep checkpointing under the original name
-			}
+			// Checkpointed under the name it has now, so a crash while
+			// draining resumes it the same way.
+			t.open(found, cdir, p.Inode, p.Offset, true)
 		}
 	}
 }
@@ -564,12 +563,15 @@ func lineAlignedEnd(path string, size int64) int64 {
 
 func fileID(path string, ino uint64) string { return path + "#" + strconv.FormatUint(ino, 10) }
 
-func (t *Tailer) open(path string, ino uint64, offset int64, rotated bool) *tailFile {
+// open starts tailing path at offset. cdir is the container's log
+// directory, which differs from path's directory for a rotated docker
+// json-file log found through the symlink target.
+func (t *Tailer) open(path, cdir string, ino uint64, offset int64, rotated bool) *tailFile {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
-	c := t.containerFor(filepath.Dir(path))
+	c := t.containerFor(cdir)
 	if c == nil {
 		_ = f.Close()
 		return nil

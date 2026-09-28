@@ -126,8 +126,9 @@ type App struct {
 	kube  kubernetes.Interface
 	local *kube.LocalCache
 
-	ship    *ship.Client
-	scanner *ingest.Scanner
+	ship *ship.Client
+	// scanner is read by /metrics, which serves before the scanner exists.
+	scanner atomic.Pointer[ingest.Scanner]
 	ready   atomic.Bool
 
 	flushers   []func(context.Context)
@@ -191,7 +192,7 @@ func newApp(cfg Config) (*App, error) {
 		}
 		a.ship = c
 	} else {
-		a.log.Warn("CONTROL_PLANE_URL unset — nothing is shipped; cost is computed and exposed on /metrics only, log tailing and profile scraping are disabled")
+		a.log.Warn("CONTROL_PLANE_URL unset — nothing is shipped: cost is computed and exposed on /metrics only; usage, events, logs, profiles and eBPF are disabled")
 	}
 	return a, nil
 }
@@ -234,10 +235,11 @@ func (a *App) run(ctx context.Context) error {
 		}
 	}
 	pricingClient := a.pricingClient()
-	a.scanner = ingest.New(ingest.Config{
+	scanner := ingest.New(ingest.Config{
 		ClusterID: a.cfg.ClusterID, NodeName: a.cfg.NodeName, Interval: a.cfg.ScanInterval, Logger: a.log,
 	}, a.local, owners, stats, ingest.NewPricer(pricingClient, a.log), emitCost)
-	a.goLoop(ctx, &wg, a.scanner.Run)
+	a.scanner.Store(scanner)
+	a.goLoop(ctx, &wg, scanner.Run)
 
 	if a.ship != nil {
 		a.startUsage(ctx, &wg, owners, stats)
@@ -427,7 +429,9 @@ func (a *App) startEBPF(ctx context.Context, wg *sync.WaitGroup, owners *kube.Ow
 		EmitFlows: func(_ context.Context, flows []*kuberov1.Flow) error {
 			for len(flows) > 0 {
 				n := min(len(flows), maxFlowsPerRequest)
-				r := &kuberov1.IngestFlowsRequest{ClusterId: a.cfg.ClusterID, Flows: flows[:n]}
+				// Copy: the drain loop may reuse its slice once we return,
+				// while this request waits in the queue.
+				r := &kuberov1.IngestFlowsRequest{ClusterId: a.cfg.ClusterID, Flows: append([]*kuberov1.Flow(nil), flows[:n]...)}
 				flowQ.Enqueue(ship.Batch[*kuberov1.IngestFlowsRequest]{Req: r, Items: n, Bytes: proto.Size(r)})
 				flows = flows[n:]
 			}
@@ -537,8 +541,8 @@ func (a *App) serveMetrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	metrics.WriteSchema(w)
 	series := []metrics.Series{{Name: "kubehero_up", Labels: map[string]string{"service": "collector"}, Value: 1}}
-	if a.scanner != nil {
-		series = append(series, a.scanner.Series()...)
+	if sc := a.scanner.Load(); sc != nil {
+		series = append(series, sc.Series()...)
 	}
 	if a.cfg.Demo {
 		series = append(series, metrics.Demo()...)

@@ -233,7 +233,7 @@ func TestAppWithoutControlPlane(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- a.run(ctx) }()
 	// Cost is still computed for /metrics.
-	waitFor(t, "chargeback series", func() bool { return a.scanner != nil && len(a.scanner.Series()) > 0 })
+	waitFor(t, "chargeback series", func() bool { sc := a.scanner.Load(); return sc != nil && len(sc.Series()) > 0 })
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("run: %v", err)
