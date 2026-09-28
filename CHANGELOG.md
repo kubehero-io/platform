@@ -130,6 +130,12 @@ notes are at the end.
 - **A ClickHouse schema that actually applies.** Versioned migrations,
   applied once and recorded, and a control plane that waits for its stores
   instead of quietly serving demo data.
+- **AWS prices without the memory spike.** The pricing engine decoded
+  AWS's whole regional EC2 offer file (about 460 MB for us-east-1) into
+  memory on every cache miss, far past its 256 MiB limit. It now streams
+  each region once every 12 hours, keeping only on-demand Linux rates (a
+  few MB of memory), downloads in the background, and answers from its
+  cache or the static table in the meantime.
 - **Enrollment tokens are verified.** A cluster token now authenticates its
   own cluster only, and can't write telemetry for another.
 - **Public images and chart**, tagged to the app version. A Helm install now
