@@ -40,7 +40,7 @@ docker_build(
 )
 docker_build(
     'kubehero/operator:dev',
-    'services/operator', dockerfile='services/operator/Dockerfile',
+    '.', dockerfile='services/operator/Dockerfile',
 )
 docker_build(
     'kubehero/dashboard:dev',

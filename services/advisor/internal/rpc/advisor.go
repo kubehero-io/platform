@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -147,4 +148,22 @@ func randomHex(n int) string {
 		return "00000000"[:n*2]
 	}
 	return hex.EncodeToString(b)
+}
+
+// Investigate lands with the investigation agent; until then it
+// reports Unimplemented rather than guessing.
+func (a *Advisor) Investigate(
+	_ context.Context,
+	_ *connect.Request[kuberov1.InvestigateRequest],
+) (*connect.Response[kuberov1.InvestigateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("investigate: not available in this build"))
+}
+
+// InvestigateStream is the streaming form of Investigate.
+func (a *Advisor) InvestigateStream(
+	_ context.Context,
+	_ *connect.Request[kuberov1.InvestigateStreamRequest],
+	_ *connect.ServerStream[kuberov1.InvestigateStreamResponse],
+) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("investigate: not available in this build"))
 }

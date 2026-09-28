@@ -45,7 +45,7 @@ jobs:
             dockerfile: services/advisor/Dockerfile
             image: ghcr.io/${{ github.repository_owner }}/advisor
           - name: operator
-            context: services/operator
+            context: .
             dockerfile: services/operator/Dockerfile
             image: ghcr.io/${{ github.repository_owner }}/operator
           - name: cli

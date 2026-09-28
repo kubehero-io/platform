@@ -30,3 +30,5 @@ require (
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 )
+
+replace github.com/kubehero-io/platform/packages/proto => ../../packages/proto

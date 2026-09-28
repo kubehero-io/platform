@@ -1,39 +1,45 @@
-# Build the manager binary.
+# syntax=docker/dockerfile:1.7
 #
-# Base image policy:
-#   - Builder pinned to the Go major.minor we test against; renovate keeps
-#     us on the current security branch.
-#   - Runtime is distroless/static-debian12:nonroot — debian12 is current
-#     LTS; the static variant has no shell, no package manager, no glibc;
-#     image attack surface is just our binary + ca-certs + nsswitch. CVE
-#     scans against this base typically come back clean.
+# Build the operator manager. Built from the REPO ROOT inside the Go
+# workspace (packages/proto resolves locally):
+#
+#   docker build -f services/operator/Dockerfile .
+#
+# Runtime is distroless/static-debian12:nonroot — no shell, no package
+# manager, no glibc: just the binary + ca-certs + nsswitch.
+
 FROM golang:1.26.5-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
+WORKDIR /src
+RUN apk add --no-cache git
 
-WORKDIR /workspace
-# Copy the Go Modules manifests
-COPY go.mod go.mod
-COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
-RUN go mod download
+COPY go.work go.work.sum* ./
+COPY packages/proto/go.mod                  packages/proto/go.mod
+COPY packages/cost-model/go.mod             packages/cost-model/go.mod
+COPY services/advisor/go.mod                services/advisor/go.mod
+COPY services/collector/go.mod              services/collector/go.mod
+COPY services/control-plane/go.mod          services/control-plane/go.mod
+COPY services/pricing-engine/go.mod         services/pricing-engine/go.mod
+COPY services/operator/go.mod               services/operator/go.mod
+COPY services/operator/go.sum               services/operator/go.sum
+COPY cli/kubehero/go.mod                    cli/kubehero/go.mod
+COPY infra/dagger/go.mod                    infra/dagger/go.mod
 
-# Copy the Go source (relies on .dockerignore to filter)
-COPY . .
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    cd services/operator && go mod download
 
-# Build
-# the GOARCH has no default value to allow the binary to be built according to the host where the command
-# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager ./cmd
+COPY packages/proto/        packages/proto/
+COPY services/operator/     services/operator/
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/go/pkg/mod \
+    cd services/operator && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w" -trimpath -o /out/manager ./cmd
+
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /
-COPY --from=builder /workspace/manager .
+COPY --from=builder /out/manager .
 USER 65532:65532
-
 ENTRYPOINT ["/manager"]
