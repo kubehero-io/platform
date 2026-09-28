@@ -6,3 +6,12 @@ datasources:
     access: proxy
     isDefault: true
     uid: kh-prom
+  # KubeHero speaks the Loki query API: Grafana's stock Loki datasource
+  # queries container logs stored in KubeHero's ClickHouse with LogQL.
+  - name: KubeHero Logs
+    type: loki
+    url: http://control-plane:8080
+    access: proxy
+    uid: kh-logs
+    jsonData:
+      maxLines: 1000

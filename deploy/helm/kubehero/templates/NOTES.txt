@@ -48,7 +48,7 @@ NEXT STEPS
    open http://localhost:{{ .Values.dashboard.service.port }}
 {{- end }}
 
-4. Use the CLI (brew install kubehero-io/tap/kubehero, or the release binary):
+4. Use the CLI (binaries on https://github.com/kubehero-io/platform/releases):
    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $fullname }}-control-plane {{ .Values.controlPlane.service.port }}:{{ .Values.controlPlane.service.port }}
    export KUBEHERO_URL=http://localhost:{{ .Values.controlPlane.service.port }} KUBEHERO_TOKEN=<admin token>
    kubehero cost allocation --aggregate namespace --window 7d

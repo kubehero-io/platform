@@ -4,27 +4,93 @@ on:
   push: { branches: [main] }
   pull_request: { branches: [main] }
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26.5"
+  GO_MODULES: >-
+    services/advisor services/control-plane services/collector
+    services/pricing-engine services/operator cli/kubehero
+    packages/cost-model packages/proto infra/dagger infra/demo/generator
+
 jobs:
   go:
-    name: Go — build + test + lint
+    name: Go — fmt + vet + build + unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.5"
-      - name: Build every module
+          go-version: ${{ env.GO_VERSION }}
+      - name: gofmt
         run: |
-          for d in services/advisor services/control-plane services/collector services/pricing-engine services/operator cli/kubehero packages/cost-model infra/dagger; do
-            (cd "$d" && go build ./...)
-          done
-      - name: Test every module
+          unformatted=$(gofmt -l $(git ls-files '*.go' | grep -v '/gen/') || true)
+          if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
+      - name: vet + build + test every module
         run: |
-          for d in services/advisor services/control-plane services/collector services/pricing-engine cli/kubehero packages/cost-model infra/dagger; do
-            (cd "$d" && go test ./...)
+          for d in $GO_MODULES; do
+            echo "::group::$d"
+            (cd "$d" && go vet ./... && go build ./... && go test -race ./...)
+            echo "::endgroup::"
           done
-      - name: Test operator (envtest suite via Makefile)
+      - name: modules build outside the workspace (what the images do)
+        run: |
+          for d in $GO_MODULES; do
+            (cd "$d" && GOWORK=off go build ./...) || { echo "GOWORK=off build failed in $d — run GOWORK=off go mod tidy"; exit 1; }
+          done
+      - name: collector cross-compiles for both node architectures
+        run: |
+          cd services/collector
+          GOOS=linux GOARCH=amd64 go build ./...
+          GOOS=linux GOARCH=arm64 go build ./...
+      - name: operator (envtest suite)
         run: make -C services/operator test
+
+  integration:
+    name: Go — integration (ClickHouse 26.8 + Postgres 18)
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:26.8-alpine
+        env:
+          CLICKHOUSE_USER: kubehero
+          CLICKHOUSE_PASSWORD: kubehero
+          CLICKHOUSE_DB: kubehero
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports: ["19000:9000", "18123:8123"]
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8123/ping"
+          --health-interval 5s --health-timeout 3s --health-retries 30
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: kubehero
+          POSTGRES_PASSWORD: kubehero
+          POSTGRES_DB: kubehero
+        ports: ["15432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kubehero"
+          --health-interval 5s --health-timeout 3s --health-retries 30
+    env:
+      KUBEHERO_TEST_CLICKHOUSE_URL: clickhouse://kubehero:kubehero@localhost:19000/kubehero
+      KUBEHERO_TEST_POSTGRES_URL: postgres://kubehero:kubehero@localhost:15432/kubehero?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: control-plane integration tests
+        run: cd services/control-plane && go test -tags integration -count=1 ./...
+      - name: migrate subcommand is idempotent
+        run: |
+          cd services/control-plane
+          export DATABASE_URL="$KUBEHERO_TEST_POSTGRES_URL" CLICKHOUSE_URL="$KUBEHERO_TEST_CLICKHOUSE_URL"
+          go run . migrate && go run . migrate
 
   govulncheck:
     name: Go — govulncheck
@@ -33,16 +99,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.5"
+          go-version: ${{ env.GO_VERSION }}
       - name: govulncheck every module
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          for d in services/advisor services/control-plane services/collector services/pricing-engine services/operator cli/kubehero packages/cost-model; do
+          for d in $GO_MODULES; do
             (cd "$d" && govulncheck ./...)
           done
 
   js:
-    name: JS — typecheck + lint
+    name: JS — typecheck + test + build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,33 +116,77 @@ jobs:
         with: { version: 9.15.0 }
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r typecheck
       - run: pnpm -r run test
+      - run: pnpm --filter @kubehero/dashboard build
+
+  images:
+    name: image · ${{ matrix.name }} (build only)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: control-plane,  dockerfile: services/control-plane/Dockerfile }
+          - { name: collector,      dockerfile: services/collector/Dockerfile }
+          - { name: operator,       dockerfile: services/operator/Dockerfile }
+          - { name: advisor,        dockerfile: services/advisor/Dockerfile }
+          - { name: pricing-engine, dockerfile: services/pricing-engine/Dockerfile }
+          - { name: cli,            dockerfile: cli/kubehero/Dockerfile }
+          - { name: dashboard,      dockerfile: apps/dashboard/Dockerfile }
+          - { name: demo-generator, dockerfile: infra/demo/generator/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
 
   helm:
-    name: Helm — lint + template
+    name: Helm — lint + template + schema-validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
-      - name: Resolve subchart dependencies
-        # Required because Chart.yaml declares optional subcharts
-        # (postgresql/clickhouse/dex/trivy/etc). All conditions default
-        # to false in values.yaml so the rendered output stays minimal.
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz
+          sudo mv kubeconform /usr/local/bin/
+      - name: Resolve optional subchart dependencies
         run: helm dep update deploy/helm/kubehero
       - run: helm lint deploy/helm/kubehero
-      - name: Template with default values (every embedded:false)
-        run: helm template kh deploy/helm/kubehero > /dev/null
-      - name: Template with production overlay
-        run: helm template kh deploy/helm/kubehero -f deploy/helm/kubehero/values.production.yaml > /dev/null
+      - run: helm lint deploy/helm/kubehero -f deploy/helm/kubehero/values.production.yaml
+      - name: Render + validate every supported shape
+        run: |
+          set -e
+          c=deploy/helm/kubehero
+          render() { helm template kh "$c" "$@" | kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.33.0; }
+          render
+          render -f "$c/values.production.yaml"
+          render -f "$c/values.airgap.yaml"
+          render --set networkPolicies.enabled=true --set ingress.enabled=true
+          render --set collector.ebpf.enabled=false --set controlPlane.auth.apiKeysSecret=extra
+          render --set controlPlane.enabled=false --set dashboard.enabled=false --set advisor.enabled=false \
+                 --set cluster.tokenSecret=hub --set controlPlane.url=https://hub.example.com \
+                 --set postgresql.embedded=false --set clickhouse.embedded=false
 
   proto:
-    name: Proto — buf lint
+    name: Proto — buf lint + generated code is current
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-action@v1
-        with: { token: "" }
+        with:
+          setup_only: true
+      - run: cd packages/proto && buf lint
+      - name: buf generate is a no-op
+        run: |
+          cd packages/proto && buf generate
+          git diff --exit-code -- gen/ || { echo "generated code is stale — run task proto"; exit 1; }
