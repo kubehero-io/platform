@@ -383,7 +383,8 @@ export function demoCostSeries(req: DemoSeriesRequest, now = Date.now()): CostSe
   const d = new Date(now);
   const monthStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
   const monthEnd = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
-  const allDaily = demoDailyTotal(filters, now, 7);
+  const withIdle = !filters.namespace && !filters.workload && !filters.team;
+  const allDaily = demoDailyTotal(filters, now, 7, withIdle ? idleMonthly : null);
   const avg7 = allDaily.reduce((a, b) => a + b, 0) / Math.max(1, allDaily.length);
   const mtdDays = (now - monthStart) / DAY;
   const forecast = avg7 * mtdDays + avg7 * ((monthEnd - now) / DAY);
@@ -391,11 +392,16 @@ export function demoCostSeries(req: DemoSeriesRequest, now = Date.now()): CostSe
   return { times, stepMs, series, totalUsd: totalUsdAll, forecastMonthUsd: forecast };
 }
 
-function demoDailyTotal(filters: Record<string, string>, now: number, days: number): number[] {
+function demoDailyTotal(filters: Record<string, string>, now: number, days: number, idleMonthly: Record<string, number> | null): number[] {
+  const idlePerDay = idleMonthly
+    ? Object.entries(idleMonthly)
+        .filter(([cluster]) => !filters.cluster || filters.cluster === cluster)
+        .reduce((s, [, m]) => s + (m * 24) / MONTH_H, 0)
+    : 0;
   const out: number[] = [];
   for (let i = days; i >= 1; i--) {
     const t = Math.floor((now - i * DAY) / DAY) * DAY;
-    let s = 0;
+    let s = idlePerDay;
     for (const wl of demoWorkloads()) {
       if (!matchesFilters(wl, filters)) continue;
       s += (totalUsd(wl) * 24 * shapeAt(wl, t, now, DAY)) / MONTH_H;

@@ -52,15 +52,14 @@ export function StatTile({
           Icon && <Icon className="h-3.5 w-3.5 text-[var(--color-fg-faint)]" />
         )}
       </div>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate font-mono text-[22px] tracking-tight" style={{ color: tone }}>
-          {value}
-        </span>
-        {series && series.length > 1 && (
-          <Sparkline values={series} color={seriesColor ?? tone} width={84} height={24} ariaLabel={`${label} trend`} />
-        )}
-      </div>
-      {sub && <div className="truncate font-mono text-[11px] text-[var(--color-fg-dim)]">{sub}</div>}
+      <span className="truncate font-mono text-[22px] leading-tight tracking-tight" style={{ color: tone }} title={typeof value === "string" ? value : undefined}>
+        {value}
+      </span>
+      {series && series.length > 1 && (
+        // Full-width trend under the number: tiles stay readable at 6-up.
+        <Sparkline values={series} color={seriesColor ?? tone} width={200} height={22} className="h-[22px] w-full" ariaLabel={`${label} trend`} />
+      )}
+      {sub && <div className="truncate font-mono text-[11px] text-[var(--color-fg-dim)]" title={typeof sub === "string" ? sub : undefined}>{sub}</div>}
     </>
   );
   const cls = "flex min-w-0 flex-col gap-2 bg-[var(--color-bg-raised)] px-5 py-4";
