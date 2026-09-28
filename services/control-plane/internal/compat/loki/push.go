@@ -353,8 +353,7 @@ var (
 	}
 )
 
-// take returns the first present key's value and removes the mapped
-// keys from rest (except keepInRest ones, which also stay as labels).
+// take returns the value of the first key present in rest.
 func take(rest map[string]string, keys []string) string {
 	for _, k := range keys {
 		if v, ok := rest[k]; ok && v != "" {
@@ -370,8 +369,10 @@ func drop(rest map[string]string, keys []string) {
 	}
 }
 
-// ToEntries maps a Loki stream onto LogEntry protos (shared with the
-// OTLP shim's tests) and reports the stream's own cluster label.
+// toEntries maps a Loki stream onto LogEntry protos and reports the
+// stream's own cluster label. Labels that became columns are removed
+// from the extra labels; app-style labels used for workload stay too,
+// so {app="x"} keeps working.
 func toEntries(s pushStream) (cluster string, out []*kuberov1.LogEntry) {
 	rest := make(map[string]string, len(s.labels))
 	for k, v := range s.labels {
