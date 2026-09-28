@@ -4,8 +4,9 @@
 // Live tail: LogsService.TailLogs (a Connect server stream) re-framed as
 // Server-Sent Events for the browser. Auth is the caller's own session
 // (API routes are outside proxy.ts's matcher, so we check here) and the
-// upstream call carries the user's token. Without a control plane the
-// demo store is tailed instead — one batch per second.
+// upstream call carries the user's token. Without a control plane (or
+// with one that has no LogsService yet) the demo store is tailed instead
+// — one batch per second.
 //
 // GET /api/logs/tail?q=<logql>[&cluster=<id>]
 //   event: lines  data: {lines: LogLine[], dropped: number}
@@ -51,6 +52,9 @@ export async function GET(req: NextRequest) {
     { signal: req.signal },
   );
   if (!opened.ok) {
+    // A control plane that predates LogsService: tail the demo store, as
+    // the page's own queries already fell back to it (its badge says demo).
+    if (opened.error.code === "unimplemented") return demoTailResponse(query, req.signal);
     const status = opened.error.code === "unauthenticated" ? 401 : opened.error.code === "permission_denied" ? 403 : opened.error.code === "invalid_argument" ? 400 : 502;
     return Response.json({ error: { code: opened.error.code, message: opened.error.message } }, { status });
   }

@@ -76,6 +76,8 @@ export type CallOptions = {
    * (route handlers that must answer JSON/SSE) just returns the error.
    */
   onExpired?: "redirect" | "return";
+  /** Codes that are an expected answer here (a probe), not worth an error log line. */
+  expected?: readonly RpcError["code"][];
 };
 
 const ENV: Record<Upstream, { url: string; token: string; tag: string }> = {
@@ -255,7 +257,9 @@ export async function callUnary<Res>(
 
   if (!result.ok) {
     // Never log credentials or request bodies — method + code is enough to debug.
-    console.error(`[${ENV[u].tag}]`, method, result.error.code, result.error.status ?? "", result.error.message);
+    if (!opts.expected?.includes(result.error.code)) {
+      console.error(`[${ENV[u].tag}]`, method, result.error.code, result.error.status ?? "", result.error.message);
+    }
     if (
       result.error.code === "unauthenticated" &&
       cred.source === "user" &&

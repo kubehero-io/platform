@@ -96,6 +96,23 @@ describe("resolveCredential", () => {
 });
 
 describe("callUnary", () => {
+  it("logs failures unless the caller marked the code as an expected answer", async () => {
+    vi.stubEnv("CONTROL_PLANE_URL", CP);
+    stubFetch(async () => ({
+      ok: false,
+      status: 401,
+      text: async () => JSON.stringify({ code: "unauthenticated", message: "missing Authorization header" }),
+    }));
+    const log = vi.mocked(console.error);
+    const probe = { credential: { header: null, source: "none" as const }, onExpired: "return" as const };
+    await callUnary("cp", "S", "WhoAmI", {}, { ...probe, expected: ["unauthenticated"] });
+    expect(log).not.toHaveBeenCalled();
+    await callUnary("cp", "S", "WhoAmI", {}, { ...probe, expected: ["permission_denied"] });
+    expect(log).toHaveBeenCalledTimes(1);
+    // The log line names method and code — never a credential or body.
+    expect(log.mock.calls[0].join(" ")).toContain("WhoAmI unauthenticated");
+  });
+
   it("returns not_configured without fetching when the URL is unset", async () => {
     vi.stubEnv("CONTROL_PLANE_URL", "");
     const mock = stubFetch(async () => {

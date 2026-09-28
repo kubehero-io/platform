@@ -89,7 +89,7 @@ export default async function LoginPage({
 
   // Token mode. Probe whether the control plane runs open (dev) so we can
   // offer a tokenless sign-in; any failure just hides that option.
-  const probe = await whoAmI({ credential: { header: null, source: "none" }, timeoutMs: 2_500 });
+  const probe = await whoAmI({ credential: { header: null, source: "none" }, timeoutMs: 2_500, expected: ["unauthenticated"] });
   const openControlPlane = probe.ok && probe.data.authRequired === false;
 
   return (
