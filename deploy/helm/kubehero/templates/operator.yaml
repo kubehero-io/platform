@@ -23,10 +23,30 @@ spec:
       {{- if gt (int .Values.operator.replicas) 1 }}
       affinity: {{- include "kubehero.antiAffinity" (dict "component" "operator") | nindent 8 }}
       {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: manager
           image: {{ include "kubehero.image" (dict "root" . "image" .Values.operator.image) }}
-          args: ["--leader-elect"]
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--leader-elect", "--health-probe-bind-address=:8081"]
+          ports:
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet: { path: /readyz, port: health }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext: {{- include "kubehero.containerSecurityContext" . | nindent 12 }}
+          resources: {{- toYaml .Values.operator.resources | nindent 12 }}
           env:
             # When CONTROL_PLANE_URL is set, the operator's CeilingPolicy
             # reconciler asks the cp's GetBurnRate RPC (which reads
@@ -37,15 +57,16 @@ spec:
             # events as they're emitted.
             {{- if .Values.operator.controlPlane.enabled }}
             - name: CONTROL_PLANE_URL
-              value: {{ .Values.operator.controlPlane.url | default (printf "http://%s-control-plane.%s.svc:%v" (include "kubehero.fullname" .) .Release.Namespace .Values.controlPlane.service.port) | quote }}
+              value: {{ .Values.operator.controlPlane.url | default (include "kubehero.controlPlaneURL" .) | quote }}
             {{- end }}
             - name: CLUSTER_ID
               value: {{ .Values.cluster.id | default .Release.Name | quote }}
-            {{- if .Values.cluster.tokenSecret }}
             - name: CONTROL_PLANE_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.cluster.tokenSecret }}
-                  key: token
+                  name: {{ include "kubehero.clusterTokenSecret" . }}
+                  key: {{ include "kubehero.clusterTokenKey" . }}
+            {{- with .Values.operator.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
 {{- end }}

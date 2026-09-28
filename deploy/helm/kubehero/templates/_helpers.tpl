@@ -1,9 +1,17 @@
 {{/* Full resource name. */}}
+{{/* Full resource name: "<release>-kubehero", or just "<release>" when the
+     release name already contains the chart name (release "kubehero" →
+     "kubehero-control-plane", not "kubehero-kubehero-control-plane"). */}}
 {{- define "kubehero.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
-{{- printf "%s-%s" .Release.Name (.Values.nameOverride | default .Chart.Name) | trunc 63 | trimSuffix "-" -}}
+{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -61,4 +69,80 @@ podAntiAffinity:
               values:
                 - {{ .component }}
         topologyKey: topology.kubernetes.io/zone
+{{- end -}}
+
+{{/*
+  A random secret value that survives upgrades: reuse the key from the
+  live Secret when it exists (lookup returns nothing under
+  `helm template` / --dry-run, which then just renders a fresh value).
+  Usage: include "kubehero.persistentRandom" (dict "root" . "secret" "name" "key" "k" "length" 32)
+*/}}
+{{- define "kubehero.persistentRandom" -}}
+{{- $existing := lookup "v1" "Secret" .root.Release.Namespace .secret -}}
+{{- if and $existing $existing.data (hasKey $existing.data .key) -}}
+{{- index $existing.data .key | b64dec -}}
+{{- else -}}
+{{- randAlphaNum (int .length) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Secret holding the control plane's generated credentials. */}}
+{{- define "kubehero.controlPlaneSecret" -}}
+{{- .Values.controlPlane.existingSecret | default (printf "%s-control-plane" (include "kubehero.fullname" .)) -}}
+{{- end -}}
+
+{{/* Secret + key the collector / operator authenticate with. */}}
+{{- define "kubehero.clusterTokenSecret" -}}
+{{- if .Values.cluster.tokenSecret -}}
+{{- .Values.cluster.tokenSecret -}}
+{{- else -}}
+{{- include "kubehero.controlPlaneSecret" . -}}
+{{- end -}}
+{{- end -}}
+{{- define "kubehero.clusterTokenKey" -}}
+{{- if .Values.cluster.tokenSecret -}}token{{- else -}}cluster-token{{- end -}}
+{{- end -}}
+
+{{/* Base URL of the control plane every in-cluster client talks to. */}}
+{{- define "kubehero.controlPlaneURL" -}}
+{{- if .Values.controlPlane.url -}}
+{{- .Values.controlPlane.url -}}
+{{- else -}}
+{{- printf "http://%s-control-plane.%s.svc:%v" (include "kubehero.fullname" .) .Release.Namespace .Values.controlPlane.service.port -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Postgres DSN source: (secret name, key). */}}
+{{- define "kubehero.postgresSecret" -}}
+{{- if .Values.postgresql.embedded -}}
+{{- printf "%s-postgres" (include "kubehero.fullname" .) -}}
+{{- else -}}
+{{- .Values.postgresql.external.existingSecret -}}
+{{- end -}}
+{{- end -}}
+{{- define "kubehero.postgresSecretKey" -}}
+{{- if .Values.postgresql.embedded -}}url{{- else -}}{{ .Values.postgresql.external.existingSecretKey | default "url" }}{{- end -}}
+{{- end -}}
+
+{{/* ClickHouse DSN source: (secret name, key). */}}
+{{- define "kubehero.clickhouseSecret" -}}
+{{- if .Values.clickhouse.embedded -}}
+{{- printf "%s-clickhouse" (include "kubehero.fullname" .) -}}
+{{- else -}}
+{{- .Values.clickhouse.external.existingSecret -}}
+{{- end -}}
+{{- end -}}
+{{- define "kubehero.clickhouseSecretKey" -}}
+{{- if .Values.clickhouse.embedded -}}url{{- else -}}{{ .Values.clickhouse.external.existingSecretKey | default "url" }}{{- end -}}
+{{- end -}}
+
+{{/* Restricted container securityContext shared by stateless components. */}}
+{{- define "kubehero.containerSecurityContext" -}}
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: true
+runAsNonRoot: true
+capabilities:
+  drop: ["ALL"]
+seccompProfile:
+  type: RuntimeDefault
 {{- end -}}

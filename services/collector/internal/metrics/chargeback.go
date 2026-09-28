@@ -7,8 +7,8 @@
 package metrics
 
 import (
-	"fmt"
 	"io"
+	"sort"
 )
 
 // Schema documents every metric the collector exports. The chart's
@@ -19,9 +19,9 @@ const schema = `
 # TYPE kubehero_pod_cost_usd_per_second gauge
 # HELP kubehero_pod_recoverable_usd_per_second Portion of pod cost reclaimable via right-sizing (requested − used, priced out).
 # TYPE kubehero_pod_recoverable_usd_per_second gauge
-# HELP kubehero_pod_cpu_millicores Pod CPU usage in millicores (1s resolution, eBPF-attributed).
+# HELP kubehero_pod_cpu_millicores Pod CPU usage in millicores, measured by the kubelet summary API (0 when stats are unavailable).
 # TYPE kubehero_pod_cpu_millicores gauge
-# HELP kubehero_pod_memory_bytes Pod resident memory bytes.
+# HELP kubehero_pod_memory_bytes Pod memory working set in bytes, measured by the kubelet summary API.
 # TYPE kubehero_pod_memory_bytes gauge
 # HELP kubehero_pod_gpu_util_ratio GPU utilization as a ratio [0, 1]. Present only for pods using GPUs.
 # TYPE kubehero_pod_gpu_util_ratio gauge
@@ -31,9 +31,8 @@ const schema = `
 # TYPE kubehero_up gauge
 `
 
-// Series is a single sample emitted by the collector. In production
-// eBPF drives real values; the scaffold ships demo series so dashboards
-// and recording rules have data to render.
+// Series is a single sample emitted by the collector: the cost scanner
+// produces them from its last scan; --demo adds synthetic ones.
 type Series struct {
 	Name   string
 	Labels map[string]string
@@ -46,19 +45,27 @@ func WriteSchema(w io.Writer) {
 }
 
 // WriteSeries formats a single series in Prometheus exposition format.
+// Labels are written in sorted order with values escaped.
 func WriteSeries(w io.Writer, s Series) {
-	var labels string
-	first := true
-	for k, v := range s.Labels {
-		if !first {
-			labels += ","
-		}
-		labels += fmt.Sprintf(`%s="%s"`, k, v)
-		first = false
+	names := make([]string, 0, len(s.Labels))
+	for k := range s.Labels {
+		names = append(names, k)
 	}
-	if labels != "" {
-		fmt.Fprintf(w, "%s{%s} %g\n", s.Name, labels, s.Value)
-	} else {
-		fmt.Fprintf(w, "%s %g\n", s.Name, s.Value)
+	sort.Strings(names)
+	values := make([]string, len(names))
+	for i, k := range names {
+		values[i] = s.Labels[k]
+	}
+	writeSample(w, s.Name, names, values, s.Value)
+}
+
+// WriteAll writes series grouped by metric name (the exposition format
+// requires a family's samples to be contiguous), preserving the
+// relative order within each family.
+func WriteAll(w io.Writer, series []Series) {
+	sorted := append([]Series(nil), series...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+	for _, s := range sorted {
+		WriteSeries(w, s)
 	}
 }

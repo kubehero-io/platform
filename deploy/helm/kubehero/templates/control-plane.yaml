@@ -1,8 +1,10 @@
 {{- if .Values.controlPlane.enabled -}}
+{{- $fullname := include "kubehero.fullname" . }}
+{{- $cpSecret := include "kubehero.controlPlaneSecret" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "kubehero.fullname" . }}-control-plane
+  name: {{ $fullname }}-control-plane
   labels: {{- include "kubehero.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.controlPlane.replicas }}
@@ -15,8 +17,17 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}
         app.kubernetes.io/component: control-plane
+      annotations:
+        # Roll the pods when generated credentials or store DSNs change.
+        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with .Values.controlPlane.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
-      serviceAccountName: {{ include "kubehero.fullname" . }}-control-plane
+      serviceAccountName: {{ $fullname }}-control-plane
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if and .Values.podSecurityContext (gt (len .Values.podSecurityContext) 0) }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- end }}
@@ -26,25 +37,116 @@ spec:
       {{- with (include "kubehero.priorityClassName" .) }}
       priorityClassName: {{ . }}
       {{- end }}
+      {{- with .Values.controlPlane.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controlPlane.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: control-plane
           image: {{ include "kubehero.image" (dict "root" . "image" .Values.controlPlane.image) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["serve", "--addr=:8080"]
+          env:
+            {{- $pgSecret := include "kubehero.postgresSecret" . }}
+            {{- if $pgSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ $pgSecret }}, key: {{ include "kubehero.postgresSecretKey" . }} }
+            {{- end }}
+            {{- $chSecret := include "kubehero.clickhouseSecret" . }}
+            {{- if $chSecret }}
+            - name: CLICKHOUSE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ $chSecret }}, key: {{ include "kubehero.clickhouseSecretKey" . }} }
+            {{- end }}
+            - name: KUBEHERO_STORE_WAIT
+              value: {{ .Values.controlPlane.storeWait | quote }}
+            {{- if eq (toString .Values.controlPlane.demoMode) "false" }}
+            - name: KUBEHERO_DEMO_MODE
+              value: "false"
+            {{- end }}
+            - name: AUDIT_HMAC_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ $cpSecret }}, key: audit-hmac-key }
+            - name: KUBEHERO_REQUIRE_AUTH
+              value: {{ .Values.controlPlane.auth.requireAuth | toString | quote }}
+            {{- if .Values.controlPlane.auth.apiKeysSecret }}
+            - name: KUBEHERO_GENERATED_API_KEYS
+              valueFrom:
+                secretKeyRef: { name: {{ $cpSecret }}, key: api-keys }
+            - name: KUBEHERO_EXTRA_API_KEYS
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.controlPlane.auth.apiKeysSecret }}, key: api-keys }
+            - name: KUBEHERO_API_KEYS
+              value: "$(KUBEHERO_GENERATED_API_KEYS),$(KUBEHERO_EXTRA_API_KEYS)"
+            {{- else }}
+            - name: KUBEHERO_API_KEYS
+              valueFrom:
+                secretKeyRef: { name: {{ $cpSecret }}, key: api-keys }
+            {{- end }}
+            {{- with .Values.controlPlane.auth.oidc }}
+            {{- if .issuerURL }}
+            - name: OIDC_ISSUER_URL
+              value: {{ .issuerURL | quote }}
+            - name: OIDC_AUDIENCE
+              value: {{ .audience | quote }}
+            - name: KUBEHERO_GROUP_ROLES
+              value: {{ .groupRoles | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.controlPlane.auth.scimTokenSecret }}
+            - name: KUBEHERO_SCIM_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.controlPlane.auth.scimTokenSecret }}, key: token }
+            {{- end }}
+            {{- with .Values.controlPlane.alertChannels }}
+            - name: KUBEHERO_ALERT_CHANNELS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.controlPlane.pricing }}
+            {{- if .netEgressUSDPerGB }}
+            - name: KUBEHERO_NET_EGRESS_USD_PER_GB
+              value: {{ .netEgressUSDPerGB | toString | quote }}
+            {{- end }}
+            {{- if .netCrossZoneUSDPerGB }}
+            - name: KUBEHERO_NET_CROSS_ZONE_USD_PER_GB
+              value: {{ .netCrossZoneUSDPerGB | toString | quote }}
+            {{- end }}
+            {{- if .logUSDPerGB }}
+            - name: KUBEHERO_LOG_USD_PER_GB
+              value: {{ .logUSDPerGB | toString | quote }}
+            {{- end }}
+            {{- end }}
+            - name: KUBEHERO_DASHBOARD_URL
+              value: {{ printf "http://%s-dashboard.%s.svc:%v" $fullname .Release.Namespace .Values.dashboard.service.port | quote }}
+            {{- with .Values.controlPlane.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8080
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+            failureThreshold: 36
           readinessProbe:
             httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
           livenessProbe:
             httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+          securityContext: {{- include "kubehero.containerSecurityContext" . | nindent 12 }}
           resources: {{- toYaml .Values.controlPlane.resources | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "kubehero.fullname" . }}-control-plane
-  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  name: {{ $fullname }}-control-plane
+  labels:
+    {{- include "kubehero.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
 spec:
   selector:
     app.kubernetes.io/name: {{ .Chart.Name }}

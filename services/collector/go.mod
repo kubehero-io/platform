@@ -12,6 +12,17 @@ require (
 	k8s.io/client-go v0.35.0
 )
 
+require (
+	github.com/fsnotify/fsnotify v1.9.0
+	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6
+)
+
+require (
+	connectrpc.com/connect v1.20.0
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+)
+
 // cost-model is never published on its own; it resolves through the
 // repo-root go.work in-workspace and through this replace elsewhere.
 replace github.com/kubehero-io/platform/packages/cost-model => ../../packages/cost-model
@@ -43,12 +54,12 @@ require (
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/term v0.39.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	golang.org/x/time v0.14.0
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/klog/v2 v2.140.0 // indirect
+	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect

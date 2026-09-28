@@ -1,40 +1,38 @@
 # syntax=docker/dockerfile:1.7
 #
-# Multi-stage build for the collector (node agent). Built from the repo
-# root inside the Go workspace so packages/proto and packages/cost-model
-# resolve locally. The eBPF objects are generated ahead of time (bpf2go)
-# and embedded, so no clang is needed here.
+# Collector (node agent: cost, logs, profiles, eBPF). eBPF objects are generated ahead of time (bpf2go) and embedded — no clang here. Built from the REPO ROOT:
+#
+#   docker build -f services/collector/Dockerfile .
+#
+# Every module replaces packages/* with the in-repo copies, so the build
+# runs outside the Go workspace (GOWORK=off) and only needs packages/ plus
+# this module in the context — adding a module elsewhere in the repo never
+# breaks this image.
 
 FROM golang:1.26.5-alpine AS build
 WORKDIR /src
 RUN apk add --no-cache git
+ENV GOWORK=off CGO_ENABLED=0
 
-COPY go.work go.work.sum* ./
-COPY packages/proto/go.mod                  packages/proto/go.mod
-COPY packages/cost-model/go.mod             packages/cost-model/go.mod
-COPY services/advisor/go.mod                services/advisor/go.mod
-COPY services/collector/go.mod              services/collector/go.mod
-COPY services/collector/go.sum*             services/collector/
-COPY services/control-plane/go.mod          services/control-plane/go.mod
-COPY services/pricing-engine/go.mod         services/pricing-engine/go.mod
-COPY services/operator/go.mod               services/operator/go.mod
-COPY cli/kubehero/go.mod                    cli/kubehero/go.mod
-COPY infra/dagger/go.mod                    infra/dagger/go.mod
-
+# 1) module files first so dependency downloads cache across source edits
+COPY packages/proto/go.mod packages/proto/go.sum packages/proto/
+COPY packages/cost-model/go.mod packages/cost-model/
+COPY services/collector/go.mod services/collector/go.sum services/collector/
 RUN --mount=type=cache,target=/root/go/pkg/mod \
-    cd services/collector && go mod download -x
+    cd services/collector && go mod download
 
-COPY packages/proto/                packages/proto/
-COPY packages/cost-model/           packages/cost-model/
-COPY services/collector/            services/collector/
+# 2) source
+COPY packages/ packages/
+COPY services/collector/ services/collector/
 
+ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 ARG VERSION=dev
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/go/pkg/mod \
     cd services/collector && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w -X main.version=${VERSION}" -trimpath -o /out/collector .
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/collector .
 
 # ─── runtime ───────────────────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12:nonroot

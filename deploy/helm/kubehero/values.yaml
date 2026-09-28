@@ -1,5 +1,8 @@
 # Default values for kubehero.
-# Every component is on by default; disable individually for bring-your-own.
+# Every component is on by default — including single-replica Postgres
+# and ClickHouse — so `helm install` shows real data from the first
+# minute. Disable individually or point at external stores for
+# production (see values.production.yaml).
 
 nameOverride: ""
 fullnameOverride: ""
@@ -17,13 +20,20 @@ image:
 imagePullSecrets: []
 
 # ─── Cluster identity ─────────────────────────────────────────────────────
-# Stamped on every ingest sample so the control plane attributes rows
-# to the right cluster. The CLI's `kubehero cluster add` mints both
-# the id (UUID-shaped or slug, your choice) and the token; the helm
-# install command it prints sets these values via --set.
+# Stamped on every sample so the control plane attributes rows to the
+# right cluster.
+#
+# Single-cluster install (default): leave tokenSecret empty. The chart
+# generates an in-cluster enrollment token (Secret
+# <release>-kubehero-cluster-token) that this release's control plane
+# accepts, and the collector + operator use it automatically.
+#
+# Federated install (collector-only in a workload cluster, pointing at a
+# hub control plane): run `kubehero cluster add`, store the printed token
+# in a Secret (key: token) and set tokenSecret + controlPlane.url.
 cluster:
   id: ""                      # e.g. "eks-use1-prod" — defaults to Release.Name
-  tokenSecret: ""             # name of a Secret carrying key=token (member+ role)
+  tokenSecret: ""             # existing Secret carrying key=token
 
 rbac:
   create: true
@@ -57,8 +67,49 @@ controlPlane:
   service:
     port: 8080
   resources:
-    requests: { cpu: 100m, memory: 128Mi }
-    limits:   { cpu: 1,    memory: 512Mi }
+    requests: { cpu: 200m, memory: 256Mi }
+    limits:   { cpu: 2,    memory: 1Gi }
+  # Point collectors/operators/advisor/dashboard at a control plane
+  # other than this release's (federated installs). Empty = this
+  # release's Service.
+  url: ""
+  # auto  — serve clearly-labelled demo fixtures only for signals whose
+  #         store is not configured (fresh clusters still look alive).
+  # false — never serve fixtures; missing stores fail loudly
+  #         (FailedPrecondition). Recommended for production.
+  demoMode: auto
+  # How long to wait for configured Postgres/ClickHouse at startup
+  # before exiting (the pod restarts and tries again).
+  storeWait: 2m
+  auth:
+    # Reject anonymous RPCs. The chart wires generated service tokens
+    # into every in-cluster client, so this is safe to keep on.
+    requireAuth: true
+    # Extra API keys: a Secret with key "api-keys" holding a comma list
+    # of "<token>:<role>" (role = owner|admin|auditor|member|viewer).
+    apiKeysSecret: ""
+    oidc:
+      issuerURL: ""           # e.g. https://dex.example.com
+      audience: ""
+      groupRoles: ""          # "kubehero-admins=admin,ml=member"
+    # SCIM 2.0 user provisioning: a Secret with key "token".
+    scimTokenSecret: ""
+  # Bring your own Secret with keys audit-hmac-key, admin-token,
+  # service-token, cluster-token, session-secret instead of letting the
+  # chart generate (and persist) them.
+  existingSecret: ""
+  # Channels paged when a policy kill-switch is armed / disarmed.
+  alertChannels: []           # ["slack://hooks.slack.com/services/…"]
+  pricing:
+    # Network $/GB. Empty = per-cloud defaults (see docs/network).
+    netEgressUSDPerGB: ""
+    netCrossZoneUSDPerGB: ""
+    # What a GB of ingested logs costs you (log-volume $ attribution).
+    logUSDPerGB: ""
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  extraEnv: []
 
 collector:
   enabled: true
@@ -70,8 +121,40 @@ collector:
   tolerations:
     - operator: Exists
   resources:
-    requests: { cpu: 50m,  memory: 64Mi }
-    limits:   { cpu: 500m, memory: 256Mi }
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: "1",  memory: 512Mi }
+  # Container logs from /var/log/pods → ClickHouse (Loki-class).
+  logs:
+    enabled: true
+    # Per-container token bucket; lines over the limit are dropped and
+    # counted (kubehero_collector_log_lines_dropped_total).
+    rateLimit: 2000
+    # The collector's own namespace is always excluded.
+    excludeNamespaces: []
+    # Where to start reading files that exist at the collector's first
+    # start: end (default, no backfill) | start.
+    startFrom: end
+  # eBPF kernel telemetry. Needs Linux ≥ 5.8 with cgroup v2 and a
+  # privileged container; degrades gracefully when unavailable.
+  ebpf:
+    enabled: true
+    netflow: true             # cgroup_skb flow accounting + TCP retransmits
+    profiler: true            # whole-node CPU profiling (perf_event)
+    profileHz: 49
+  # pprof scraping of annotated pods (profiles.grafana.com/* or
+  # kubehero.io/profile*).
+  profiling:
+    scrape: true
+    interval: 60s
+  usageInterval: 30s          # container usage history for rightsizing
+  events: true                # OOM kills, crash loops, unschedulable pods
+  hostPaths:
+    logs: /var/log/pods
+    state: /var/lib/kubehero
+    cgroup: /sys/fs/cgroup
+  podAnnotations: {}
+  extraArgs: []
+  extraEnv: []
 
 operator:
   enabled: true
@@ -79,17 +162,19 @@ operator:
   image:
     name: operator
     tag: ""
-  # Where the operator reads live burn rates (GetBurnRate RPC) and posts
-  # audit events. When disabled — or when the URL resolves to nothing —
-  # the operator runs with a stub provider that always reads 0, so
-  # CeilingPolicies can NEVER trip (enforcement is effectively dry-run).
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+  # Where the operator reads live burn rates (GetBurnRate) and
+  # rightsizing recommendations, and posts audit events. When disabled
+  # the operator runs observe-only: CeilingPolicies can NEVER trip and
+  # RightsizingPolicies never apply.
   controlPlane:
-    # Flip to false to sever the operator from the control-plane and run
-    # observe-only (the operator logs this loudly at startup).
     enabled: true
-    # Override the endpoint; empty means the chart's own control-plane
-    # Service (http://<release>-control-plane.<ns>.svc:<port>).
+    # Override the endpoint; empty means controlPlane.url or this
+    # release's control-plane Service.
     url: ""
+  extraEnv: []
 
 pricingEngine:
   enabled: true
@@ -99,11 +184,18 @@ pricingEngine:
     tag: ""
   service:
     port: 8082
-  schedule: "0 */6 * * *"
+  resources:
+    requests: { cpu: 25m,  memory: 48Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+  # Optional: GCP Cloud Billing Catalog API key (Secret key "api-key").
+  # AWS and Azure public price lists need no credentials.
+  gcpBillingSecret: ""
+  extraEnv: []
 
-# The advisor is KubeHero's agentic layer: read-only briefings +
-# proposed guarded actions served over Connect-RPC. It only calls the
-# control-plane's read RPCs and never touches the Kubernetes API.
+# The advisor is KubeHero's agentic layer: read-only briefings,
+# "Ask KubeHero" investigations and proposed guarded actions over
+# Connect-RPC. It only calls the control-plane's read RPCs and never
+# touches the Kubernetes API.
 advisor:
   enabled: true
   replicas: 1
@@ -115,6 +207,8 @@ advisor:
   resources:
     requests: { cpu: 50m,  memory: 64Mi }
     limits:   { cpu: 500m, memory: 256Mi }
+  # Claude model for the LLM brain (empty = the binary's default).
+  model: ""
   # LLM brain (Claude). Leave existingSecret empty to run the built-in
   # deterministic rules brain — no external API calls at all.
   anthropic:
@@ -122,6 +216,7 @@ advisor:
     existingSecret: ""
     # Key inside that Secret.
     secretKey: "api-key"
+  extraEnv: []
 
 dashboard:
   enabled: true
@@ -131,6 +226,14 @@ dashboard:
     tag: ""
   service:
     port: 3001
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: "1",  memory: 512Mi }
+  # Sign-in: "token" (paste an API token; each user acts with their own
+  # token and role) or "demo" (any email, demo data only — never with
+  # real stores).
+  authMode: token
+  extraEnv: []
 
 # ───────────────────────────────────────────────────────────────────────────
 # Chargeback / showback
@@ -217,46 +320,47 @@ airgap: false
 # ═══════════════════════════════════════════════════════════════════════════
 # STACK DEPENDENCIES
 # ═══════════════════════════════════════════════════════════════════════════
-# Every block below has two modes:
-#   · embedded: true  → install the upstream subchart in this release
-#   · embedded: false → point at an existing deployment via `external`
-# Greenfield clusters enable embedded; mature clusters use external.
+# Postgres + ClickHouse are built into this chart (official images, one
+# replica each, persistent volumes) and on by default; flip `embedded:
+# false` and point `external.existingSecret` at a DSN for managed stores.
+# The remaining blocks are optional upstream subcharts (off by default —
+# run `helm dep update` before enabling one).
 # ═══════════════════════════════════════════════════════════════════════════
 
-# ─── Postgres (metadata, audit, policy state) ──────────────────────────────
+# ─── Postgres (metadata: clusters, policies, audit log, alert rules) ─────
 postgresql:
-  # CloudNativePG — the CNCF-sandbox Kubernetes operator for Postgres.
-  embedded: false
+  # embedded: true → a single-replica Postgres StatefulSet in this
+  # release (official postgres image, persistent volume). Great for
+  # getting started; use a managed Postgres in production.
+  embedded: true
+  image: postgres:18-alpine
+  storage:
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: "1",  memory: 1Gi }
   external:
-    host: ""
-    port: 5432
-    database: "kubehero"
-    sslMode: "require"
-    # auth reads from the secret below; paste creds via ExternalSecret.
-    existingSecret: "kubehero-postgres-credentials"
-  # When embedded: subchart config passes through under the 'cloudnative-pg'
-  # key; see https://cloudnative-pg.io/documentation/current/installation_upgrade/
-
-# ─── ClickHouse (time-series — billions of cost-per-pod-second points) ────
-clickhouse:
-  embedded: false
-  external:
-    host: ""
-    port: 9440
-    database: "kubehero"
-    existingSecret: "kubehero-clickhouse-credentials"
-  # Embedded install uses altinity/clickhouse-operator; see
-  # https://docs.altinity.com/clickhouse-operator/
-
-# ─── Cache / rate-limit / pub-sub ─────────────────────────────────────────
-cache:
-  # Valkey — BSD-fork of Redis, fully upstream-compatible. Ships as a
-  # subchart. Swap for DragonflyDB or external Redis via `external`.
-  embedded: false
-  external:
-    host: ""
-    port: 6379
+    # A Secret whose `existingSecretKey` holds a full DSN:
+    # postgres://user:pass@host:5432/kubehero?sslmode=verify-full
     existingSecret: ""
+    existingSecretKey: url
+
+# ─── ClickHouse (time series: cost, logs, profiles, flows, usage) ────────
+clickhouse:
+  embedded: true
+  image: clickhouse/clickhouse-server:26.8-alpine
+  storage:
+    size: 50Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: "4",  memory: 8Gi }
+  external:
+    # A Secret whose `existingSecretKey` holds a full DSN:
+    # clickhouse://user:pass@host:9000/kubehero?secure=true
+    existingSecret: ""
+    existingSecretKey: url
 
 # ─── Auth ─────────────────────────────────────────────────────────────────
 auth:
@@ -269,11 +373,6 @@ auth:
     # Customer's IdP config lives here when embedded. See
     # https://dexidp.io/docs/connectors/ for every supported source.
     connectors: []
-  # Cloud mode: WorkOS provides SSO + SCIM. Populate only for SaaS.
-  workos:
-    enabled: false
-    apiKeySecret: ""
-    clientIdSecret: ""
 
 # ─── Secrets ──────────────────────────────────────────────────────────────
 secrets:

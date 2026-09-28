@@ -12,9 +12,9 @@ var required = []struct {
 	metric string
 	labels []string
 }{
-	{"kubehero_pod_cost_usd_per_second",         []string{"team", "namespace", "pod", "nodepool", "cloud", "region"}},
-	{"kubehero_pod_recoverable_usd_per_second",  []string{"team", "namespace", "pod"}},
-	{"kubehero_pod_cpu_millicores",              []string{"team", "namespace", "pod"}},
+	{"kubehero_pod_cost_usd_per_second", []string{"team", "namespace", "pod", "nodepool", "cloud", "region"}},
+	{"kubehero_pod_recoverable_usd_per_second", []string{"team", "namespace", "pod"}},
+	{"kubehero_pod_cpu_millicores", []string{"team", "namespace", "pod"}},
 }
 
 func TestDemoExportsRequiredLabels(t *testing.T) {

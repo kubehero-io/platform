@@ -1,8 +1,10 @@
 {{- if .Values.dashboard.enabled -}}
+{{- $fullname := include "kubehero.fullname" . }}
+{{- $cpSecret := include "kubehero.controlPlaneSecret" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "kubehero.fullname" . }}-dashboard
+  name: {{ $fullname }}-dashboard
   labels: {{- include "kubehero.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.dashboard.replicas }}
@@ -16,7 +18,14 @@ spec:
         app.kubernetes.io/name: {{ .Chart.Name }}
         app.kubernetes.io/component: dashboard
     spec:
-      serviceAccountName: {{ include "kubehero.fullname" . }}-dashboard
+      serviceAccountName: {{ $fullname }}-dashboard
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       {{- with (include "kubehero.priorityClassName" .) }}
       priorityClassName: {{ . }}
       {{- end }}
@@ -26,15 +35,62 @@ spec:
       containers:
         - name: dashboard
           image: {{ include "kubehero.image" (dict "root" . "image" .Values.dashboard.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: CONTROL_PLANE_URL
+              value: {{ include "kubehero.controlPlaneURL" . | quote }}
+            {{- if .Values.controlPlane.enabled }}
+            - name: CONTROL_PLANE_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ $cpSecret }}, key: service-token }
+            - name: KUBEHERO_SESSION_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ $cpSecret }}, key: session-secret }
+            {{- end }}
+            {{- if .Values.advisor.enabled }}
+            - name: ADVISOR_URL
+              value: {{ printf "http://%s-advisor.%s.svc:%v" $fullname .Release.Namespace .Values.advisor.service.port | quote }}
+            {{- end }}
+            - name: KUBEHERO_DASHBOARD_AUTH
+              value: {{ .Values.dashboard.authMode | quote }}
+            {{- with .Values.dashboard.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 3001
+          readinessProbe:
+            httpGet: { path: /login, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources: {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          volumeMounts:
+            # Next.js writes its image/fetch cache here at runtime.
+            - name: next-cache
+              mountPath: /app/apps/dashboard/.next/cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "kubehero.fullname" . }}-dashboard
-  labels: {{- include "kubehero.labels" . | nindent 4 }}
+  name: {{ $fullname }}-dashboard
+  labels:
+    {{- include "kubehero.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
 spec:
   selector:
     app.kubernetes.io/name: {{ .Chart.Name }}

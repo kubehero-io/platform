@@ -1,8 +1,8 @@
 {{- if .Values.networkPolicies.enabled }}
 {{- $fullname := include "kubehero.fullname" . }}
-# Default-deny for the kubehero-system namespace with explicit allow rules
-# per component. Egress to storage + cloud APIs is open; intra-namespace
-# traffic is scoped to the minimum each component needs.
+{{- $name := .Chart.Name }}
+# Default-deny for the release namespace with explicit allows per
+# component. Requires a CNI that enforces NetworkPolicy.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -13,11 +13,11 @@ spec:
   podSelector: {}
   policyTypes: ["Ingress", "Egress"]
 ---
-# DNS egress — required by every pod
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ $fullname }}-allow-dns
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
 spec:
   podSelector: {}
   policyTypes: ["Egress"]
@@ -30,51 +30,60 @@ spec:
       ports:
         - { protocol: UDP, port: 53 }
         - { protocol: TCP, port: 53 }
----
-# Control plane — accepts scrape from Prometheus + RPC from dashboard/cli
 {{- if .Values.controlPlane.enabled }}
+---
+# Control plane: RPC from every KubeHero client, Prometheus scrapes, and
+# (with ingress on) external agents / CLI through the ingress controller.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ $fullname }}-control-plane
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels:
-      app.kubernetes.io/component: control-plane
+    matchLabels: { app.kubernetes.io/component: control-plane }
   policyTypes: ["Ingress", "Egress"]
   ingress:
     - from:
+        {{- range list "dashboard" "collector" "operator" "advisor" }}
         - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: dashboard
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: collector
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: {{ . }} }
+        {{- end }}
         - namespaceSelector:
             matchLabels: { kubernetes.io/metadata.name: monitoring }
+        {{- if .Values.ingress.enabled }}
+        # Ingress controllers live in their own namespaces.
+        - namespaceSelector: {}
+        {{- end }}
       ports:
-        - { protocol: TCP, port: {{ .Values.controlPlane.service.port }} }
+        - { protocol: TCP, port: 8080 }
   egress:
-    # Postgres + ClickHouse (any destination; customers lock down via external)
+    # Postgres / ClickHouse (embedded pods or external endpoints).
     - ports:
         - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 9000 }
         - { protocol: TCP, port: 9440 }
-        - { protocol: TCP, port: 6379 }
-    # Outbound HTTPS to cloud APIs + Dex issuer
+        - { protocol: TCP, port: 8123 }
+        - { protocol: TCP, port: 8443 }
+    # OIDC JWKS, cloud pricing APIs, alert webhooks (Slack, PagerDuty,
+    # Opsgenie, Teams, Alertmanager …).
     - ports:
         - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 9093 }
 {{- end }}
----
-# Collector — accepts scrape + K8s API egress
 {{- if .Values.collector.enabled }}
+---
+# Collector: egress is open on purpose — it scrapes pprof endpoints on
+# arbitrary pod ports, calls the API server, the control plane and the
+# pricing engine. Ingress: metrics scrapes only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ $fullname }}-collector
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels:
-      app.kubernetes.io/component: collector
+    matchLabels: { app.kubernetes.io/component: collector }
   policyTypes: ["Ingress", "Egress"]
   ingress:
     - from:
@@ -83,37 +92,130 @@ spec:
       ports:
         - { protocol: TCP, port: {{ .Values.collector.service.port }} }
   egress:
+    - {}
+{{- end }}
+{{- if .Values.operator.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-operator
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/component: operator }
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
     - to:
         - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: control-plane
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: control-plane }
       ports:
-        - { protocol: TCP, port: {{ .Values.controlPlane.service.port }} }
-    # K8s API
+        - { protocol: TCP, port: 8080 }
+    # Kubernetes API server
     - ports:
         - { protocol: TCP, port: 443 }
         - { protocol: TCP, port: 6443 }
 {{- end }}
+{{- if .Values.advisor.enabled }}
 ---
-# Dashboard — accepts HTTP from ingress, talks to control-plane
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-advisor
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/component: advisor }
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: dashboard }
+        {{- if .Values.ingress.enabled }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.advisor.service.port }} }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: control-plane }
+      ports:
+        - { protocol: TCP, port: 8080 }
+    # Anthropic API (only used when an API key is configured).
+    - ports:
+        - { protocol: TCP, port: 443 }
+{{- end }}
 {{- if .Values.dashboard.enabled }}
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ $fullname }}-dashboard
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
 spec:
   podSelector:
-    matchLabels:
-      app.kubernetes.io/component: dashboard
+    matchLabels: { app.kubernetes.io/component: dashboard }
   policyTypes: ["Ingress", "Egress"]
   ingress:
-    - {}   # ingress controller routes — customers scope via their own policies
+    - {}   # ingress controller / port-forward — scope with your own policies
   egress:
     - to:
         - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: control-plane
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: control-plane }
       ports:
-        - { protocol: TCP, port: {{ .Values.controlPlane.service.port }} }
+        - { protocol: TCP, port: 8080 }
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: advisor }
+      ports:
+        - { protocol: TCP, port: {{ .Values.advisor.service.port }} }
+{{- end }}
+{{- if .Values.pricingEngine.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-pricing-engine
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/component: pricing-engine }
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: collector }
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: control-plane }
+      ports:
+        - { protocol: TCP, port: {{ .Values.pricingEngine.service.port }} }
+  egress:
+    - ports:
+        - { protocol: TCP, port: 443 }   # AWS / GCP / Azure price lists
+{{- end }}
+{{- if and .Values.controlPlane.enabled (or .Values.postgresql.embedded .Values.clickhouse.embedded) }}
+---
+# Embedded stores: reachable from the control plane only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-stores
+  labels: {{- include "kubehero.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [postgres, clickhouse] }
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/component: control-plane }
+      ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 9000 }
+        - { protocol: TCP, port: 8123 }
+  egress: []
 {{- end }}
 {{- end }}

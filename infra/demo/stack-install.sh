@@ -87,16 +87,6 @@ if ask "install ClickHouse operator (time-series cost store)?"; then
   ok "clickhouse-operator up"
 fi
 
-# ─── 6. Valkey (BSD-fork Redis) ──────────────────────────────────────────
-if ask "install Valkey (cache + rate-limit)?"; then
-  step "valkey"
-  repo_add bitnami https://charts.bitnami.com/bitnami
-  helm upgrade --install valkey bitnami/valkey \
-    --namespace kubehero-system --create-namespace --wait
-  ok "valkey up"
-fi
-
-# ─── 7. Dex (auth) ───────────────────────────────────────────────────────
 if ask "install Dex (OIDC proxy to your IdP)?"; then
   step "dex"
   repo_add dex https://charts.dexidp.io
@@ -144,3 +134,4 @@ ok "kubehero up"
 printf "\n${c_g}STACK READY${c_reset}\n"
 printf "  Grafana    kubectl -n monitoring port-forward svc/kps-grafana 3000:80\n"
 printf "  Dashboard  kubectl -n kubehero-system port-forward svc/kubehero-dashboard 3001:3001\n"
+printf "  Token      kubectl -n kubehero-system get secret kubehero-control-plane -o jsonpath='{.data.admin-token}' | base64 -d\n"
