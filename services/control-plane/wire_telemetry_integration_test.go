@@ -269,25 +269,33 @@ func TestIngestLoad200k(t *testing.T) {
 	t.Logf("ingest: %d lines accepted by the RPC in %v (%.0f lines/s); stored in ClickHouse after %v (%.0f lines/s end to end)",
 		total, accepted.Round(time.Millisecond), float64(total)/accepted.Seconds(), stored.Round(time.Millisecond), float64(total)/stored.Seconds())
 
+	// Metric grids are minute-aligned, as the dashboard sends them, so
+	// the minute rollup can answer (unaligned grids take the exact raw
+	// path). The line filter keeps the second query on raw rows.
+	end := now.Truncate(time.Minute)
 	for _, q := range []struct {
-		name  string
-		query string
-		step  int64
+		name       string
+		query      string
+		step       int64
+		maxScanned int64 // 0: unbounded
 	}{
-		{"filtered 1h log query", `{namespace="shop", app="api"} |= "status=500" | logfmt | dur > 300ms`, 0},
-		{"1h metric query (exact SQL)", `sum by (namespace) (count_over_time({cluster="load", level="error"}[5m]))`, 60_000},
-		{"1h metric query (rollup)", `sum by (level) (rate({cluster="load"}[5m]))`, 60_000},
-		{"1h metric query (Go pipeline)", `sum by (status) (count_over_time({namespace="pay"} | logfmt | status >= 500 [5m]))`, 60_000},
+		{"filtered 1h log query", `{namespace="shop", app="api"} |= "status=500" | logfmt | dur > 300ms`, 0, 0},
+		{"1h metric query (SQL over raw rows)", `sum by (namespace) (count_over_time({cluster="load", level="error"} |= "status=500" [5m]))`, 60_000, 0},
+		{"1h metric query (minute rollup)", `sum by (level) (rate({cluster="load"}[5m]))`, 60_000, total / 4},
+		{"1h metric query (Go pipeline)", `sum by (status) (count_over_time({namespace="pay"} | logfmt | status >= 500 [5m]))`, 60_000, 0},
 	} {
 		began := time.Now()
 		res, err := h.logs.QueryLogs(ctx, connect.NewRequest(&kuberov1.QueryLogsRequest{
-			Query: q.query, StartUnixMs: now.Add(-time.Hour).UnixMilli(), EndUnixMs: now.UnixMilli(), StepMs: q.step, Limit: 100,
+			Query: q.query, StartUnixMs: end.Add(-time.Hour).UnixMilli(), EndUnixMs: end.UnixMilli(), StepMs: q.step, Limit: 100,
 		}))
 		if err != nil {
 			t.Fatalf("%s: %v", q.name, err)
 		}
 		if len(res.Msg.GetLines())+len(res.Msg.GetSeries()) == 0 {
 			t.Fatalf("%s returned nothing", q.name)
+		}
+		if scanned := res.Msg.GetStats().GetRowsScanned(); q.maxScanned > 0 && scanned > q.maxScanned {
+			t.Fatalf("%s scanned %d rows: the minute rollup should have answered it", q.name, scanned)
 		}
 		t.Logf("%s: %v (%d lines, %d series, %d rows scanned)", q.name, time.Since(began).Round(time.Millisecond),
 			len(res.Msg.GetLines()), len(res.Msg.GetSeries()), res.Msg.GetStats().GetRowsScanned())
