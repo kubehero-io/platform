@@ -124,7 +124,10 @@ eventually "LogQL metric query over error lines"          300 has_errors
 eventually "rightsizing has recommendations for shop"     420 has_usage
 eventually "profiles collected for shop services"         420 has_profiles
 if kubectl -n "$NS" logs ds/kubehero-collector | grep -q '"ebpf'; then
-  eventually "eBPF service map has shop edges"            300 has_flows || true
+  # Soft check: some kind hosts lack cgroup_skb support. fail() exits,
+  # so run it in a subshell to keep going either way.
+  ( eventually "eBPF service map has shop edges"          300 has_flows ) \
+    || note "no eBPF flows yet (kernel without cgroup_skb?); continuing"
 fi
 
 ok "end-to-end checks passed"
