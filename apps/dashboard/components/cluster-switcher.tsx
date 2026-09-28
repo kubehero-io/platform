@@ -5,7 +5,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Layers, Search, Star } from "lucide-react";
-import { CLUSTERS, cloudColor, stateMeta } from "@/lib/fleet-data";
+import { cloudColor, stateMeta } from "@/lib/fleet-data";
+import { useNavStatus } from "@/components/nav-status";
+import type { NavStatus } from "@/lib/api/nav";
+
+type SwitcherCluster = NavStatus["clusters"][number];
 
 /* Federation UX: a cluster scoped to "all" or one specific cluster,
    accessible from anywhere. Borrows the Lens "hotbar" pattern —
@@ -46,6 +50,9 @@ export function ClusterSwitcher() {
   const [query, setQuery] = useState("");
   const [recent, setRecent] = useState<string[]>([]);
   const path = usePathname() ?? "";
+  // Live clusters from /api/nav (demo fixture while in demo mode).
+  const status = useNavStatus();
+  const CLUSTERS: SwitcherCluster[] = useMemo(() => status?.clusters ?? [], [status]);
 
   // Sync recents from localStorage on mount, then on every path
   // change that touches a cluster drill-in.
@@ -107,16 +114,16 @@ export function ClusterSwitcher() {
       c.cloud.toLowerCase().includes(q) ||
       c.region.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [query, CLUSTERS]);
 
   const recentClusters = useMemo(
     () =>
       recent
         .map((id) => CLUSTERS.find((c) => c.id === id))
-        .filter((c): c is (typeof CLUSTERS)[number] => Boolean(c))
+        .filter((c): c is SwitcherCluster => Boolean(c))
         .filter((c) => active?.id !== c.id)
         .slice(0, RECENT_MAX),
-    [recent, active],
+    [recent, active, CLUSTERS],
   );
 
   const close = useCallback(() => {
@@ -229,7 +236,7 @@ function ClusterRow({
   onPick,
   dim = false,
 }: {
-  cluster: (typeof CLUSTERS)[number];
+  cluster: SwitcherCluster;
   active: boolean;
   onPick: () => void;
   dim?: boolean;
