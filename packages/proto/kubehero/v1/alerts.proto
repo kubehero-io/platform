@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kubehero.v1;
+
+option go_package = "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1";
+
+// AlertsService is one alerting engine over every signal KubeHero
+// stores: log metrics (LogQL), spend rate, budget burn, spend
+// anomalies, network cost, and cluster events. Rules are evaluated on
+// the control plane; notifications route through the same channel
+// grammar as policy escalations (slack://, pagerduty://, opsgenie://,
+// teams://, webhook+https://, alertmanager+https://).
+service AlertsService {
+  rpc ListAlertRules(ListAlertRulesRequest) returns (ListAlertRulesResponse) {}
+  rpc UpsertAlertRule(UpsertAlertRuleRequest) returns (UpsertAlertRuleResponse) {}
+  rpc DeleteAlertRule(DeleteAlertRuleRequest) returns (DeleteAlertRuleResponse) {}
+  // Evaluates a rule once, right now, without persisting state or
+  // notifying anyone — the rule editor's "preview" button.
+  rpc TestAlertRule(TestAlertRuleRequest) returns (TestAlertRuleResponse) {}
+  // Active (pending + firing) alerts plus recently resolved ones.
+  rpc ListAlerts(ListAlertsRequest) returns (ListAlertsResponse) {}
+  rpc CreateSilence(CreateSilenceRequest) returns (CreateSilenceResponse) {}
+  rpc ListSilences(ListSilencesRequest) returns (ListSilencesResponse) {}
+  rpc DeleteSilence(DeleteSilenceRequest) returns (DeleteSilenceResponse) {}
+}
+
+// AlertRule. `kind` selects the query language of `query`:
+//
+//   logs     LogQL metric query, one alert per series:
+//              sum by (namespace) (count_over_time({level="error"}[5m]))
+//   cost     spend rate in $/hour over the last 15m for a selector,
+//            optionally grouped:  cost{namespace="ml-inference"}  |
+//            cost by (team)
+//   budget   a BudgetPolicy name; value = burn-rate multiple (1.0 =
+//            spending exactly at budget)
+//   anomaly  optional selector; value = anomaly $/mo impact, one alert
+//            per anomaly:  anomaly{kind="spend"}
+//   network  network spend rate in $/hour: network{namespace="edge"} by (workload)
+//   event    cluster-event count in a window:
+//              events{kind="oom_killed",namespace="prod"}[10m]
+message AlertRule {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string kind = 4;                 // logs | cost | budget | anomaly | network | event
+  string query = 5;
+  string op = 6;                   // > | >= | < | <= | == | !=
+  double threshold = 7;
+  string pending_for = 8;          // how long the condition must hold, e.g. "5m"
+  string severity = 9;             // info | warn | critical
+  repeated string channels = 10;
+  map<string, string> labels = 11;
+  // summary / description / runbook_url; {{ $value }} and
+  // {{ $labels.<name> }} are templated.
+  map<string, string> annotations = 12;
+  bool enabled = 13;
+  string eval_interval = 14;       // default "1m"
+  string created_at = 15;
+  string updated_at = 16;
+  string created_by = 17;
+}
+
+message ListAlertRulesRequest {
+  string kind = 1;                 // optional filter
+}
+
+message ListAlertRulesResponse {
+  repeated AlertRule rules = 1;
+}
+
+message UpsertAlertRuleRequest {
+  AlertRule rule = 1;              // empty id = create
+}
+
+message UpsertAlertRuleResponse {
+  AlertRule rule = 1;
+}
+
+message DeleteAlertRuleRequest {
+  string id = 1;
+}
+
+message DeleteAlertRuleResponse {}
+
+message TestAlertRuleRequest {
+  AlertRule rule = 1;
+}
+
+message AlertEvaluation {
+  map<string, string> labels = 1;
+  double value = 2;
+  bool triggered = 3;
+}
+
+message TestAlertRuleResponse {
+  repeated AlertEvaluation results = 1;
+  string error = 2;                // query / parse error, if any
+  double exec_ms = 3;
+}
+
+message Alert {
+  string id = 1;                   // stable per (rule, label set)
+  string rule_id = 2;
+  string rule_name = 3;
+  string kind = 4;
+  string state = 5;                // pending | firing | resolved
+  string severity = 6;
+  map<string, string> labels = 7;
+  double value = 8;
+  string summary = 9;
+  string description = 10;
+  string started_at = 11;          // RFC3339: condition first held
+  string fired_at = 12;            // RFC3339: pending → firing
+  string resolved_at = 13;
+  string last_eval_at = 14;
+  bool silenced = 15;
+  string link_path = 16;           // dashboard deep link
+}
+
+message ListAlertsRequest {
+  string state = 1;                // optional: pending | firing | resolved
+  int32 limit = 2;                 // default 100
+}
+
+message ListAlertsResponse {
+  repeated Alert alerts = 1;
+  int32 firing = 2;
+  int32 pending = 3;
+}
+
+message Silence {
+  string id = 1;
+  // Label matchers; an alert is silenced when every matcher equals the
+  // alert's label (the special key "alertname" matches the rule name).
+  map<string, string> matchers = 2;
+  string starts_at = 3;            // RFC3339
+  string ends_at = 4;              // RFC3339
+  string created_by = 5;
+  string comment = 6;
+}
+
+message CreateSilenceRequest {
+  Silence silence = 1;
+}
+
+message CreateSilenceResponse {
+  Silence silence = 1;
+}
+
+message ListSilencesRequest {
+  bool include_expired = 1;
+}
+
+message ListSilencesResponse {
+  repeated Silence silences = 1;
+}
+
+message DeleteSilenceRequest {
+  string id = 1;
+}
+
+message DeleteSilenceResponse {}

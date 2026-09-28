@@ -1,0 +1,202 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kubehero.v1;
+
+option go_package = "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1";
+
+// TelemetryService is the node agent's write path for every signal
+// beyond pod cost: container logs, CPU / memory profiles, eBPF network
+// flows, per-container utilisation history, and Kubernetes health
+// events. The collector DaemonSet calls it; so do the compatibility
+// shims (Loki push, OTLP logs, Pyroscope ingest) after translating.
+//
+// Every RPC takes a batch and returns (accepted, dropped). Rows that
+// fail validation are dropped, never retried. Callers authenticate
+// with the per-cluster token minted by RegisterCluster (member+ role).
+service TelemetryService {
+  // Container log lines, tailed from /var/log/pods on each node.
+  rpc IngestLogs(IngestLogsRequest) returns (IngestLogsResponse) {}
+
+  // Aggregated stack samples: eBPF CPU sampling, scraped pprof
+  // endpoints, or pushed pprof / folded profiles.
+  rpc IngestProfiles(IngestProfilesRequest) returns (IngestProfilesResponse) {}
+
+  // eBPF-observed L3/L4 flows between pods, services, nodes and the
+  // internet, pre-attributed on the node.
+  rpc IngestFlows(IngestFlowsRequest) returns (IngestFlowsResponse) {}
+
+  // Per-container usage vs requests/limits — the history the
+  // percentile rightsizing engine reads.
+  rpc IngestUsage(IngestUsageRequest) returns (IngestUsageResponse) {}
+
+  // Kubernetes health signals: OOM kills, crash loops, unschedulable
+  // pods, evictions, image pull failures, node pressure.
+  rpc IngestEvents(IngestEventsRequest) returns (IngestEventsResponse) {}
+}
+
+// PodRef identifies where a signal came from. Every field is optional
+// except namespace + pod for pod-scoped signals. workload is the
+// top-level owner resolved through ReplicaSets / Jobs (a Deployment's
+// name, not the ReplicaSet's hash-suffixed one).
+message PodRef {
+  string namespace = 1;
+  string pod = 2;
+  string container = 3;
+  string workload = 4;       // owning controller name
+  string workload_kind = 5;  // Deployment | StatefulSet | DaemonSet | Job | CronJob | ReplicaSet | Pod
+  string node = 6;
+  string team = 7;           // kubehero.io/team label, namespace fallback
+  string zone = 8;           // topology.kubernetes.io/zone of the node
+  string pod_uid = 9;
+}
+
+// ─── Logs ────────────────────────────────────────────────────────────────
+
+message LogEntry {
+  int64 ts_unix_nano = 1;
+  PodRef source = 2;
+  string stream = 3;               // stdout | stderr
+  // Detected severity: trace | debug | info | warn | error | fatal.
+  // Empty when no level could be detected.
+  string level = 4;
+  string body = 5;
+  // Extra stream labels (e.g. app, version, allow-listed pod labels).
+  map<string, string> labels = 6;
+  string trace_id = 7;             // W3C / B3 trace id when found in the line
+}
+
+message IngestLogsRequest {
+  string cluster_id = 1;
+  repeated LogEntry entries = 2;
+}
+
+message IngestLogsResponse {
+  int32 accepted = 1;
+  int32 dropped = 2;
+}
+
+// ─── Profiles ────────────────────────────────────────────────────────────
+
+// StackSample is one unique stack with its aggregated value.
+message StackSample {
+  // Frames from root (outermost caller) to leaf (on-CPU function).
+  // Unsymbolised frames are rendered as "[unknown]" or "0x<addr>".
+  repeated string frames = 1;
+  int64 value = 2;
+}
+
+message Profile {
+  int64 ts_unix_nano = 1;          // start of the profiled window
+  int64 duration_nano = 2;
+  // cpu | alloc_space | alloc_objects | inuse_space | inuse_objects |
+  // goroutines | mutex | block
+  string type = 3;
+  string unit = 4;                 // nanoseconds | bytes | count
+  string service = 5;              // app / service name (workload by default)
+  PodRef source = 6;
+  map<string, string> labels = 7;
+  repeated StackSample samples = 8;
+  string origin = 9;               // ebpf | pprof-scrape | pprof-push | pyroscope
+  int64 period = 10;               // sampling period in `unit` (cpu: ns per sample)
+}
+
+message IngestProfilesRequest {
+  string cluster_id = 1;
+  repeated Profile profiles = 2;
+}
+
+message IngestProfilesResponse {
+  int32 accepted = 1;
+  int32 samples = 2;
+  int32 dropped = 3;
+}
+
+// ─── Network flows ───────────────────────────────────────────────────────
+
+message FlowEndpoint {
+  string ip = 1;
+  string kind = 2;                 // pod | service | node | external
+  PodRef pod = 3;                  // set when kind = pod
+  string service = 4;              // "<namespace>/<name>" when kind = service
+  string zone = 5;
+  // Display name: workload, service, node, reverse-DNS or the IP.
+  string name = 6;
+}
+
+message Flow {
+  int64 ts_unix_ms = 1;            // end of the aggregation window
+  int32 window_sec = 2;
+  FlowEndpoint src = 3;
+  FlowEndpoint dst = 4;
+  int32 port = 5;                  // server-side port (heuristic: lower of the pair)
+  string protocol = 6;             // tcp | udp | icmp | other
+  uint64 bytes = 7;                // bytes src → dst in the window
+  uint64 packets = 8;
+  // Which hook observed the flow: egress (at the sender) or ingress
+  // (at the receiver). Pod-to-pod traffic is seen twice; the query
+  // side de-duplicates by preferring ingress for pod ↔ pod pairs.
+  string direction = 9;
+  uint32 retransmits = 10;
+}
+
+message IngestFlowsRequest {
+  string cluster_id = 1;
+  repeated Flow flows = 2;
+}
+
+message IngestFlowsResponse {
+  int32 accepted = 1;
+  int32 dropped = 2;
+}
+
+// ─── Container usage ─────────────────────────────────────────────────────
+
+message ContainerUsage {
+  int64 ts_unix_ms = 1;
+  PodRef source = 2;               // container must be set
+  double cpu_usage_cores = 3;
+  uint64 mem_working_set_bytes = 4;
+  double cpu_request_cores = 5;
+  uint64 mem_request_bytes = 6;
+  double cpu_limit_cores = 7;      // 0 = no limit
+  uint64 mem_limit_bytes = 8;      // 0 = no limit
+  uint32 restarts = 9;
+  string last_termination_reason = 10;  // e.g. OOMKilled
+}
+
+message IngestUsageRequest {
+  string cluster_id = 1;
+  repeated ContainerUsage usage = 2;
+}
+
+message IngestUsageResponse {
+  int32 accepted = 1;
+  int32 dropped = 2;
+}
+
+// ─── Cluster events ──────────────────────────────────────────────────────
+
+message ClusterEvent {
+  int64 ts_unix_ms = 1;
+  // oom_killed | crash_loop | image_pull_backoff | unschedulable |
+  // evicted | node_not_ready | node_pressure | restarted | warning
+  string kind = 2;
+  string severity = 3;             // info | warn | critical
+  PodRef source = 4;
+  string reason = 5;               // Kubernetes reason string
+  string message = 6;
+  map<string, string> attributes = 7;
+  int32 count = 8;
+}
+
+message IngestEventsRequest {
+  string cluster_id = 1;
+  repeated ClusterEvent events = 2;
+}
+
+message IngestEventsResponse {
+  int32 accepted = 1;
+  int32 dropped = 2;
+}

@@ -401,11 +401,58 @@ message PodCostSample {
   uint64 mem_bytes = 14;
   float gpu_util_pct = 15;
 
-  // Cost per second of wall clock at this tick. For the synthetic
-  // collector this is requests × node price. For the real eBPF
-  // collector this becomes utilisation-weighted.
+  // Cost per second of wall clock at this tick: the node's price ×
+  // the pod's billable share, max(requests, measured usage).
   double cost_usd_sec = 16;
   double recoverable_usd_sec = 17;
+
+  // Measured utilisation at this tick (kubelet Summary API). Zero when
+  // stats were unavailable for the node and cost fell back to requests.
+  uint32 cpu_usage_millicores = 18;
+  uint64 mem_usage_bytes = 19;
+  // cost_usd_sec split by resource, for OpenCost-style allocation.
+  double cpu_cost_usd_sec = 20;
+  double ram_cost_usd_sec = 21;
+  double gpu_cost_usd_sec = 22;
+  // Top-level owner (Deployment, StatefulSet, …) and placement.
+  string workload = 23;
+  string workload_kind = 24;
+  string zone = 25;
+  string cloud = 26;               // aws | gcp | azure | "" (unknown / on-prem)
+  uint32 gpu_count = 27;
+  // Seconds of wall clock this sample covers (the collector's scan
+  // interval). Spend in the interval = cost_usd_sec × interval_sec.
+  // 0 is read as 5 (the historical default scan interval).
+  float interval_sec = 28;
+  // Pod labels, sent when the collector first sees a pod and whenever
+  // they change — backs label:<key> allocation. Usually empty.
+  map<string, string> labels = 29;
+}
+
+// NodeCostSample is one node's price and allocation at a tick — what
+// idle cost (price − allocated) is computed from.
+message NodeCostSample {
+  string node = 1;
+  int64 ts_unix_ms = 2;
+  string nodepool = 3;
+  string region = 4;
+  string zone = 5;
+  string sku = 6;
+  string lifecycle = 7;            // on-demand | spot | …
+  string cloud = 8;
+  double price_per_hour = 9;
+  uint32 cpu_allocatable_millicores = 10;
+  uint64 mem_allocatable_bytes = 11;
+  uint32 cpu_requested_millicores = 12;
+  uint64 mem_requested_bytes = 13;
+  uint32 cpu_used_millicores = 14;
+  uint64 mem_used_bytes = 15;
+  uint32 gpu_count = 16;
+  string gpu_kind = 17;
+  double cost_usd_sec = 18;        // price_per_hour / 3600
+  double idle_usd_sec = 19;        // share of the node no pod requested
+  string price_source = 20;        // annotation | pricing-engine | estimate
+  float interval_sec = 21;         // seconds this sample covers
 }
 
 message IngestPodCostRequest {
@@ -413,6 +460,9 @@ message IngestPodCostRequest {
   // empty — the collector's API key carries the cluster identity.
   string cluster_id = 1;
   repeated PodCostSample samples = 2;
+  // The reporting node's own price + allocation (each collector
+  // reports only the node it runs on).
+  repeated NodeCostSample nodes = 3;
 }
 
 message IngestPodCostResponse {

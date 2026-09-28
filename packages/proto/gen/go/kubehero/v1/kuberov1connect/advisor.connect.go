@@ -41,6 +41,12 @@ const (
 	// AdvisorServiceListAdviceProcedure is the fully-qualified name of the AdvisorService's ListAdvice
 	// RPC.
 	AdvisorServiceListAdviceProcedure = "/kubehero.v1.AdvisorService/ListAdvice"
+	// AdvisorServiceInvestigateProcedure is the fully-qualified name of the AdvisorService's
+	// Investigate RPC.
+	AdvisorServiceInvestigateProcedure = "/kubehero.v1.AdvisorService/Investigate"
+	// AdvisorServiceInvestigateStreamProcedure is the fully-qualified name of the AdvisorService's
+	// InvestigateStream RPC.
+	AdvisorServiceInvestigateStreamProcedure = "/kubehero.v1.AdvisorService/InvestigateStream"
 )
 
 // AdvisorServiceClient is a client for the kubehero.v1.AdvisorService service.
@@ -52,6 +58,17 @@ type AdvisorServiceClient interface {
 	// ListAdvice returns just the proposed actions — the dashboard's
 	// action queue without the narrative.
 	ListAdvice(context.Context, *connect.Request[v1.ListAdviceRequest]) (*connect.Response[v1.ListAdviceResponse], error)
+	// Investigate answers a free-form operator question ("why did
+	// checkout's spend jump last night?") by running a read-only
+	// tool loop over every signal — cost allocation, anomalies, log
+	// volume + patterns, profiles, the network map, cluster events,
+	// rightsizing — and returning an answer grounded in cited evidence,
+	// plus guarded proposals. Same guardrail as briefings: read-only,
+	// proposals only, CRD-whitelisted.
+	Investigate(context.Context, *connect.Request[v1.InvestigateRequest]) (*connect.Response[v1.InvestigateResponse], error)
+	// InvestigateStream is Investigate with live progress: one event per
+	// tool call, then the final response.
+	InvestigateStream(context.Context, *connect.Request[v1.InvestigateStreamRequest]) (*connect.ServerStreamForClient[v1.InvestigateStreamResponse], error)
 }
 
 // NewAdvisorServiceClient constructs a client for the kubehero.v1.AdvisorService service. By
@@ -77,13 +94,27 @@ func NewAdvisorServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(advisorServiceMethods.ByName("ListAdvice")),
 			connect.WithClientOptions(opts...),
 		),
+		investigate: connect.NewClient[v1.InvestigateRequest, v1.InvestigateResponse](
+			httpClient,
+			baseURL+AdvisorServiceInvestigateProcedure,
+			connect.WithSchema(advisorServiceMethods.ByName("Investigate")),
+			connect.WithClientOptions(opts...),
+		),
+		investigateStream: connect.NewClient[v1.InvestigateStreamRequest, v1.InvestigateStreamResponse](
+			httpClient,
+			baseURL+AdvisorServiceInvestigateStreamProcedure,
+			connect.WithSchema(advisorServiceMethods.ByName("InvestigateStream")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // advisorServiceClient implements AdvisorServiceClient.
 type advisorServiceClient struct {
-	getBriefing *connect.Client[v1.GetBriefingRequest, v1.GetBriefingResponse]
-	listAdvice  *connect.Client[v1.ListAdviceRequest, v1.ListAdviceResponse]
+	getBriefing       *connect.Client[v1.GetBriefingRequest, v1.GetBriefingResponse]
+	listAdvice        *connect.Client[v1.ListAdviceRequest, v1.ListAdviceResponse]
+	investigate       *connect.Client[v1.InvestigateRequest, v1.InvestigateResponse]
+	investigateStream *connect.Client[v1.InvestigateStreamRequest, v1.InvestigateStreamResponse]
 }
 
 // GetBriefing calls kubehero.v1.AdvisorService.GetBriefing.
@@ -96,6 +127,16 @@ func (c *advisorServiceClient) ListAdvice(ctx context.Context, req *connect.Requ
 	return c.listAdvice.CallUnary(ctx, req)
 }
 
+// Investigate calls kubehero.v1.AdvisorService.Investigate.
+func (c *advisorServiceClient) Investigate(ctx context.Context, req *connect.Request[v1.InvestigateRequest]) (*connect.Response[v1.InvestigateResponse], error) {
+	return c.investigate.CallUnary(ctx, req)
+}
+
+// InvestigateStream calls kubehero.v1.AdvisorService.InvestigateStream.
+func (c *advisorServiceClient) InvestigateStream(ctx context.Context, req *connect.Request[v1.InvestigateStreamRequest]) (*connect.ServerStreamForClient[v1.InvestigateStreamResponse], error) {
+	return c.investigateStream.CallServerStream(ctx, req)
+}
+
 // AdvisorServiceHandler is an implementation of the kubehero.v1.AdvisorService service.
 type AdvisorServiceHandler interface {
 	// GetBriefing returns the current advisor briefing for a cluster (or
@@ -105,6 +146,17 @@ type AdvisorServiceHandler interface {
 	// ListAdvice returns just the proposed actions — the dashboard's
 	// action queue without the narrative.
 	ListAdvice(context.Context, *connect.Request[v1.ListAdviceRequest]) (*connect.Response[v1.ListAdviceResponse], error)
+	// Investigate answers a free-form operator question ("why did
+	// checkout's spend jump last night?") by running a read-only
+	// tool loop over every signal — cost allocation, anomalies, log
+	// volume + patterns, profiles, the network map, cluster events,
+	// rightsizing — and returning an answer grounded in cited evidence,
+	// plus guarded proposals. Same guardrail as briefings: read-only,
+	// proposals only, CRD-whitelisted.
+	Investigate(context.Context, *connect.Request[v1.InvestigateRequest]) (*connect.Response[v1.InvestigateResponse], error)
+	// InvestigateStream is Investigate with live progress: one event per
+	// tool call, then the final response.
+	InvestigateStream(context.Context, *connect.Request[v1.InvestigateStreamRequest], *connect.ServerStream[v1.InvestigateStreamResponse]) error
 }
 
 // NewAdvisorServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -126,12 +178,28 @@ func NewAdvisorServiceHandler(svc AdvisorServiceHandler, opts ...connect.Handler
 		connect.WithSchema(advisorServiceMethods.ByName("ListAdvice")),
 		connect.WithHandlerOptions(opts...),
 	)
+	advisorServiceInvestigateHandler := connect.NewUnaryHandler(
+		AdvisorServiceInvestigateProcedure,
+		svc.Investigate,
+		connect.WithSchema(advisorServiceMethods.ByName("Investigate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	advisorServiceInvestigateStreamHandler := connect.NewServerStreamHandler(
+		AdvisorServiceInvestigateStreamProcedure,
+		svc.InvestigateStream,
+		connect.WithSchema(advisorServiceMethods.ByName("InvestigateStream")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/kubehero.v1.AdvisorService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AdvisorServiceGetBriefingProcedure:
 			advisorServiceGetBriefingHandler.ServeHTTP(w, r)
 		case AdvisorServiceListAdviceProcedure:
 			advisorServiceListAdviceHandler.ServeHTTP(w, r)
+		case AdvisorServiceInvestigateProcedure:
+			advisorServiceInvestigateHandler.ServeHTTP(w, r)
+		case AdvisorServiceInvestigateStreamProcedure:
+			advisorServiceInvestigateStreamHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -147,4 +215,12 @@ func (UnimplementedAdvisorServiceHandler) GetBriefing(context.Context, *connect.
 
 func (UnimplementedAdvisorServiceHandler) ListAdvice(context.Context, *connect.Request[v1.ListAdviceRequest]) (*connect.Response[v1.ListAdviceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kubehero.v1.AdvisorService.ListAdvice is not implemented"))
+}
+
+func (UnimplementedAdvisorServiceHandler) Investigate(context.Context, *connect.Request[v1.InvestigateRequest]) (*connect.Response[v1.InvestigateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("kubehero.v1.AdvisorService.Investigate is not implemented"))
+}
+
+func (UnimplementedAdvisorServiceHandler) InvestigateStream(context.Context, *connect.Request[v1.InvestigateStreamRequest], *connect.ServerStream[v1.InvestigateStreamResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("kubehero.v1.AdvisorService.InvestigateStream is not implemented"))
 }

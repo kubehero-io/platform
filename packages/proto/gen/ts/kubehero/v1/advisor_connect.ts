@@ -5,7 +5,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetBriefingRequest, GetBriefingResponse, ListAdviceRequest, ListAdviceResponse } from "./advisor_pb.js";
+import { GetBriefingRequest, GetBriefingResponse, InvestigateRequest, InvestigateResponse, InvestigateStreamRequest, InvestigateStreamResponse, ListAdviceRequest, ListAdviceResponse } from "./advisor_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -48,6 +48,35 @@ export const AdvisorService = {
       I: ListAdviceRequest,
       O: ListAdviceResponse,
       kind: MethodKind.Unary,
+    },
+    /**
+     * Investigate answers a free-form operator question ("why did
+     * checkout's spend jump last night?") by running a read-only
+     * tool loop over every signal — cost allocation, anomalies, log
+     * volume + patterns, profiles, the network map, cluster events,
+     * rightsizing — and returning an answer grounded in cited evidence,
+     * plus guarded proposals. Same guardrail as briefings: read-only,
+     * proposals only, CRD-whitelisted.
+     *
+     * @generated from rpc kubehero.v1.AdvisorService.Investigate
+     */
+    investigate: {
+      name: "Investigate",
+      I: InvestigateRequest,
+      O: InvestigateResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * InvestigateStream is Investigate with live progress: one event per
+     * tool call, then the final response.
+     *
+     * @generated from rpc kubehero.v1.AdvisorService.InvestigateStream
+     */
+    investigateStream: {
+      name: "InvestigateStream",
+      I: InvestigateStreamRequest,
+      O: InvestigateStreamResponse,
+      kind: MethodKind.ServerStreaming,
     },
   }
 } as const;

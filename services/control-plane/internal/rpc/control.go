@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -70,6 +71,11 @@ type ControlPlane struct {
 	// fixtures return FailedPrecondition instead, so a misconfigured
 	// production deploy fails loudly rather than serving fake numbers.
 	DemoFixturesDisabled bool
+	// PG / CH are the raw store handles (nil when unconfigured) for
+	// RPCs computed straight from the stores — rightsizing-backed waste,
+	// team spend, capacity demands.
+	PG *sql.DB
+	CH *sql.DB
 }
 
 // Options is a tiny option-bag so callers can grow capability without
@@ -84,6 +90,8 @@ type Options struct {
 	PodCost              *clickhouse.PodCostWriter
 	Anomalies            *clickhouse.SpendAnomalyProvider
 	DemoFixturesDisabled bool
+	PG                   *sql.DB
+	CH                   *sql.DB
 }
 
 func New(opts ...Options) *ControlPlane {
@@ -115,6 +123,12 @@ func New(opts ...Options) *ControlPlane {
 		}
 		if o.DemoFixturesDisabled {
 			cp.DemoFixturesDisabled = true
+		}
+		if o.PG != nil {
+			cp.PG = o.PG
+		}
+		if o.CH != nil {
+			cp.CH = o.CH
 		}
 	}
 	return cp

@@ -1,0 +1,327 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kubehero.v1;
+
+option go_package = "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1";
+
+// ═══════════════════════════════════════════════════════════════════════
+// Shared query primitives
+// ═══════════════════════════════════════════════════════════════════════
+
+message Point {
+  int64 ts_unix_ms = 1;
+  double value = 2;
+}
+
+message Series {
+  map<string, string> labels = 1;
+  repeated Point points = 2;
+}
+
+message QueryStats {
+  int64 rows_scanned = 1;
+  int64 bytes_scanned = 2;
+  double exec_ms = 3;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Logs — LogQL-compatible query surface over the ClickHouse log store
+// ═══════════════════════════════════════════════════════════════════════
+
+service LogsService {
+  // QueryLogs runs a LogQL query. Log queries ({…} |= "x" | json …)
+  // return lines; metric queries (count_over_time, rate,
+  // bytes_over_time, bytes_rate, sum/avg/min/max/topk by (…)) return
+  // series. The time range defaults to the last hour.
+  rpc QueryLogs(QueryLogsRequest) returns (QueryLogsResponse) {}
+
+  // GetLogVolume returns a lines-per-step histogram for the selector,
+  // split by level (or another label), plus ingest volume + cost.
+  rpc GetLogVolume(GetLogVolumeRequest) returns (GetLogVolumeResponse) {}
+
+  // GetLogPatterns clusters matching lines into templates (Drain) so a
+  // million lines read as twenty patterns with counts and trends.
+  rpc GetLogPatterns(GetLogPatternsRequest) returns (GetLogPatternsResponse) {}
+
+  // ListLogLabels returns label names, or values of one label.
+  rpc ListLogLabels(ListLogLabelsRequest) returns (ListLogLabelsResponse) {}
+
+  // TailLogs streams new lines matching a log query as they arrive.
+  rpc TailLogs(TailLogsRequest) returns (stream TailLogsResponse) {}
+}
+
+message QueryLogsRequest {
+  string query = 1;                // LogQL
+  int64 start_unix_ms = 2;         // 0 = end - 1h
+  int64 end_unix_ms = 3;           // 0 = now
+  int32 limit = 4;                 // log queries: max lines (default 100, max 5000)
+  string direction = 5;            // backward (newest first, default) | forward
+  int64 step_ms = 6;               // metric queries: resolution; 0 = auto
+  string cluster_id = 7;           // optional; also expressible as {cluster="…"}
+}
+
+message LogLine {
+  int64 ts_unix_nano = 1;
+  string body = 2;
+  string level = 3;
+  // Stream labels: cluster, namespace, pod, container, workload, node,
+  // stream, team, plus any labels extracted by | json / | logfmt.
+  map<string, string> labels = 4;
+  string trace_id = 5;
+}
+
+message QueryLogsResponse {
+  string result_type = 1;          // streams | matrix
+  repeated LogLine lines = 2;      // result_type = streams
+  repeated Series series = 3;      // result_type = matrix
+  QueryStats stats = 4;
+}
+
+message GetLogVolumeRequest {
+  string query = 1;                // selector + optional line filters
+  int64 start_unix_ms = 2;
+  int64 end_unix_ms = 3;
+  int64 step_ms = 4;               // 0 = auto (~60 buckets)
+  string group_by = 5;             // label to split by; default "level"
+  string cluster_id = 6;
+}
+
+message GetLogVolumeResponse {
+  repeated Series series = 1;
+  int64 total_lines = 2;
+  int64 total_bytes = 3;
+  // What storing this volume costs per month at the configured
+  // $/GB-ingested rate — logs are a line item too.
+  double est_cost_usd_month = 4;
+}
+
+message GetLogPatternsRequest {
+  string query = 1;
+  int64 start_unix_ms = 2;
+  int64 end_unix_ms = 3;
+  int32 limit = 4;                 // default 50
+  string cluster_id = 5;
+}
+
+message LogPattern {
+  string pattern = 1;              // template with <_> wildcards
+  int64 count = 2;
+  string level = 3;                // dominant level
+  double share_pct = 4;
+  repeated Point trend = 5;        // count per step
+  string sample = 6;               // one concrete line
+}
+
+message GetLogPatternsResponse {
+  repeated LogPattern patterns = 1;
+  int64 lines_analyzed = 2;
+}
+
+message ListLogLabelsRequest {
+  string name = 1;                 // empty = list names; set = list its values
+  int64 start_unix_ms = 2;
+  int64 end_unix_ms = 3;
+  string query = 4;                // optional selector to scope values
+  string cluster_id = 5;
+}
+
+message ListLogLabelsResponse {
+  repeated string names = 1;
+  repeated string values = 2;
+}
+
+message TailLogsRequest {
+  string query = 1;                // log query (no metric functions)
+  int64 start_unix_ms = 2;         // resume point; 0 = now - 10s
+  string cluster_id = 3;
+}
+
+message TailLogsResponse {
+  repeated LogLine lines = 1;
+  int64 dropped = 2;               // lines skipped to keep up
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Profiles — continuous profiling (eBPF + pprof), priced
+// ═══════════════════════════════════════════════════════════════════════
+
+service ProfilesService {
+  // Services with profile data in the window, with the profile types
+  // available for each and what their CPU costs.
+  rpc ListProfileTargets(ListProfileTargetsRequest) returns (ListProfileTargetsResponse) {}
+
+  // A merged flamegraph for a service; pass a baseline window for a
+  // diff flamegraph (regressions light up).
+  rpc GetFlamegraph(GetFlamegraphRequest) returns (GetFlamegraphResponse) {}
+
+  // Functions ranked by self / total time, with $/mo attribution.
+  rpc GetTopFunctions(GetTopFunctionsRequest) returns (GetTopFunctionsResponse) {}
+}
+
+message ListProfileTargetsRequest {
+  int64 start_unix_ms = 1;
+  int64 end_unix_ms = 2;
+  string cluster_id = 3;
+  string namespace = 4;
+}
+
+message ProfileTarget {
+  string service = 1;
+  string namespace = 2;
+  string workload = 3;
+  repeated string types = 4;
+  string origin = 5;               // ebpf | pprof-scrape | pprof-push | pyroscope
+  int64 last_seen_unix_ms = 6;
+  double cpu_cores_avg = 7;        // from cpu profiles in the window
+  double cost_usd_month = 8;       // workload spend from the cost plane
+}
+
+message ListProfileTargetsResponse {
+  repeated ProfileTarget targets = 1;
+}
+
+message ProfileSelector {
+  string service = 1;
+  string type = 2;                 // default "cpu"
+  string namespace = 3;
+  string pod = 4;
+  string cluster_id = 5;
+  map<string, string> labels = 6;
+}
+
+message GetFlamegraphRequest {
+  ProfileSelector selector = 1;
+  int64 start_unix_ms = 2;
+  int64 end_unix_ms = 3;
+  // Diff mode when both are set: node totals are compared against the
+  // baseline window, normalised to the same total.
+  int64 baseline_start_unix_ms = 4;
+  int64 baseline_end_unix_ms = 5;
+  int32 max_nodes = 6;             // prune tiny nodes; default 2048
+}
+
+// FlameNode is one frame in a pre-order, flattened call tree.
+message FlameNode {
+  string name = 1;
+  int32 parent = 2;                // index into nodes; -1 for the root
+  int32 depth = 3;
+  int64 self = 4;
+  int64 total = 5;
+  int64 baseline_self = 6;         // diff mode, normalised
+  int64 baseline_total = 7;        // diff mode, normalised
+}
+
+message GetFlamegraphResponse {
+  repeated FlameNode nodes = 1;    // nodes[0] is the synthetic root "total"
+  int64 total = 2;
+  string unit = 3;
+  string type = 4;
+  int64 baseline_total = 5;
+  int64 samples = 6;
+  // What the profiled CPU time costs per month (cpu profiles only) —
+  // the multiplier the UI uses to price a frame: cost × total / root.
+  double cost_usd_month = 7;
+}
+
+message GetTopFunctionsRequest {
+  ProfileSelector selector = 1;
+  int64 start_unix_ms = 2;
+  int64 end_unix_ms = 3;
+  int32 limit = 4;                 // default 25
+  string order_by = 5;             // self (default) | total
+}
+
+message TopFunction {
+  string name = 1;
+  int64 self = 2;
+  int64 total = 3;
+  double self_pct = 4;
+  double total_pct = 5;
+  double self_cost_usd_month = 6;
+}
+
+message GetTopFunctionsResponse {
+  repeated TopFunction functions = 1;
+  int64 total = 2;
+  string unit = 3;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Network — eBPF service map with priced edges
+// ═══════════════════════════════════════════════════════════════════════
+
+service NetworkService {
+  // Workload-level service map: who talks to whom, how much, whether
+  // it crosses zones or leaves the cloud, and what that costs.
+  rpc GetServiceMap(GetServiceMapRequest) returns (GetServiceMapResponse) {}
+
+  // Per-workload network spend: internet egress + cross-zone transfer.
+  rpc ListNetworkCosts(ListNetworkCostsRequest) returns (ListNetworkCostsResponse) {}
+}
+
+message GetServiceMapRequest {
+  string cluster_id = 1;
+  string namespace = 2;            // optional focus namespace
+  int64 start_unix_ms = 3;
+  int64 end_unix_ms = 4;
+  int32 max_nodes = 5;             // default 60
+}
+
+message ServiceMapNode {
+  string id = 1;                   // stable: "<kind>:<namespace>/<name>"
+  string name = 2;
+  string namespace = 3;
+  string kind = 4;                 // workload | service | node | external
+  string zone = 5;
+  double bytes_in = 6;
+  double bytes_out = 7;
+  double cost_usd_month = 8;       // network spend attributed to this node
+}
+
+message ServiceMapEdge {
+  string source = 1;               // node id
+  string target = 2;               // node id
+  int32 port = 3;
+  string protocol = 4;
+  double bytes = 5;
+  double bytes_per_sec = 6;
+  bool cross_zone = 7;
+  bool egress = 8;                 // leaves the cluster for the internet
+  double cost_usd_month = 9;
+  double retransmits = 10;
+}
+
+message GetServiceMapResponse {
+  repeated ServiceMapNode nodes = 1;
+  repeated ServiceMapEdge edges = 2;
+  double total_cost_usd_month = 3;
+  double cross_zone_gb = 4;
+  double egress_gb = 5;
+  string source = 6;               // live | demo
+}
+
+message ListNetworkCostsRequest {
+  string cluster_id = 1;
+  int64 start_unix_ms = 2;
+  int64 end_unix_ms = 3;
+  int32 limit = 4;
+}
+
+message NetworkCost {
+  string namespace = 1;
+  string workload = 2;
+  double egress_gb = 3;
+  double cross_zone_gb = 4;
+  double egress_usd_month = 5;
+  double cross_zone_usd_month = 6;
+  double total_usd_month = 7;
+  string top_destination = 8;
+}
+
+message ListNetworkCostsResponse {
+  repeated NetworkCost costs = 1;
+  double total_usd_month = 2;
+  string source = 3;               // live | demo
+}

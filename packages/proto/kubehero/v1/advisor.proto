@@ -24,6 +24,19 @@ service AdvisorService {
   // ListAdvice returns just the proposed actions — the dashboard's
   // action queue without the narrative.
   rpc ListAdvice(ListAdviceRequest) returns (ListAdviceResponse) {}
+
+  // Investigate answers a free-form operator question ("why did
+  // checkout's spend jump last night?") by running a read-only
+  // tool loop over every signal — cost allocation, anomalies, log
+  // volume + patterns, profiles, the network map, cluster events,
+  // rightsizing — and returning an answer grounded in cited evidence,
+  // plus guarded proposals. Same guardrail as briefings: read-only,
+  // proposals only, CRD-whitelisted.
+  rpc Investigate(InvestigateRequest) returns (InvestigateResponse) {}
+
+  // InvestigateStream is Investigate with live progress: one event per
+  // tool call, then the final response.
+  rpc InvestigateStream(InvestigateStreamRequest) returns (stream InvestigateStreamResponse) {}
 }
 
 // ─── GetBriefing ─────────────────────────────────────────────────────────
@@ -77,4 +90,57 @@ message ListAdviceRequest {
 
 message ListAdviceResponse {
   repeated ProposedAction actions = 1;
+}
+
+// ─── Investigate ─────────────────────────────────────────────────────────
+
+message InvestigateRequest {
+  string question = 1;
+  string cluster_id = 2;   // optional; empty = fleet-wide
+  string window = 3;       // "1h" | "24h" (default) | "7d"
+  // Optional dashboard context the question was asked from, e.g.
+  // "/workloads/eks-use1-prod/checkout/api" or an anomaly id.
+  string context = 4;
+}
+
+// EvidenceItem is one fact the answer rests on, with a deep link so a
+// human can verify it in two clicks.
+message EvidenceItem {
+  // cost | anomaly | logs | profile | network | event | rightsizing | alert
+  string kind = 1;
+  string title = 2;
+  string detail = 3;
+  string link_path = 4;    // dashboard path
+  string query = 5;        // e.g. the LogQL that produced it
+}
+
+message InvestigateStep {
+  string tool = 1;         // e.g. "query_logs"
+  string input_json = 2;
+  string summary = 3;      // one line: what came back
+  double duration_ms = 4;
+  bool error = 5;
+}
+
+message InvestigateResponse {
+  string id = 1;
+  string answer_markdown = 2;
+  string spoken_summary = 3;          // TTS-ready, ~20-40s
+  repeated EvidenceItem evidence = 4;
+  repeated ProposedAction actions = 5;
+  repeated InvestigateStep steps = 6;
+  string source = 7;                  // llm | rules | demo
+  int64 generated_at_unix = 8;
+}
+
+message InvestigateStreamRequest {
+  InvestigateRequest request = 1;
+}
+
+message InvestigateStreamResponse {
+  oneof event {
+    InvestigateStep step = 1;          // a tool call finished
+    string progress = 2;               // a short progress note
+    InvestigateResponse result = 3;    // terminal event
+  }
 }

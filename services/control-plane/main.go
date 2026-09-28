@@ -193,11 +193,16 @@ func serve(parent context.Context, addr string) error {
 			alertChannels = append(alertChannels, ch)
 		}
 	}
+	// One router serves both the ArmPolicy page-out and the alert rule
+	// evaluator; each rule carries its own channels.
+	router := alerter.NewRouter(alerter.NewSlack(), alerter.NewPagerDuty(), alerter.NewOpsGenie())
 	if len(alertChannels) > 0 {
-		rpcOpts.Alerts = alerter.NewRouter(alerter.NewSlack(), alerter.NewPagerDuty(), alerter.NewOpsGenie())
+		rpcOpts.Alerts = router
 		rpcOpts.AlertChannels = alertChannels
 		log.Info("alerting wired", "channels", len(alertChannels))
 	}
+	rpcOpts.PG = pg
+	rpcOpts.CH = ch
 	authCfg := auth.Config{
 		APIKeys:        auth.ParseAPIKeys(os.Getenv("KUBEHERO_API_KEYS")),
 		OIDCIssuer:     os.Getenv("OIDC_ISSUER_URL"),
@@ -215,6 +220,22 @@ func serve(parent context.Context, addr string) error {
 	interceptors := connect.WithInterceptors(auth.NewInterceptor(authCfg))
 	path, handler := kuberov1connect.NewControlPlaneServiceHandler(rpc.New(rpcOpts), interceptors)
 	mux.Handle(path, handler)
+
+	// Signal engines: logs / profiles / flows / usage / events ingest +
+	// LogQL, then cost allocation, profiling, network and alerting.
+	// Background loops (alert evaluation, tail pollers) stop with ctx.
+	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	deps := wireDeps{
+		Log:                  log,
+		PG:                   pg,
+		CH:                   ch,
+		Handler:              []connect.HandlerOption{interceptors},
+		DemoFixturesDisabled: fixturesOff,
+		Alerts:               router,
+	}
+	logEngine := wireTelemetry(ctx, mux, deps)
+	wireQuery(ctx, mux, deps, logEngine)
 
 	// SCIM 2.0 — opt-in via KUBEHERO_SCIM_TOKEN. When unset, every
 	// non-discovery SCIM endpoint returns 401, so external IdPs can
@@ -240,8 +261,6 @@ func serve(parent context.Context, addr string) error {
 		}
 	}()
 
-	ctx, cancel := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 	select {
 	case <-ctx.Done():
 		log.Info("shutting down")

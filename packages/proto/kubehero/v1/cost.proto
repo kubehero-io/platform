@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kubehero.v1;
+
+import "kubehero/v1/observe.proto";
+
+option go_package = "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1;kuberov1";
+
+// CostService is the allocation engine: OpenCost-compatible cost
+// allocation by any dimension (with idle and shared-cost handling),
+// spend time series, and percentile-based rightsizing computed from
+// measured container usage.
+//
+// The same allocation data is exposed over plain HTTP in OpenCost's
+// wire format (/allocation/compute) and as a FinOps FOCUS CSV export
+// (/api/v1/export/focus) — see the control-plane docs.
+service CostService {
+  rpc GetAllocation(GetAllocationRequest) returns (GetAllocationResponse) {}
+  rpc GetCostTimeseries(GetCostTimeseriesRequest) returns (GetCostTimeseriesResponse) {}
+  rpc ListRightsizing(ListRightsizingRequest) returns (ListRightsizingResponse) {}
+  rpc GetEfficiency(GetEfficiencyRequest) returns (GetEfficiencyResponse) {}
+}
+
+message GetAllocationRequest {
+  // "24h" | "7d" | "30d" | "today" | "yesterday" | "week" | "month" |
+  // "lastmonth" | an RFC3339 pair "2026-09-01T00:00:00Z,2026-09-08T00:00:00Z".
+  string window = 1;
+  // Dimensions to group by: cluster | namespace | workload | controller |
+  // pod | container | node | nodepool | team | cost_center | zone |
+  // label:<key>. Multiple = composite key joined with "/".
+  repeated string aggregate = 2;
+  // Exact-match filters on the same dimension names.
+  map<string, string> filters = 3;
+  bool include_idle = 4;           // add an "__idle__" row per cluster
+  // How idle cost is shared back: "" (kept separate) | "weighted" |
+  // "even".
+  string share_idle = 5;
+  // Namespaces whose cost is redistributed to everyone else (e.g.
+  // kube-system, monitoring), weighted by each row's own cost.
+  repeated string shared_namespaces = 6;
+  string cluster_id = 7;
+}
+
+message Allocation {
+  string name = 1;
+  map<string, string> properties = 2;
+  int64 start_unix_ms = 3;
+  int64 end_unix_ms = 4;
+  double minutes = 5;
+
+  double cpu_core_hours = 6;
+  double cpu_core_request_average = 7;
+  double cpu_core_usage_average = 8;
+  double cpu_cost = 9;
+  double cpu_efficiency = 10;      // usage / request, 0..1+
+
+  double ram_byte_hours = 11;
+  double ram_byte_request_average = 12;
+  double ram_byte_usage_average = 13;
+  double ram_cost = 14;
+  double ram_efficiency = 15;
+
+  double gpu_hours = 16;
+  double gpu_cost = 17;
+
+  double network_cost = 18;
+  double pv_cost = 19;
+  double shared_cost = 20;
+  double idle_cost = 21;
+  double total_cost = 22;
+  double total_efficiency = 23;
+
+  // KubeHero extensions beyond the OpenCost shape.
+  double recoverable_cost = 24;    // what rightsizing would recover
+  double log_ingest_gb = 25;       // log volume attributed to this row
+}
+
+message GetAllocationResponse {
+  repeated Allocation allocations = 1;
+  Allocation totals = 2;
+  int64 start_unix_ms = 3;
+  int64 end_unix_ms = 4;
+  string source = 5;               // live | demo
+}
+
+message GetCostTimeseriesRequest {
+  string window = 1;               // default "30d"
+  string step = 2;                 // "1h" | "1d" (default: auto)
+  string group_by = 3;             // "" (total) | namespace | team | cluster | nodepool | workload
+  map<string, string> filters = 4;
+  int32 top = 5;                   // keep the N largest groups, fold the rest into "other"
+  string cluster_id = 6;
+}
+
+message GetCostTimeseriesResponse {
+  repeated Series series = 1;      // value = $ spent in the step
+  double total_usd = 2;
+  // Linear projection of the current month's spend.
+  double forecast_month_usd = 3;
+  string source = 4;               // live | demo
+}
+
+message ListRightsizingRequest {
+  string cluster_id = 1;
+  string namespace = 2;
+  string window = 3;               // observation window; default "7d"
+  // Headroom added on top of the chosen percentile; default 15 (%).
+  double headroom_pct = 4;
+  // CPU percentile to size to: p90 | p95 (default) | p99 | max.
+  // Memory always sizes to max(p99, observed max) — OOM is not a
+  // tradeoff.
+  string cpu_percentile = 5;
+  double min_savings_usd_month = 6;
+  int32 limit = 7;
+}
+
+message RightsizingRecommendation {
+  string id = 1;                   // "<cluster>/<namespace>/<workload>/<container>"
+  string cluster = 2;
+  string namespace = 3;
+  string workload = 4;
+  string workload_kind = 5;
+  string container = 6;
+  int32 replicas = 7;
+
+  double cpu_request_cores = 8;
+  double cpu_limit_cores = 9;
+  double cpu_p50_cores = 10;
+  double cpu_p95_cores = 11;
+  double cpu_p99_cores = 12;
+  double cpu_max_cores = 13;
+  double cpu_recommended_cores = 14;
+
+  uint64 mem_request_bytes = 15;
+  uint64 mem_limit_bytes = 16;
+  uint64 mem_p50_bytes = 17;
+  uint64 mem_p99_bytes = 18;
+  uint64 mem_max_bytes = 19;
+  uint64 mem_recommended_bytes = 20;
+
+  double current_cost_usd_month = 21;
+  double recommended_cost_usd_month = 22;
+  double savings_usd_month = 23;   // negative = the workload is under-provisioned
+
+  int64 samples = 24;
+  string window = 25;
+  string confidence = 26;          // low | medium | high (by sample coverage)
+  string direction = 27;           // downsize | upsize | ok
+  string reason = 28;              // plain-English explanation
+  int32 oom_kills = 29;            // in the window; > 0 blocks memory downsizing
+  double cpu_throttle_risk = 30;   // 0..1: how often usage hit the limit
+}
+
+message ListRightsizingResponse {
+  repeated RightsizingRecommendation recommendations = 1;
+  double total_savings_usd_month = 2;
+  string source = 3;               // live | demo
+}
+
+message GetEfficiencyRequest {
+  string cluster_id = 1;
+  string window = 2;               // default "7d"
+}
+
+message EfficiencyBreakdown {
+  string name = 1;                 // cluster or namespace
+  double cpu_efficiency = 2;       // usage / request
+  double ram_efficiency = 3;
+  double idle_cost_usd_month = 4;
+  double total_cost_usd_month = 5;
+  double score = 6;                // 0..100
+}
+
+message GetEfficiencyResponse {
+  double score = 1;                // 0..100 fleet efficiency score
+  double cpu_efficiency = 2;
+  double ram_efficiency = 3;
+  double idle_cost_usd_month = 4;
+  double recoverable_usd_month = 5;
+  repeated EfficiencyBreakdown clusters = 6;
+  repeated EfficiencyBreakdown namespaces = 7;
+  string source = 8;               // live | demo
+}

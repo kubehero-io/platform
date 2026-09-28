@@ -51,3 +51,11 @@ cover.out
 # Helm subchart tarballs (resolved via `helm dep update`)
 deploy/helm/*/charts/
 deploy/helm/*/Chart.lock
+
+# Local go build outputs (never commit binaries)
+/services/*/collector
+/services/control-plane/control-plane
+/services/advisor/advisor
+/services/pricing-engine/pricing-engine
+/cli/kubehero/kubehero
+/infra/dagger/dagger
