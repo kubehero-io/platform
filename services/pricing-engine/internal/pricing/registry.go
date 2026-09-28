@@ -43,10 +43,10 @@ func (r *Registry) WithLive(s Source) *Registry {
 
 // Quote resolves a price. Algorithm:
 //
-//   1. Try the live source for `cloud` (skipped if not registered).
-//   2. On ErrUnimplemented / ErrNotFound, fall back to Static.
-//   3. On any other error, surface it (network failure shouldn't be
-//      hidden by the static map).
+//  1. Try the live source for `cloud` (skipped if not registered).
+//  2. On ErrUnimplemented / ErrNotFound, fall back to Static.
+//  3. On any other error, surface it (network failure shouldn't be
+//     hidden by the static map).
 //
 // The lifecycle string is normalised to lowercase before dispatch.
 func (r *Registry) Quote(ctx context.Context, cloud Cloud, sku, region, lifecycle string) (Quote, error) {
