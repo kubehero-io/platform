@@ -122,6 +122,23 @@ func (c *Client) ArmPolicy(req *ArmPolicyRequest) (*ArmPolicyResponse, error) {
 	return &out, err
 }
 
+// AppendAuditEntryRequest mirrors the proto. Payload is a proto bytes
+// field, so the JSON wire form is base64 — which is exactly how
+// encoding/json encodes []byte.
+type AppendAuditEntryRequest struct {
+	ClusterID  string `json:"clusterId,omitempty"`
+	ActorSub   string `json:"actorSub,omitempty"`
+	Action     string `json:"action"`
+	TargetKind string `json:"targetKind,omitempty"`
+	TargetName string `json:"targetName,omitempty"`
+	Payload    []byte `json:"payload,omitempty"`
+	Outcome    string `json:"outcome,omitempty"`
+}
+
+func (c *Client) AppendAuditEntry(req *AppendAuditEntryRequest) error {
+	return c.call("kubehero.v1.ControlPlaneService", "AppendAuditEntry", req, nil)
+}
+
 func (c *Client) Quote(cloud, sku, region, lifecycle string) (*QuoteResponse, error) {
 	var out QuoteResponse
 	err := c.call("kubehero.v1.PricingService", "Quote",

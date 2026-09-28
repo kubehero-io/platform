@@ -68,16 +68,3 @@ func capCmd() *cobra.Command {
 	c.Flags().StringVar(&reason, "reason", "", "Why you are arming/disarming (recorded in the audit log)")
 	return c
 }
-
-func undoCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "undo <audit-id>",
-		Short: "Reverse an applied action within its cooldown window",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintf(cmd.OutOrStdout(),
-				"undoing %s (rpc not wired yet — see /docs/cli for manual recovery)\n", args[0])
-			return nil
-		},
-	}
-}

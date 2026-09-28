@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) KubeHero contributors
 
-// Package llm is the Anthropic-backed advisor brain, active when
-// ANTHROPIC_API_KEY is set. It narrates the snapshot and proposes
-// guarded actions; every response is parsed leniently and pushed
-// through the same validation guardrail as the rules brain. On ANY
-// failure — API error, timeout, unparseable output — it falls back to
-// the deterministic rules brain, so briefings never 500 because
-// Anthropic is down.
+// Package llm is the Claude-backed advisor tier, active when
+// ANTHROPIC_API_KEY is set: the briefing brain here and the agentic
+// investigator in investigate.go. Every request streams, uses adaptive
+// thinking, opts into server-side refusal fallbacks, and asks for a
+// schema-constrained JSON answer that is still parsed leniently and
+// pushed through the same guardrail as the rules tier. On ANY failure —
+// API error, timeout, refusal, unparseable output — it falls back to the
+// deterministic rules tier, so nothing 500s because Anthropic is down.
 package llm
 
 import (
@@ -15,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -26,82 +26,60 @@ import (
 )
 
 // requestTimeout bounds a single briefing generation.
-const requestTimeout = 60 * time.Second
+const requestTimeout = 90 * time.Second
 
-// systemPrompt is the advisor persona. The CRD schema summaries are
-// distilled from services/operator/api/v1 types and config/samples so
-// the model can only propose manifests the operator actually accepts.
-const systemPrompt = `You are the KubeHero Advisor: a senior SRE / FinOps expert embedded in a Kubernetes cost and operations platform.
+// actionSchema is the JSON schema of one proposed action (shared by
+// briefings and investigations).
+var actionSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"id":                 map[string]any{"type": "string", "description": "stable slug"},
+		"title":              map[string]any{"type": "string", "description": "imperative title"},
+		"impact_monthly_usd": map[string]any{"type": "number", "description": "monthly USD impact, >= 0"},
+		"risk":               map[string]any{"type": "string", "enum": []string{"low", "medium", "high"}},
+		"kind": map[string]any{"type": "string", "enum": []string{
+			brain.KindRightsize, brain.KindCeilingArm, brain.KindConsolidate, brain.KindInvestigate}},
+		"target":    map[string]any{"type": "string", "description": "cluster/namespace/workload"},
+		"rationale": map[string]any{"type": "string", "description": "why, grounded in the data"},
+		"crd_yaml":  map[string]any{"type": "string", "description": "complete CRD manifest, or empty for workload.investigate"},
+	},
+	"required":             []string{"id", "title", "impact_monthly_usd", "risk", "kind", "target", "rationale", "crd_yaml"},
+	"additionalProperties": false,
+}
 
-Rules you must follow:
-- Be concise and concrete. Never invent data: only reference clusters, workloads, dollar amounts, and anomalies present in the snapshot JSON the user provides.
-- You are READ-ONLY. You only PROPOSE actions; humans apply them through KubeHero's arming flow. Never suggest imperative kubectl mutations.
-- Every proposed action must map to exactly one KubeHero policy CRD — BudgetPolicy, CeilingPolicy, or RightsizingPolicy — or be an investigate-only action with no manifest.
-- Prefer conservative defaults: recommend-mode rightsizing, alert-first escalations, humanArm: true.
+var briefingSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"headline":      map[string]any{"type": "string"},
+		"markdown":      map[string]any{"type": "string"},
+		"spoken_script": map[string]any{"type": "string"},
+		"actions":       map[string]any{"type": "array", "items": actionSchema},
+	},
+	"required":             []string{"headline", "markdown", "spoken_script", "actions"},
+	"additionalProperties": false,
+}
 
-KubeHero CRD schemas (apiVersion: kubehero.kubehero.io/v1, metadata.namespace: kubehero-system):
-
-1) BudgetPolicy — declarative spending intent.
-   spec:
-     scope: { clusterSelector|namespaceSelector: <label selector> }   # required
-     ceiling: "$100000/mo"                                            # required, "$<amount>/mo" or "/hr"
-     hardStop: <bool>                                                 # optional; false = advisory
-     humanArm: <bool>                                                 # keep true
-     escalation: [ {action: alert|hpa.cap|pod.evict|nodepool.cordon, ratioPercent: 1..100, waitAfter: "2m", channels: ["slack://ops"]} ]
-     alertChannels: ["slack://ops"]
-
-2) CeilingPolicy — burn-rate triggered enforcement.
-   spec:
-     budgetRef: <name of a BudgetPolicy>       # required
-     trigger: { burnRateMilli: >=1000, window: "5m" }   # required
-     escalation: [ <same steps as BudgetPolicy> ]
-     cooldown: "10m"
-     humanArm: true
-
-3) RightsizingPolicy — request right-sizing.
-   spec:
-     scope: { namespaceSelector: <label selector> }     # required
-     mode: recommend|apply|shadow                       # use recommend unless told otherwise
-     targetUtilization: 1..100
-     exclude: [<workload names>]
-     safety: { minReplicas: <int>, p95HeadroomPct: <int>, observationWindow: "14d", maxChangePerDay: <int> }
-
-Output format — respond with a SINGLE JSON object and nothing else (no prose, no markdown fences):
-{
-  "headline": "<one line, <=120 chars>",
-  "markdown": "<full briefing in markdown: spend summary, top savings, anomalies, proposed actions>",
-  "spoken_script": "<TTS-ready plain prose, 45-90 seconds spoken (~120-220 words), no markdown syntax>",
-  "actions": [
-    {
-      "id": "<stable slug>",
-      "title": "<imperative title>",
-      "impact_monthly_usd": <number >= 0>,
-      "risk": "low|medium|high",
-      "kind": "rightsize.requests|ceiling.arm|nodepool.consolidate|workload.investigate",
-      "target": "<cluster/namespace/workload>",
-      "rationale": "<why, grounded in the snapshot>",
-      "crd_yaml": "<complete YAML manifest for one of the three CRDs, or \"\" for workload.investigate>"
-    }
-  ]
-}`
-
-// Brain calls Anthropic and falls back to `Fallback` on any failure.
+// Brain calls Claude and falls back to `fallback` on any failure.
 type Brain struct {
 	client   anthropic.Client
+	cfg      Config
 	fallback brain.Brain
 	log      *slog.Logger
 }
 
-// New builds the LLM brain. The Anthropic client reads
-// ANTHROPIC_API_KEY from the environment.
-func New(fallback brain.Brain, log *slog.Logger) *Brain {
-	return &Brain{client: anthropic.NewClient(), fallback: fallback, log: log}
+// New builds the LLM briefing brain.
+func New(fallback brain.Brain, log *slog.Logger, cfg Config) *Brain {
+	return &Brain{client: cfg.client(), cfg: cfg, fallback: fallback, log: log}
 }
 
 func (b *Brain) Generate(ctx context.Context, snap *source.Snapshot) (*kuberov1.Briefing, error) {
 	briefing, err := b.generate(ctx, snap)
 	if err != nil {
-		b.log.Warn("llm brain failed, falling back to rules", "err", err)
+		attrs := []any{"err", err}
+		if r, ok := IsRefusal(err); ok {
+			attrs = append(attrs, "refusal_category", r.Category)
+		}
+		b.log.Warn("llm brain failed, falling back to rules", attrs...)
 		return b.fallback.Generate(ctx, snap)
 	}
 	return briefing, nil
@@ -115,19 +93,20 @@ func (b *Brain) generate(ctx context.Context, snap *source.Snapshot) (*kuberov1.
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
 	}
-	user := "Cluster data snapshot (window " + snap.Window + "):\n" + string(payload) +
-		"\n\nProduce the briefing JSON now."
+	user := "Cluster data snapshot (window " + snap.Window + "):\n<snapshot>\n" + string(payload) +
+		"\n</snapshot>\n\nWrite the briefing."
 
-	stream := b.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeOpus4_8,
-		MaxTokens: 16000,
-		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}},
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
-		},
-	})
-	message := anthropic.Message{}
+	params := b.cfg.baseParams(briefingSystemPrompt)
+	params.Messages = []anthropic.BetaMessageParam{
+		anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(user)),
+	}
+	params.OutputConfig = anthropic.BetaOutputConfigParam{
+		Format: anthropic.BetaJSONOutputFormatParam{Schema: briefingSchema},
+	}
+
+	stream := b.client.Beta.Messages.NewStreaming(ctx, params)
+	defer stream.Close()
+	message := anthropic.BetaMessage{}
 	for stream.Next() {
 		if err := message.Accumulate(stream.Current()); err != nil {
 			return nil, fmt.Errorf("accumulate stream: %w", err)
@@ -136,14 +115,13 @@ func (b *Brain) generate(ctx context.Context, snap *source.Snapshot) (*kuberov1.
 	if err := stream.Err(); err != nil {
 		return nil, fmt.Errorf("anthropic stream: %w", err)
 	}
-
-	var text strings.Builder
-	for _, block := range message.Content {
-		if t, ok := block.AsAny().(anthropic.TextBlock); ok {
-			text.WriteString(t.Text)
-		}
+	if err := checkStop(&message); err != nil {
+		return nil, err
 	}
-	briefing, err := parseBriefing(text.String())
+	if model, fell := servedBy(&message); fell {
+		b.log.Info("briefing served by server-side fallback model", "model", model)
+	}
+	briefing, err := parseBriefing(messageText(&message))
 	if err != nil {
 		return nil, fmt.Errorf("parse llm output: %w", err)
 	}

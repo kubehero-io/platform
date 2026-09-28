@@ -13,11 +13,13 @@ var Version = "0.0.0-dev"
 
 // global flags shared by every subcommand
 var (
-	flagEndpoint string
-	flagToken    string
-	flagOrg      string
-	flagOutput   string
-	flagInsecure bool
+	flagEndpoint        string
+	flagAdvisorEndpoint string
+	flagToken           string
+	flagOrg             string
+	flagOutput          string
+	flagInsecure        bool
+	flagNoColor         bool
 )
 
 func Root() *cobra.Command {
@@ -35,9 +37,13 @@ func Root() *cobra.Command {
 	pf.StringVar(&flagOrg, "org", "", "Organization slug")
 	pf.StringVarP(&flagOutput, "output", "o", "", "Output format: table | json | yaml | wide")
 	pf.BoolVar(&flagInsecure, "insecure", false, "Skip TLS verification (dev only)")
+	pf.StringVar(&flagAdvisorEndpoint, "advisor-endpoint", "", "Advisor URL for ask / mcp (default: --endpoint)")
+	pf.BoolVar(&flagNoColor, "no-color", false, "Disable colour (also honours NO_COLOR)")
 
 	root.AddCommand(scanCmd(), rightsizeCmd(), applyCmd(), quoteCmd(),
-		clusterCmd(), authCmd(), healthCmd(), capCmd(), undoCmd())
+		clusterCmd(), authCmd(), healthCmd(), capCmd(), undoCmd(),
+		logsCmd(), profileCmd(), costCmd(), networkCmd(), alertsCmd(),
+		askCmd(), mcpCmd())
 	return root
 }
 
@@ -52,6 +58,9 @@ func resolveConfig() *config.Config {
 	}
 	if flagOrg != "" {
 		c.Org = flagOrg
+	}
+	if flagAdvisorEndpoint != "" {
+		c.AdvisorEndpoint = flagAdvisorEndpoint
 	}
 	if flagOutput != "" {
 		c.Output = flagOutput

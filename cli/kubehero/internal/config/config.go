@@ -5,8 +5,9 @@
 //
 // Resolution order (later wins):
 //   1. ~/.kubehero/config.yaml
-//   2. KUBEHERO_ENDPOINT, KUBEHERO_TOKEN, KUBEHERO_ORG env vars
-//   3. --endpoint, --token, --org flags
+//   2. KUBEHERO_ENDPOINT, KUBEHERO_TOKEN, KUBEHERO_ORG,
+//      KUBEHERO_ADVISOR_ENDPOINT env vars
+//   3. --endpoint, --token, --org, --advisor-endpoint flags
 
 package config
 
@@ -19,11 +20,15 @@ import (
 )
 
 type Config struct {
-	Endpoint string `yaml:"endpoint"`           // e.g. https://api.kubehero.io
-	Token    string `yaml:"token,omitempty"`    // bearer token; do not log
-	Org      string `yaml:"org,omitempty"`      // optional default org slug
-	Output   string `yaml:"output,omitempty"`   // table · json · yaml · wide
-	Insecure bool   `yaml:"insecure,omitempty"` // skip TLS verify
+	Endpoint string `yaml:"endpoint"`        // e.g. https://api.kubehero.io
+	Token    string `yaml:"token,omitempty"` // bearer token; do not log
+	// AdvisorEndpoint is where AdvisorService lives (kubehero ask, the
+	// MCP briefing/investigate tools). Empty = Endpoint, for ingresses
+	// that route /kubehero.v1.AdvisorService/ to the advisor.
+	AdvisorEndpoint string `yaml:"advisorEndpoint,omitempty"`
+	Org             string `yaml:"org,omitempty"`      // optional default org slug
+	Output          string `yaml:"output,omitempty"`   // table · json · yaml · wide
+	Insecure        bool   `yaml:"insecure,omitempty"` // skip TLS verify
 }
 
 const dirName = ".kubehero"
@@ -54,6 +59,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("KUBEHERO_ORG"); v != "" {
 		c.Org = v
+	}
+	if v := os.Getenv("KUBEHERO_ADVISOR_ENDPOINT"); v != "" {
+		c.AdvisorEndpoint = v
 	}
 	if c.Output == "" {
 		c.Output = "table"

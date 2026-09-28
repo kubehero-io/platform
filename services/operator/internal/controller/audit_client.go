@@ -65,12 +65,7 @@ func (h *HTTPAuditEmitter) Emit(ctx context.Context, e AuditEvent) error {
 		return errors.New("AuditEvent.Action is required")
 	}
 
-	// Caller may set either raw bytes or a JSON-marshalable struct.
-	if len(e.Payload) > 0 && e.PayloadJSON == nil {
-		e.PayloadJSON = json.RawMessage(e.Payload)
-	}
-
-	body, err := json.Marshal(e)
+	body, err := wireBody(e)
 	if err != nil {
 		return err
 	}
@@ -97,4 +92,40 @@ func (h *HTTPAuditEmitter) Emit(ctx context.Context, e AuditEvent) error {
 			resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	return nil
+}
+
+// auditWire is AppendAuditEntryRequest in Connect-JSON (protojson) form.
+// payload is a proto bytes field, so on the wire it must be a base64
+// string — encoding/json renders []byte exactly that way. Sending the
+// payload as a JSON object (as this client once did) is rejected by the
+// control plane's protojson codec.
+type auditWire struct {
+	Org            string  `json:"org,omitempty"`
+	ClusterID      string  `json:"clusterId,omitempty"`
+	ActorSub       string  `json:"actorSub,omitempty"`
+	ActorEmail     string  `json:"actorEmail,omitempty"`
+	Action         string  `json:"action"`
+	TargetKind     string  `json:"targetKind,omitempty"`
+	TargetName     string  `json:"targetName,omitempty"`
+	Payload        []byte  `json:"payload,omitempty"`
+	Outcome        string  `json:"outcome,omitempty"`
+	EffectUsdMonth float64 `json:"effectUsdMonth,omitempty"`
+}
+
+// wireBody encodes e for AppendAuditEntry. Callers may set either raw
+// Payload bytes (already JSON) or a JSON-marshalable PayloadJSON.
+func wireBody(e AuditEvent) ([]byte, error) {
+	payload := e.Payload
+	if len(payload) == 0 && e.PayloadJSON != nil {
+		b, err := json.Marshal(e.PayloadJSON)
+		if err != nil {
+			return nil, fmt.Errorf("marshal audit payload: %w", err)
+		}
+		payload = b
+	}
+	return json.Marshal(auditWire{
+		Org: e.Org, ClusterID: e.ClusterID, ActorSub: e.ActorSub, ActorEmail: e.ActorEmail,
+		Action: e.Action, TargetKind: e.TargetKind, TargetName: e.TargetName,
+		Payload: payload, Outcome: e.Outcome, EffectUsdMonth: e.EffectUsdMonth,
+	})
 }

@@ -1,0 +1,28 @@
+# Test fixture: a schemaless stand-in for the Kubernetes autoscaler
+# project's VerticalPodAutoscaler CRD, so envtest can exercise the
+# rightsizer's "VPA manages this container" guard. Only the fields the
+# operator reads (spec.targetRef, spec.resourcePolicy) matter.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: verticalpodautoscalers.autoscaling.k8s.io
+  annotations:
+    # *.k8s.io groups are protected; the upstream VPA CRD carries this.
+    api-approved.kubernetes.io: https://github.com/kubernetes/kubernetes/pull/63797
+spec:
+  group: autoscaling.k8s.io
+  names:
+    kind: VerticalPodAutoscaler
+    listKind: VerticalPodAutoscalerList
+    plural: verticalpodautoscalers
+    singular: verticalpodautoscaler
+    shortNames: [vpa]
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          x-kubernetes-preserve-unknown-fields: true

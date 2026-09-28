@@ -5,6 +5,22 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
   - apps
   resources:
   - deployments
@@ -12,7 +28,30 @@ rules:
   verbs:
   - get
   - list
+  - patch
   - watch
+- apiGroups:
+  - aquasecurity.github.io
+  resources:
+  - vulnerabilityreports
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - autoscaling.k8s.io
+  resources:
+  - verticalpodautoscalers
+  verbs:
+  - get
+  - list
 - apiGroups:
   - kubehero.kubehero.io
   resources:

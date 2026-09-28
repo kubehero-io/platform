@@ -14,7 +14,23 @@ spec:
     singular: rightsizingpolicy
   scope: Namespaced
   versions:
-  - name: v1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.workloadsInScope
+      name: Workloads
+      type: integer
+    - jsonPath: .status.totalSavingsUsdMonth
+      name: Savings/mo
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Armed")].status
+      name: Armed
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
     schema:
       openAPIV3Schema:
         description: RightsizingPolicy is the Schema for the rightsizingpolicies API
@@ -39,13 +55,40 @@ spec:
           spec:
             description: spec defines the desired state of RightsizingPolicy
             properties:
+              adjustLimits:
+                description: |-
+                  AdjustLimits also scales existing CPU / memory limits so the
+                  limit:request ratio is preserved. When false (the default) only
+                  requests change, and a request is never raised above its limit.
+                type: boolean
               exclude:
                 description: Exclude is a list of workload names to skip entirely.
                 items:
                   type: string
                 type: array
+              humanArm:
+                description: |-
+                  HumanArm requires an operator to arm the policy (the
+                  kubehero.kubehero.io/armed="true" annotation, set by
+                  `kubehero cap --arm` or the dashboard) before apply mode mutates
+                  anything. Defaults true.
+                type: boolean
+              minConfidence:
+                description: |-
+                  MinConfidence is the lowest recommendation confidence apply mode
+                  acts on. Confidence reflects sample coverage of the observation
+                  window. Defaults to medium.
+                enum:
+                - low
+                - medium
+                - high
+                type: string
               mode:
-                description: Mode controls how recommendations are applied.
+                description: |-
+                  Mode controls how recommendations are applied:
+                  recommend — surface per-container recommendations in status only;
+                  shadow — additionally compute and audit what apply WOULD change;
+                  apply — patch container requests when every safety guard passes.
                 enum:
                 - recommend
                 - apply
@@ -55,19 +98,37 @@ spec:
                 description: Safety caps change frequency to avoid thrash.
                 properties:
                   maxChangePerDay:
+                    description: |-
+                      MaxChangePerDay caps applied changes per workload per UTC day.
+                      Defaults to 1; 0 blocks all changes.
                     format: int32
                     type: integer
                   minReplicas:
+                    description: |-
+                      MinReplicas skips workloads running fewer replicas than this — a
+                      resource change rolls every pod, which a single replica can't do
+                      without a gap. Defaults to 1.
                     format: int32
                     type: integer
                   observationWindow:
+                    description: |-
+                      ObservationWindow is the usage window recommendations are computed
+                      over, e.g. "7d" or "36h" (1h..90d). Defaults to "7d".
                     type: string
                   p95HeadroomPct:
+                    description: |-
+                      P95HeadroomPct is the headroom added on top of the sized
+                      percentile. Defaults to 15.
                     format: int32
                     type: integer
                 type: object
               scope:
-                description: Scope narrows this policy to specific clusters / namespaces.
+                description: |-
+                  Scope narrows this policy to specific clusters / namespaces.
+                  clusterSelector is matched against the operator's cluster labels
+                  (CLUSTER_LABELS plus kubehero.io/cluster-id); unset matches every
+                  cluster. namespaceSelector is matched against Namespace labels;
+                  unset selects nothing and {} selects every non-system namespace.
                 properties:
                   clusterSelector:
                     description: |-
@@ -169,8 +230,10 @@ spec:
                     x-kubernetes-map-type: atomic
                 type: object
               targetUtilization:
-                description: TargetUtilization is the desired p95 utilization percentage
-                  (0..100).
+                description: |-
+                  TargetUtilization is the desired p95 utilization percentage (0..100).
+                  When set it wins over safety.p95HeadroomPct: the headroom sent to the
+                  recommender is 100/targetUtilization − 1 (70 → ~43% headroom).
                 format: int32
                 maximum: 100
                 minimum: 1
@@ -185,14 +248,8 @@ spec:
               conditions:
                 description: |-
                   conditions represent the current state of the RightsizingPolicy resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                  Ready reports spec validity and scope; Armed the human-arm gate;
+                  DataAvailable whether the control plane served live recommendations.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -251,6 +308,229 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              lastApplied:
+                description: LastApplied is when apply mode last patched a workload.
+                format: date-time
+                type: string
+              lastEvaluated:
+                description: LastEvaluated is when recommendations were last fetched
+                  and evaluated.
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the spec generation last evaluated.
+                format: int64
+                type: integer
+              plannedChanges:
+                description: |-
+                  PlannedChanges (shadow + apply modes) is the guard-evaluated change
+                  set from the last evaluation (capped at 50 entries).
+                items:
+                  description: PlannedChange is a guard-evaluated change for one container.
+                  properties:
+                    changeId:
+                      description: |-
+                        ChangeID ties an applied change to its audit event and to the
+                        workload's kubehero.io/rightsize-previous annotation; pass it to
+                        `kubehero undo` to restore the previous requests.
+                      type: string
+                    container:
+                      type: string
+                    cpuLimit:
+                      description: QuantityChange is a from → to pair for one resource
+                        value.
+                      properties:
+                        from:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        to:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                      required:
+                      - from
+                      - to
+                      type: object
+                    cpuRequest:
+                      description: QuantityChange is a from → to pair for one resource
+                        value.
+                      properties:
+                        from:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        to:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                      required:
+                      - from
+                      - to
+                      type: object
+                    kind:
+                      type: string
+                    memoryLimit:
+                      description: QuantityChange is a from → to pair for one resource
+                        value.
+                      properties:
+                        from:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        to:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                      required:
+                      - from
+                      - to
+                      type: object
+                    memoryRequest:
+                      description: QuantityChange is a from → to pair for one resource
+                        value.
+                      properties:
+                        from:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        to:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                      required:
+                      - from
+                      - to
+                      type: object
+                    namespace:
+                      type: string
+                    outcome:
+                      description: Outcome is planned (shadow), applied, blocked,
+                        or failed.
+                      enum:
+                      - planned
+                      - applied
+                      - blocked
+                      - failed
+                      type: string
+                    reason:
+                      description: |-
+                        Reason names the guard that blocked the change, or notes how the
+                        target was bounded (step limit, observed max, limit ceiling).
+                      type: string
+                    savingsUsdMonth:
+                      type: string
+                    workload:
+                      type: string
+                  required:
+                  - container
+                  - kind
+                  - namespace
+                  - outcome
+                  - workload
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              plannedChangesHash:
+                description: |-
+                  PlannedChangesHash fingerprints the planned set so a shadow audit
+                  event is emitted only when what WOULD change actually changes.
+                type: string
+              recommendations:
+                description: |-
+                  Recommendations lists per-container suggestions, largest saving
+                  first (capped at 50 entries; totalSavingsUsdMonth covers them all).
+                items:
+                  description: |-
+                    ContainerRecommendation is one container's right-size suggestion,
+                    joined against the live workload spec (current values are what the
+                    pod template requests right now, not what the recommender last saw).
+                  properties:
+                    confidence:
+                      description: Confidence is low | medium | high (sample coverage
+                        of the window).
+                      type: string
+                    container:
+                      type: string
+                    currentCpuRequest:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    currentMemoryRequest:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    kind:
+                      description: Kind is Deployment or StatefulSet.
+                      type: string
+                    namespace:
+                      type: string
+                    oomKills:
+                      description: OOMKills observed in the window; > 0 blocks memory
+                        decreases.
+                      format: int32
+                      type: integer
+                    reason:
+                      description: Reason is the recommender's plain-English explanation.
+                      type: string
+                    recommendedCpuRequest:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    recommendedMemoryRequest:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    savingsUsdMonth:
+                      description: |-
+                        SavingsUSDMonth is the monthly saving in USD ("1234.56"); negative
+                        means the container is under-provisioned and sizing up costs more.
+                      type: string
+                    workload:
+                      type: string
+                  required:
+                  - container
+                  - kind
+                  - namespace
+                  - workload
+                  type: object
+                type: array
+                x-kubernetes-list-type: atomic
+              totalSavingsUsdMonth:
+                description: |-
+                  TotalSavingsUSDMonth sums savingsUsdMonth over every in-scope
+                  recommendation, in USD ("1234.56").
+                type: string
+              workloadsInScope:
+                description: |-
+                  WorkloadsInScope counts Deployments + StatefulSets the policy covers
+                  after exclusions.
+                format: int32
+                type: integer
             type: object
         required:
         - spec
