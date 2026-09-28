@@ -71,3 +71,4 @@ Open source and free to self-host.
 
 - Apache 2.0 — CLI, collector, cost-model, proto
 - BSL 1.1 — control plane, operator, advisor, pricing engine, dashboard (source-available, free to run yourself)
+- GPL-2.0-only OR Apache-2.0 — the eBPF programs in `services/collector/internal/ebpf/bpf/` (the kernel only lets GPL-compatible programs call the helpers they use); the Go loader and the rest of the collector are Apache 2.0. Texts: `LICENSE-APACHE-2.0`, `LICENSE-BSL-1.1`, `LICENSE-GPL-2.0`.

@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.26.5"
+  GO_VERSION: "1.26.8"
   GO_MODULES: >-
     services/advisor services/control-plane services/collector
     services/pricing-engine services/operator cli/kubehero

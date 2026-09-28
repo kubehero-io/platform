@@ -9,7 +9,7 @@
 # this module in the context — adding a module elsewhere in the repo never
 # breaks this image.
 
-FROM golang:1.26.5-alpine AS build
+FROM golang:1.26.8-alpine AS build
 WORKDIR /src
 RUN apk add --no-cache git
 ENV GOWORK=off CGO_ENABLED=0

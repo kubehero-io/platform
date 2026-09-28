@@ -2,7 +2,7 @@ module github.com/kubehero-io/platform/services/control-plane
 
 go 1.26.2
 
-toolchain go1.26.5
+toolchain go1.26.8
 
 require (
 	connectrpc.com/connect v1.20.0

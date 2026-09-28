@@ -7,7 +7,7 @@
 # integration tests; both need Docker, neither needs clang on the host.
 
 REPO_ROOT := $(abspath ../..)
-GO_IMAGE ?= golang:1.26.5
+GO_IMAGE ?= golang:1.26.8
 
 .PHONY: bpf ebpf-test
 

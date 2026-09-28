@@ -31,7 +31,7 @@ fi
 # with. clang/llvm are pinned to the Debian 13 major version; the tag is
 # content-addressed so an edit here rebuilds it and nothing else does.
 dockerfile="$(cat <<'EOF'
-FROM golang:1.26.5-trixie
+FROM golang:1.26.8-trixie
 RUN apt-get update \
  && apt-get install -y --no-install-recommends clang-19 llvm-19 libbpf-dev \
  && rm -rf /var/lib/apt/lists/*

@@ -10,7 +10,7 @@
 //
 //	docker run --rm --privileged --pid=host --cgroupns=host \
 //	  -v /sys/fs/cgroup:/sys/fs/cgroup -v /sys/kernel:/sys/kernel \
-//	  -v $REPO:/src -w /src/services/collector golang:1.26.5 \
+//	  -v $REPO:/src -w /src/services/collector golang:1.26.8 \
 //	  go test -tags ebpfintegration -count=1 -v ./internal/ebpf/...
 
 package ebpf

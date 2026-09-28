@@ -3,7 +3,7 @@
 # Demo telemetry generator (see main.go). Built from the REPO ROOT:
 #   docker build -f infra/demo/generator/Dockerfile .
 
-FROM golang:1.26.5-alpine AS build
+FROM golang:1.26.8-alpine AS build
 WORKDIR /src
 ENV GOWORK=off CGO_ENABLED=0
 COPY packages/proto/go.mod packages/proto/go.sum packages/proto/
