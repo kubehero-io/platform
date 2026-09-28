@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 
 	"github.com/kubehero-io/platform/services/collector/internal/app"
 )
@@ -91,6 +92,9 @@ func serveCmd() *cobra.Command {
 				return fmt.Errorf("--log-level: %w", err)
 			}
 			cfg.Logger = slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+			// client-go (leader election, reflectors) logs through klog;
+			// send it to the same JSON stream.
+			klog.SetSlogLogger(cfg.Logger)
 
 			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
@@ -102,7 +106,11 @@ func serveCmd() *cobra.Command {
 	f.BoolVar(&cfg.Demo, "demo", false, "also expose synthetic chargeback series (labelled source=\"demo\") on /metrics")
 	f.StringVar(&logLevel, "log-level", "info", "log level: debug | info | warn | error")
 	f.StringVar(&cfg.Kubeconfig, "kubeconfig", "", "kubeconfig path for out-of-cluster runs (default $KUBECONFIG or ~/.kube/config)")
-	f.DurationVar(&cfg.ScanInterval, "scan-interval", 5*time.Second, "cost scan interval (pod + node cost samples)")
+	f.DurationVar(&cfg.ScanInterval, "scan-interval", 5*time.Second, "cost scan + container-status event interval")
+	f.DurationVar(&cfg.UsageInterval, "usage-interval", 30*time.Second, "per-container usage sample interval (rightsizing history)")
+	f.BoolVar(&cfg.Events, "events", true, "detect health events (OOM kills, crash loops, image pull failures, unschedulable pods, evictions, node pressure)")
+	f.BoolVar(&cfg.LeaderElect, "leader-elect", true,
+		"run cluster-scoped duties (pending pods, Warning events, node conditions) only on the holder of the kubehero-collector Lease in $POD_NAMESPACE")
 	f.StringVar(&cfg.KubeletURL, "kubelet-url", "",
 		"read stats straight from this kubelet (e.g. https://$(NODE_IP):10250; needs get nodes/stats) instead of via the API-server node proxy (needs get nodes/proxy)")
 	f.BoolVar(&cfg.KubeletInsecureTLS, "kubelet-insecure-tls", false, "skip kubelet serving-certificate verification with --kubelet-url")

@@ -24,11 +24,14 @@ import (
 
 	kuberov1 "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1"
 	"github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1/kuberov1connect"
+	"github.com/kubehero-io/platform/services/collector/internal/events"
 	"github.com/kubehero-io/platform/services/collector/internal/ingest"
 	"github.com/kubehero-io/platform/services/collector/internal/kube"
 	"github.com/kubehero-io/platform/services/collector/internal/kubeletstats"
+	"github.com/kubehero-io/platform/services/collector/internal/leader"
 	"github.com/kubehero-io/platform/services/collector/internal/metrics"
 	"github.com/kubehero-io/platform/services/collector/internal/ship"
+	"github.com/kubehero-io/platform/services/collector/internal/usage"
 )
 
 // Config is everything the process needs, assembled by main from flags
@@ -50,9 +53,19 @@ type Config struct {
 	PricingEngineURL  string
 
 	ScanInterval       time.Duration
+	UsageInterval      time.Duration
 	KubeletURL         string
 	KubeletInsecureTLS bool
 	KubeletStatsTTL    time.Duration
+
+	// Events enables health-event detection (node-local container
+	// status; cluster-scoped sources on the leader).
+	Events bool
+	// LeaderElect runs cluster-scoped duties only on the holder of the
+	// LeaseName Lease in PodNamespace. Disabling it runs them on EVERY
+	// collector (only sensible for a single-node or dev setup).
+	LeaderElect bool
+	LeaseName   string
 
 	// ShutdownTimeout bounds the final queue flush.
 	ShutdownTimeout time.Duration
@@ -94,6 +107,12 @@ func newApp(cfg Config) (*App, error) {
 	}
 	if cfg.ShutdownTimeout <= 0 {
 		cfg.ShutdownTimeout = 10 * time.Second
+	}
+	if cfg.UsageInterval <= 0 {
+		cfg.UsageInterval = 30 * time.Second
+	}
+	if cfg.LeaseName == "" {
+		cfg.LeaseName = "kubehero-collector"
 	}
 	a := &App{cfg: cfg, log: cfg.Logger}
 	if cfg.ClusterID == "" {
@@ -174,6 +193,13 @@ func (a *App) run(ctx context.Context) error {
 	}, a.local, owners, stats, ingest.NewPricer(pricingClient, a.log), emitCost)
 	a.goLoop(ctx, &wg, a.scanner.Run)
 
+	if a.ship != nil {
+		a.startUsage(ctx, &wg, owners, stats)
+		if a.cfg.Events {
+			a.startEvents(ctx, &wg, owners)
+		}
+	}
+
 	select {
 	case <-ctx.Done():
 	case err := <-srvErr:
@@ -219,6 +245,63 @@ func (a *App) goLoop(ctx context.Context, wg *sync.WaitGroup, f func(context.Con
 		defer wg.Done()
 		f(ctx)
 	}()
+}
+
+func (a *App) startUsage(ctx context.Context, wg *sync.WaitGroup, owners *kube.OwnerResolver, stats kubeletstats.Provider) {
+	q := ship.NewQueue(ship.QueueConfig{Signal: "usage", MaxItems: 50_000, MaxBytes: 16 << 20}, a.ship.SendUsage, a.log)
+	a.startQueue(ctx, wg, q.Run, q.Flush)
+	sampler := usage.New(usage.Config{
+		ClusterID: a.cfg.ClusterID, NodeName: a.cfg.NodeName, Interval: a.cfg.UsageInterval, Logger: a.log,
+	}, a.local, owners, stats, func(r *kuberov1.IngestUsageRequest) {
+		q.Enqueue(ship.Batch[*kuberov1.IngestUsageRequest]{Req: r, Items: len(r.Usage), Bytes: proto.Size(r)})
+	})
+	a.goLoop(ctx, wg, sampler.Run)
+}
+
+// startEvents runs node-local status detection on every collector and
+// the cluster-scoped sources on the elected leader only.
+func (a *App) startEvents(ctx context.Context, wg *sync.WaitGroup, owners *kube.OwnerResolver) {
+	q := ship.NewQueue(ship.QueueConfig{Signal: "events", MaxItems: 20_000, MaxBytes: 16 << 20}, a.ship.SendEvents, a.log)
+	a.startQueue(ctx, wg, q.Run, q.Flush)
+	batcher := events.NewBatcher(a.cfg.ClusterID, 5*time.Second, func(r *kuberov1.IngestEventsRequest) {
+		q.Enqueue(ship.Batch[*kuberov1.IngestEventsRequest]{Req: r, Items: len(r.Events), Bytes: proto.Size(r)})
+	})
+	a.goLoop(ctx, wg, batcher.Run)
+
+	detector := events.NewStatusDetector(a.local, owners)
+	a.goLoop(ctx, wg, func(ctx context.Context) {
+		tickLoop(ctx, a.cfg.ScanInterval, func(now time.Time) {
+			batcher.Add("status", detector.Detect(ctx, now)...)
+		})
+	})
+
+	duties := func(lctx context.Context) {
+		events.NewClusterWatcher(events.ClusterConfig{Logger: a.log}, a.kube, owners, batcher.Add).Run(lctx)
+	}
+	if !a.cfg.LeaderElect {
+		a.log.Warn("--leader-elect=false — cluster-scoped event sources run on this collector unconditionally")
+		a.goLoop(ctx, wg, duties)
+		return
+	}
+	a.goLoop(ctx, wg, func(ctx context.Context) {
+		leader.Run(ctx, leader.Config{
+			Client: a.kube, Namespace: a.cfg.PodNamespace, Name: a.cfg.LeaseName, Identity: a.cfg.PodName, Logger: a.log,
+		}, duties)
+	})
+}
+
+// tickLoop calls fn every interval until ctx ends.
+func tickLoop(ctx context.Context, interval time.Duration, fn func(time.Time)) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			fn(now)
+		}
+	}
 }
 
 func (a *App) statsProvider() (kubeletstats.Provider, error) {
