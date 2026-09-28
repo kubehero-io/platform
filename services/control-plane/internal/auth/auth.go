@@ -358,10 +358,16 @@ func splitKey(e string) (string, Role) {
 		token := strings.TrimSpace(e[:i])
 		role := strings.ToLower(strings.TrimSpace(e[i+1:]))
 		switch role {
+		case "owner":
+			return token, RoleOwner
 		case "admin":
 			return token, RoleAdmin
+		case "auditor":
+			return token, RoleAuditor
 		case "member":
 			return token, RoleMember
+		case "viewer":
+			return token, RoleViewer
 		}
 		// Unknown suffix — treat the whole string as a token + member.
 	}
