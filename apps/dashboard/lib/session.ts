@@ -1,20 +1,25 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) KubeHero contributors
 
-// Demo-mode session: a single HMAC-signed cookie. No server-side store,
-// no password, no JWT. It's here to shape the UX — arriving design
-// partners experience a real login → onboarding → dashboard flow without
-// us having to wire a real auth provider first.
+// Session: a single encrypted, HMAC-signed cookie (lib/session-crypto.ts).
+// No server-side store.
 //
-// The cookie is httpOnly + signed (see lib/session-crypto.ts) so it can't
-// be read or forged from the browser; invalid or tampered cookies read as
-// logged-out. All reads/writes happen server-side (server components,
-// server actions, route handlers).
+// Two flavours, chosen by lib/auth-mode.ts:
+//   demo   any email, no password — the product tour, only without a
+//          control plane behind the dashboard.
+//   token  the user signed in with a control-plane credential that
+//          WhoAmI validated; the cookie carries that credential so every
+//          server-side RPC runs AS the user. The token never reaches
+//          client components — use getSessionView() for anything that is
+//          rendered.
 //
-// When we ship real auth (Clerk / WorkOS / Dex), this file is the only
-// seam that changes.
+// All reads/writes happen server-side (server components, server
+// actions, route handlers); the cookie is httpOnly.
 
 import { cookies } from "next/headers";
+import { sessionAcceptable } from "./auth-gate";
+import { authMode, type AuthMode } from "./auth-mode";
+import type { Role } from "./roles";
 import { signSession, verifySession } from "./session-crypto";
 
 export type Session = {
@@ -22,19 +27,47 @@ export type Session = {
   org: string;
   onboarded: boolean;
   createdAt: number;
+  /** Absent on sessions minted before auth modes existed → demo. */
+  mode?: AuthMode;
+  /** Token mode: the user's control-plane credential. Server-only. */
+  token?: string;
+  role?: Role;
+  /** WhoAmI subject — key hash, OIDC sub, or "anonymous". */
+  subject?: string;
+  /** Epoch ms after which the session is refused. */
+  expiresAt?: number;
 };
 
+/** What UI code may see: everything except the credential. */
+export type SessionView = Omit<Session, "token"> & { hasToken: boolean };
+
 export const SESSION_COOKIE = "kh_session";
-const MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+const DEMO_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+export const TOKEN_MAX_AGE = 60 * 60 * 12; // 12 hours — it holds a credential
 
 export async function getSession(): Promise<Session | null> {
-  const c = await cookies();
-  const raw = c.get(SESSION_COOKIE)?.value;
+  let raw: string | undefined;
+  try {
+    const c = await cookies();
+    raw = c.get(SESSION_COOKIE)?.value;
+  } catch {
+    // Outside a request scope (e.g. unit tests of the RPC layer): no user.
+    return null;
+  }
   if (!raw) return null;
-  return verifySession(raw);
+  const s = verifySession(raw);
+  if (!s || !sessionAcceptable(s, authMode())) return null;
+  return s;
 }
 
-export async function setSession(patch: Partial<Session>) {
+export async function getSessionView(): Promise<SessionView | null> {
+  const s = await getSession();
+  if (!s) return null;
+  const { token, ...rest } = s;
+  return { ...rest, hasToken: !!token };
+}
+
+export async function setSession(patch: Partial<Session>, opts: { maxAgeSec?: number } = {}) {
   const current = (await getSession()) ?? {
     email: "",
     org: "",
@@ -48,7 +81,7 @@ export async function setSession(patch: Partial<Session>) {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: MAX_AGE,
+    maxAge: opts.maxAgeSec ?? DEMO_MAX_AGE,
   });
 }
 

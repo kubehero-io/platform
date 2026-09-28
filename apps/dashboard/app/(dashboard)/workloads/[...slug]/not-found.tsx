@@ -7,7 +7,7 @@ import { Topbar } from "@/components/topbar";
 export default function WorkloadNotFound() {
   return (
     <>
-      <Topbar crumbs={[{ label: "waste", href: "/waste" }, { label: "not found" }]} />
+      <Topbar crumbs={[{ label: "fleet", href: "/fleet" }, { label: "not found" }]} range={false} />
       <div className="px-5 py-12">
         <div className="mx-auto max-w-xl border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] p-6">
           <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">
@@ -23,11 +23,11 @@ export default function WorkloadNotFound() {
             <code className="text-[var(--color-cool)]">/workloads/&lt;cluster&gt;/&lt;namespace&gt;/&lt;name&gt;</code>.
           </p>
           <Link
-            href="/waste"
+            href="/allocation?agg=workload"
             className="inline-flex items-center gap-2 border border-[var(--color-line-bright)] bg-[var(--color-bg-sunken)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors hover:border-[var(--color-cool)] hover:text-[var(--color-cool)]"
           >
             <ArrowLeft className="h-3 w-3" />
-            back to waste
+            browse workloads
           </Link>
         </div>
       </div>

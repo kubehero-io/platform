@@ -5,7 +5,7 @@ import { Topbar } from "@/components/topbar";
 export default function BudgetsLoading() {
   return (
     <>
-      <Topbar crumbs={[{ label: "budgets" }]} />
+      <Topbar crumbs={[{ label: "control" }, { label: "budgets" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6">
           <div className="mb-2 h-3 w-64 bg-[var(--color-line-bright)]" />

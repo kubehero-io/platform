@@ -5,7 +5,7 @@ import { Topbar } from "@/components/topbar";
 export default function CeilingsLoading() {
   return (
     <>
-      <Topbar crumbs={[{ label: "ceiling log" }]} />
+      <Topbar crumbs={[{ label: "control" }, { label: "ceiling log" }]} />
       <div className="px-5 py-6">
         <div className="mb-6">
           <div className="mb-2 h-3 w-64 bg-[var(--color-line-bright)]" />

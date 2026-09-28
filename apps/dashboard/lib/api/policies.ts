@@ -18,10 +18,12 @@ function dtoToRow(p: PolicyDTO): BudgetRowData {
     p.kind === "CeilingPolicy" ? "CeilingPolicy" : "BudgetPolicy";
   return {
     name: p.name,
-    scope: p.scope,
-    ceilingUSD: p.ceilingUsd,
-    spentPct: p.spentPct,
+    scope: p.scope ?? "",
+    ceilingUSD: p.ceilingUsd ?? 0,
+    spentPct: p.spentPct ?? 0,
     kind,
+    // protojson omits false — absent means disarmed.
+    armed: p.armed === true,
   };
 }
 

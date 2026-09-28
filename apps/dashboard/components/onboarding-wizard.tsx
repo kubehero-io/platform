@@ -35,13 +35,33 @@ const PLANS = [
   },
 ] as const;
 
+// Demo-mode placeholder token: derived from the org (FNV-1a, two lanes)
+// so it is stable across renders and never pretends to be a credential
+// the control plane issued.
+function demoAgentToken(org: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x9e3779b9;
+  for (const ch of org) {
+    const c = ch.codePointAt(0) ?? 0;
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x5bd1e995) >>> 0;
+  }
+  return `khc_demo_${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
+}
+
+// Quote for a POSIX shell only when needed, so the copied command works
+// for org names with spaces or quotes.
+function shellArg(v: string): string {
+  return /^[A-Za-z0-9._@=-]+$/.test(v) ? v : `'${v.replace(/'/g, `'\\''`)}'`;
+}
+
 export function OnboardingWizard({ email, org }: { email: string; org: string }) {
   const [step, setStep] = useState<Step>(1);
   const [plan, setPlan] = useState<"helm" | "manifests">("helm");
-  const token = `khc_${btoa(`${org}:${Date.now()}`).replace(/=/g, "").slice(0, 24)}`;
+  const token = demoAgentToken(org);
   const helmCmd = `helm install kubehero kubehero/kubehero \\
   --namespace kubehero-system --create-namespace \\
-  --set org=${org} \\
+  --set ${shellArg(`org=${org}`)} \\
   --set agent.token=${token}`;
 
   return (
@@ -144,7 +164,7 @@ export function OnboardingWizard({ email, org }: { email: string; org: string })
                     onClick={() => setStep(3)}
                     className="btn-secondary"
                   >
-                    Skip — I'll connect later
+                    Skip — I’ll connect later
                   </button>
                 </div>
               </motion.div>

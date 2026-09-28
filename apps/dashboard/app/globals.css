@@ -34,6 +34,14 @@
   --text-display: clamp(2.75rem, 7vw, 5.75rem);
   --text-hero:    clamp(1.75rem, 4vw, 3rem);
 
+  /* Syntax (LogQL editor) — soft, never the state colours */
+  --color-syn-label:  #6dd3ff;
+  --color-syn-string: #a8d99b;
+  --color-syn-fn:     #c3a6ff;
+  --color-syn-kw:     #8fa7ff;
+  --color-syn-pipe:   #f0a574;
+  --color-syn-num:    #e5c07b;
+
   /* Radii — technical, not soft */
   --radius-sm: 2px;
   --radius-md: 4px;

@@ -7,7 +7,7 @@ import { Topbar } from "@/components/topbar";
 export default function ClusterNotFound() {
   return (
     <>
-      <Topbar crumbs={[{ label: "fleet", href: "/fleet" }, { label: "not found" }]} />
+      <Topbar crumbs={[{ label: "fleet", href: "/fleet" }, { label: "not found" }]} range={false} />
       <div className="px-5 py-12">
         <div className="mx-auto max-w-xl border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] p-6">
           <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">

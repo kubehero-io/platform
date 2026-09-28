@@ -6,15 +6,22 @@ import { Topbar } from "@/components/topbar";
 import { DataSourceBadge } from "@/components/data-source-badge";
 import { BudgetRow } from "@/components/interactive/budget-row";
 import { getPolicies } from "@/lib/api/policies";
+import { authMode } from "@/lib/auth-mode";
+import { canAdmin } from "@/lib/roles";
+import { getSessionView } from "@/lib/session";
 
 export const metadata = { title: "Budgets · KubeHero" };
 export const dynamic = "force-dynamic";
 
 export default async function BudgetsPage() {
-  const { rows, source } = await getPolicies();
+  const [{ rows, source }, session] = await Promise.all([getPolicies(), getSessionView()]);
+  const live = source === "live";
+  // Demo sessions may click everything (nothing persists); token sessions
+  // need admin — the control plane enforces it again on ArmPolicy.
+  const canArm = authMode() === "demo" || canAdmin(session?.role);
   return (
     <>
-      <Topbar crumbs={[{ label: "budgets" }]} />
+      <Topbar crumbs={[{ label: "control" }, { label: "budgets" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -36,9 +43,16 @@ export default async function BudgetsPage() {
           <DataSourceBadge source={source} />
         </div>
 
+        {!canArm && (
+          <div className="mb-4 border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] px-4 py-2.5 font-mono text-[11px] text-[var(--color-fg-dim)]">
+            read-only · arming and disarming kill-switches needs the admin role (you are{" "}
+            <span className="text-[var(--color-fg)]">{session?.role ?? "viewer"}</span>)
+          </div>
+        )}
+
         <div className="flex flex-col gap-[1px] border border-[var(--color-line-bright)] bg-[var(--color-line)]">
           {rows.map((b) => (
-            <BudgetRow key={b.name} b={b} />
+            <BudgetRow key={b.name} b={b} live={live} canArm={canArm} />
           ))}
         </div>
       </div>

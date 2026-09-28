@@ -25,7 +25,7 @@ export default async function AdvisorPage() {
 
   return (
     <>
-      <Topbar crumbs={[{ label: "advisor" }]} />
+      <Topbar crumbs={[{ label: "agents" }, { label: "advisor" }]} range={false} />
       <div className="px-5 py-6">
         {/* ── briefing header ─────────────────────────────────────────── */}
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">

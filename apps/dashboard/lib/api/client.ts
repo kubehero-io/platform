@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
-// Connect-RPC client for the control-plane.
+// Connect-RPC client for the control-plane's ControlPlaneService.
 //
 // Behavior:
 //   · CONTROL_PLANE_URL set  → real Connect call to the Go server
-//   · unset                  → returns mock data (dashboard demo mode)
+//   · unset                  → returns null (callers serve demo data)
 //
-// Connect's wire protocol is plain HTTP/2 with `Content-Type: application/proto`
-// or `application/json`. We use JSON here so we can curl + grep the responses
-// during development. Both are fine — switch to proto when bandwidth matters.
+// Transport, credentials, deadlines and error mapping live in rpc.ts;
+// this file only names the RPCs.
 
 import "server-only";
 import {
@@ -24,43 +23,13 @@ import {
   type ListWasteRecommendationsResponse,
   type QuoteResponse,
 } from "./types";
+import { callOrNull, callUnary, upstreamBase, type CallOptions, type RpcResult } from "./rpc";
 
 const SERVICE = "kubehero.v1.ControlPlaneService";
 const PRICING = "kubehero.v1.PricingService";
 
-function endpoint(): string | null {
-  const v = process.env.CONTROL_PLANE_URL?.trim();
-  return v && v.length > 0 ? v.replace(/\/$/, "") : null;
-}
-
-async function rpc<Req, Res>(
-  service: string,
-  method: string,
-  req: Req,
-  signal?: AbortSignal,
-): Promise<Res | null> {
-  const base = endpoint();
-  if (!base) return null;
-  try {
-    const r = await fetch(`${base}/${service}/${method}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Connect-Protocol-Version": "1",
-      },
-      body: JSON.stringify(req ?? {}),
-      cache: "no-store",
-      signal,
-    });
-    if (!r.ok) {
-      console.error("[control-plane]", method, r.status, await r.text());
-      return null;
-    }
-    return (await r.json()) as Res;
-  } catch (err) {
-    console.error("[control-plane] rpc failed", method, err);
-    return null;
-  }
+function rpc<Req, Res>(service: string, method: string, req: Req): Promise<Res | null> {
+  return callOrNull<Res>("cp", service, method, req);
 }
 
 export async function listClusters(pageSize = 100): Promise<{
@@ -143,5 +112,39 @@ export async function listCapacityDemands(args: {
 }
 
 export function isLive(): boolean {
-  return endpoint() !== null;
+  return upstreamBase("cp") !== null;
+}
+
+// ─── WhoAmI ─────────────────────────────────────────────────────────────
+
+export type WhoAmIResponse = {
+  subject?: string;
+  role?: string;
+  email?: string;
+  groups?: string[];
+  clusterId?: string;
+  authRequired?: boolean;
+};
+
+/** Resolves the principal behind a credential — used by the token sign-in. */
+export function whoAmI(opts: CallOptions): Promise<RpcResult<WhoAmIResponse>> {
+  return callUnary<WhoAmIResponse>("cp", SERVICE, "WhoAmI", {}, { timeoutMs: 5_000, onExpired: "return", ...opts });
+}
+
+// ─── ArmPolicy (admin) ───────────────────────────────────────────────────
+
+export type ArmPolicyResponse = {
+  policyName?: string;
+  armed?: boolean;
+  effectiveAtUnix?: string | number;
+  auditId?: string;
+};
+
+export function armPolicy(args: {
+  clusterId?: string;
+  policyName: string;
+  armed: boolean;
+  reason?: string;
+}): Promise<RpcResult<ArmPolicyResponse>> {
+  return callUnary<ArmPolicyResponse>("cp", SERVICE, "ArmPolicy", args);
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Search, X } from "lucide-react";
 
@@ -32,13 +32,15 @@ export function TableFilter({
   const sp = useSearchParams();
   const [pending, startTransition] = useTransition();
 
-  const initial = sp.get("q") ?? "";
-  const [q, setQ] = useState(initial);
-
-  // Sync local input with URL when navigation changes externally.
-  useEffect(() => {
-    setQ(sp.get("q") ?? "");
-  }, [sp]);
+  const urlQ = sp.get("q") ?? "";
+  const [q, setQ] = useState(urlQ);
+  // Follow the URL when navigation changes it from outside (back button,
+  // reset links) — adjusted during render, React's documented pattern.
+  const [seenUrlQ, setSeenUrlQ] = useState(urlQ);
+  if (urlQ !== seenUrlQ) {
+    setSeenUrlQ(urlQ);
+    setQ(urlQ);
+  }
 
   const facetValues = useMemo(() => {
     const m: Record<string, string> = {};
@@ -85,6 +87,8 @@ export function TableFilter({
           value={q}
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder={placeholder}
+          data-search-input
+          aria-label={placeholder}
           className="flex-1 bg-transparent font-mono text-[12px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] focus:outline-none"
         />
         {q && (

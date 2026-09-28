@@ -4,8 +4,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocalStorageJSON } from "@/lib/use-local-storage";
 import { ChevronDown, Layers, Search, Star } from "lucide-react";
-import { CLUSTERS, cloudColor, stateMeta } from "@/lib/fleet-data";
+import { cloudColor, stateMeta } from "@/lib/fleet-data";
+import { useNavStatus } from "@/components/nav-status";
+import type { NavStatus } from "@/lib/api/nav";
+
+type SwitcherCluster = NavStatus["clusters"][number];
 
 /* Federation UX: a cluster scoped to "all" or one specific cluster,
    accessible from anywhere. Borrows the Lens "hotbar" pattern —
@@ -20,49 +25,38 @@ import { CLUSTERS, cloudColor, stateMeta } from "@/lib/fleet-data";
 const RECENT_KEY = "kh.recent-clusters";
 const RECENT_MAX = 5;
 
-function loadRecent(): string[] {
-  if (typeof window === "undefined") return [];
+const NO_RECENT: string[] = [];
+
+function clusterIdFromPath(path: string): string | null {
+  const m = path.match(/^\/clusters\/([^/]+)/);
+  if (!m) return null;
   try {
-    const raw = window.localStorage.getItem(RECENT_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr.filter((s) => typeof s === "string") : [];
+    return decodeURIComponent(m[1]);
   } catch {
-    return [];
+    return null;
   }
 }
 
-function saveRecent(ids: string[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(RECENT_KEY, JSON.stringify(ids));
-  } catch {
-    // quota / private browsing — fail silently
-  }
+function validateRecent(v: unknown): string[] | null {
+  return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string" && s.length <= 253).slice(0, RECENT_MAX) : null;
 }
 
 export function ClusterSwitcher() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [recent, setRecent] = useState<string[]>([]);
+  const [recent, writeRecent] = useLocalStorageJSON(RECENT_KEY, NO_RECENT, validateRecent);
   const path = usePathname() ?? "";
+  // Live clusters from /api/nav (demo fixture while in demo mode).
+  const status = useNavStatus();
+  const CLUSTERS: SwitcherCluster[] = useMemo(() => status?.clusters ?? [], [status]);
 
-  // Sync recents from localStorage on mount, then on every path
-  // change that touches a cluster drill-in.
+  // Record every cluster drill-in (MRU). Writes only when the order
+  // actually changes, so the store update settles after one pass.
   useEffect(() => {
-    setRecent(loadRecent());
-  }, []);
-
-  useEffect(() => {
-    const m = path.match(/^\/clusters\/([^/]+)/);
-    if (!m) return;
-    const id = m[1];
-    setRecent((prev) => {
-      const next = [id, ...prev.filter((x) => x !== id)].slice(0, RECENT_MAX);
-      saveRecent(next);
-      return next;
-    });
-  }, [path]);
+    const id = clusterIdFromPath(path);
+    if (!id || recent[0] === id) return;
+    writeRecent([id, ...recent.filter((x) => x !== id)].slice(0, RECENT_MAX));
+  }, [path, recent, writeRecent]);
 
   // Keyboard: `g c` opens the switcher. Lens uses ⌘K for the global
   // palette (we already have that elsewhere); this is the focused
@@ -92,8 +86,8 @@ export function ClusterSwitcher() {
     };
   }, []);
 
-  const match = path.match(/^\/clusters\/([^/]+)/);
-  const active = match ? CLUSTERS.find((c) => c.id === match[1]) : null;
+  const activeId = clusterIdFromPath(path);
+  const active = activeId ? CLUSTERS.find((c) => c.id === activeId) : null;
   const label = active ? active.name : "Fleet · all clusters";
 
   // Fuzzy filter — substring on name / cloud / region. The cmd-palette
@@ -107,16 +101,16 @@ export function ClusterSwitcher() {
       c.cloud.toLowerCase().includes(q) ||
       c.region.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [query, CLUSTERS]);
 
   const recentClusters = useMemo(
     () =>
       recent
         .map((id) => CLUSTERS.find((c) => c.id === id))
-        .filter((c): c is (typeof CLUSTERS)[number] => Boolean(c))
+        .filter((c): c is SwitcherCluster => Boolean(c))
         .filter((c) => active?.id !== c.id)
         .slice(0, RECENT_MAX),
-    [recent, active],
+    [recent, active, CLUSTERS],
   );
 
   const close = useCallback(() => {
@@ -229,7 +223,7 @@ function ClusterRow({
   onPick,
   dim = false,
 }: {
-  cluster: (typeof CLUSTERS)[number];
+  cluster: SwitcherCluster;
   active: boolean;
   onPick: () => void;
   dim?: boolean;

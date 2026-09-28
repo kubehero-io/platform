@@ -6,7 +6,7 @@ import { SkeletonKpi, SkeletonTable } from "@/components/skeleton";
 export default function FleetLoading() {
   return (
     <>
-      <Topbar crumbs={[{ label: "fleet" }]} />
+      <Topbar crumbs={[{ label: "observe" }, { label: "fleet" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6 flex items-end justify-between gap-3">
           <div>

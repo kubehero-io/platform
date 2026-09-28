@@ -7,11 +7,13 @@
 // Zero external TTS deps — if the browser can't speak, we degrade to a
 // quiet "not supported" chip instead of hiding the feature.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AudioLines, Pause, Play, Square, VolumeX } from "lucide-react";
 import { formatSeconds, speechSeconds } from "@/lib/advisor-format";
 
 const RATE = 1.05;
+
+const noopSubscribe = () => () => {};
 
 type Status = "idle" | "playing" | "paused";
 
@@ -31,17 +33,16 @@ function pickVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null 
 }
 
 export function PlayBriefing({ script }: { script: string }) {
-  // null = not yet mounted (SSR-safe), then true/false once we can probe.
-  const [supported, setSupported] = useState<boolean | null>(null);
+  // null during SSR, then true/false once the browser can be probed.
+  const supported = useSyncExternalStore<boolean | null>(
+    noopSubscribe,
+    () => "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance !== "undefined",
+    () => null,
+  );
   const [status, setStatus] = useState<Status>("idle");
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   useEffect(() => {
-    setSupported(
-      typeof window !== "undefined" &&
-        "speechSynthesis" in window &&
-        typeof window.SpeechSynthesisUtterance !== "undefined",
-    );
     return () => {
       // Never leave a voice talking after navigation.
       if (typeof window !== "undefined" && "speechSynthesis" in window) {

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) KubeHero contributors
 
+import Link from "next/link";
 import { Cpu } from "lucide-react";
 import { Topbar } from "@/components/topbar";
+import { DataSourceBadge } from "@/components/data-source-badge";
 
 export const metadata = { title: "GPU panel · KubeHero" };
 
@@ -43,7 +45,7 @@ function tone(pct: number): string {
 export default function GpuPage() {
   return (
     <>
-      <Topbar crumbs={[{ label: "gpu panel" }]} />
+      <Topbar crumbs={[{ label: "cost" }, { label: "gpu" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -54,7 +56,13 @@ export default function GpuPage() {
             <h1 className="text-[22px] font-medium tracking-tight text-[var(--color-fg)]">
               {GPUS.length} GPUs across the fleet.
             </h1>
+            <p className="mt-2 max-w-2xl text-[13px] text-[var(--color-fg-dim)]">
+              Per-device utilisation and VRAM come from DCGM, which the control-plane API does not expose yet —
+              this view shows sample data. GPU <em>spend</em> by workload is live on{" "}
+              <Link href="/allocation?agg=workload" className="text-[var(--color-cool)] hover:text-[var(--color-fg)]">allocation</Link>.
+            </p>
           </div>
+          <DataSourceBadge source="demo" reason="unset" detail="GPU device telemetry is not in the control-plane API yet" />
         </div>
 
         {/* KPIs */}

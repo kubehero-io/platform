@@ -1,102 +1,83 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) KubeHero contributors
-
 "use client";
 
+// ⌘K / Ctrl-K palette: every view (with its `g <key>` shortcut), live
+// clusters from /api/nav, and two query actions that turn whatever you
+// typed into a destination — "search logs for …" and "ask KubeHero …".
+
 import {
-  AlertTriangle,
   BookOpen,
-  Cpu,
   CornerDownLeft,
-  FileSearch,
   Layers,
-  Receipt,
-  ScanLine,
+  MessageCircleQuestion,
   Search,
-  Settings as SettingsIcon,
-  ShieldAlert,
-  ShieldCheck,
-  Sparkles,
+  ScrollText,
+  Siren,
   Terminal,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { CLUSTERS } from "@/lib/fleet-data";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useNavStatus } from "@/components/nav-status";
+import { NAV } from "@/lib/nav";
+import { logqlString } from "@/lib/url";
+
+type Kind = "query" | "nav" | "cluster" | "action" | "docs";
 
 type Item = {
   id: string;
   label: string;
-  kind: "nav" | "cluster" | "action" | "docs";
+  kind: Kind;
   hint?: string;
+  keywords?: string;
+  shortcut?: string;
   href: string;
   external?: boolean;
-  icon: React.ComponentType<{
-    className?: string;
-    style?: React.CSSProperties;
-  }>;
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
 };
 
-const NAV: Item[] = [
-  { id: "nav-advisor",    label: "Advisor",        kind: "nav", href: "/advisor",    icon: Sparkles },
-  { id: "nav-fleet",      label: "Fleet",          kind: "nav", href: "/fleet",      icon: Layers },
-  { id: "nav-waste",      label: "Waste",          kind: "nav", href: "/waste",      icon: AlertTriangle },
-  { id: "nav-chargeback", label: "Chargeback",     kind: "nav", href: "/chargeback", icon: Receipt },
-  { id: "nav-gpu",        label: "GPU panel",      kind: "nav", href: "/gpu",        icon: Cpu },
-  { id: "nav-budgets",    label: "Budgets",        kind: "nav", href: "/budgets",    icon: Receipt },
-  { id: "nav-ceilings",   label: "Ceiling log",    kind: "nav", href: "/ceilings",   icon: ShieldCheck },
-  { id: "nav-posture",    label: "Posture",        kind: "nav", href: "/posture",    icon: ShieldAlert },
-  { id: "nav-settings",   label: "Settings",       kind: "nav", href: "/settings",   icon: SettingsIcon },
-];
+const NAV_ITEMS: Item[] = NAV.flatMap((g) =>
+  g.items.map((i) => ({
+    id: `nav-${i.href}`,
+    label: i.label,
+    kind: "nav" as const,
+    hint: g.label || undefined,
+    keywords: i.keywords,
+    shortcut: i.key ? `g ${i.key}` : undefined,
+    href: i.href,
+    icon: i.icon,
+  })),
+);
 
 const ACTIONS: Item[] = [
-  { id: "act-scan",       label: "Run waste scan",                   kind: "action", href: "/waste",      icon: ScanLine,  hint: "kubehero scan --report waste" },
-  { id: "act-rightsize",  label: "Apply rightsize plan",             kind: "action", href: "/waste",      icon: Terminal,  hint: "kubehero rightsize --apply" },
-  { id: "act-arm",        label: "Arm a budget policy",              kind: "action", href: "/budgets",    icon: ShieldCheck, hint: "kubehero cap --arm <name>" },
-  { id: "act-audit",      label: "Export audit log",                 kind: "action", href: "/settings",   icon: FileSearch, hint: "kubehero audit forward" },
+  { id: "act-errors", label: "Show errors across the fleet", kind: "action", href: `/logs?q=${encodeURIComponent('{level=~"error|fatal"}')}`, icon: ScrollText, hint: "logs", keywords: "errors fatal" },
+  { id: "act-firing", label: "What is firing right now", kind: "action", href: "/alerts", icon: Siren, hint: "alerts", keywords: "alerts incidents" },
+  { id: "act-new-rule", label: "Create an alert rule", kind: "action", href: "/alerts?tab=rules&rule=new", icon: Siren, hint: "alerts", keywords: "new rule" },
+  { id: "act-rightsize", label: "Review high-confidence rightsizing", kind: "action", href: "/rightsizing?conf=high&direction=downsize", icon: Terminal, hint: "kubehero rightsize list", keywords: "waste savings" },
+  { id: "act-idle", label: "Allocation with idle shared by cost", kind: "action", href: "/allocation?idle=weighted", icon: Terminal, hint: "cost", keywords: "idle opencost" },
+  { id: "act-focus", label: "Export FinOps FOCUS (30d)", kind: "action", href: "/api/export/focus?window=30d&aggregate=workload", icon: Terminal, hint: "csv", keywords: "focus export csv finops" },
 ];
 
 const DOCS: Item[] = [
-  { id: "doc-overview",    label: "Overview",                         kind: "docs", href: "https://kubehero.io/docs/overview",                       external: true, icon: BookOpen },
-  { id: "doc-quickstart",  label: "Quickstart",                       kind: "docs", href: "https://kubehero.io/docs/quickstart",                     external: true, icon: BookOpen },
-  { id: "doc-crd",         label: "CRD reference · BudgetPolicy",     kind: "docs", href: "https://kubehero.io/docs/crd-reference",                  external: true, icon: BookOpen },
-  { id: "doc-chargeback",  label: "Chargeback — the label convention", kind: "docs", href: "https://kubehero.io/docs/chargeback",                    external: true, icon: BookOpen },
-  { id: "doc-metrics",     label: "Metrics reference",                kind: "docs", href: "https://kubehero.io/docs/metrics-reference",              external: true, icon: BookOpen },
-  { id: "doc-production",  label: "Production · HA + federation",     kind: "docs", href: "https://kubehero.io/docs/production",                     external: true, icon: BookOpen },
-  { id: "doc-clouds",      label: "Cloud integrations (AWS · GCP · Azure)", kind: "docs", href: "https://kubehero.io/docs/integrations/clouds",     external: true, icon: BookOpen },
-  { id: "doc-troubleshoot", label: "Troubleshooting",                 kind: "docs", href: "https://kubehero.io/docs/troubleshooting",                external: true, icon: BookOpen },
+  { id: "doc-quickstart", label: "Quickstart", kind: "docs", href: "https://kubehero.io/docs/quickstart", external: true, icon: BookOpen },
+  { id: "doc-logql", label: "LogQL reference", kind: "docs", href: "https://kubehero.io/docs/logs", external: true, icon: BookOpen },
+  { id: "doc-alerts", label: "Alert rules — every kind", kind: "docs", href: "https://kubehero.io/docs/alerts", external: true, icon: BookOpen },
+  { id: "doc-crd", label: "CRD reference · RightsizingPolicy / BudgetPolicy", kind: "docs", href: "https://kubehero.io/docs/crd-reference", external: true, icon: BookOpen },
+  { id: "doc-troubleshoot", label: "Troubleshooting", kind: "docs", href: "https://kubehero.io/docs/troubleshooting", external: true, icon: BookOpen },
 ];
-
-// Precompute cluster items — cheap.
-const CLUSTER_ITEMS: Item[] = CLUSTERS.map((c) => ({
-  id: `cluster-${c.id}`,
-  label: c.name,
-  kind: "cluster" as const,
-  hint: `${c.cloud} · ${c.region} · ${c.nodes} nodes`,
-  href: `/clusters/${c.id}`,
-  icon: Layers,
-}));
-
-const ALL: Item[] = [...NAV, ...ACTIONS, ...CLUSTER_ITEMS, ...DOCS];
 
 function matches(item: Item, q: string) {
   if (!q) return true;
-  const needle = q.toLowerCase();
-  return (
-    item.label.toLowerCase().includes(needle) ||
-    (item.hint?.toLowerCase().includes(needle) ?? false)
-  );
+  const hay = `${item.label} ${item.hint ?? ""} ${item.keywords ?? ""}`.toLowerCase();
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((t) => hay.includes(t));
 }
 
-function kindLabel(k: Item["kind"]) {
-  return k === "nav"
-    ? "navigate"
-    : k === "cluster"
-      ? "cluster"
-      : k === "action"
-        ? "action"
-        : "docs";
-}
+const KIND_LABEL: Record<Kind, string> = { query: "search", nav: "navigate", cluster: "clusters", action: "actions", docs: "docs" };
 
 export function CmdPalette() {
   const [open, setOpen] = useState(false);
@@ -104,8 +85,9 @@ export function CmdPalette() {
   const [cursor, setCursor] = useState(0);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
+  const status = useNavStatus();
+  const reduce = useReducedMotion();
 
-  // cmd+k / ctrl+k
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -114,37 +96,77 @@ export function CmdPalette() {
       }
       if (e.key === "Escape") setOpen(false);
     };
+    const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("kh:open-palette", onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("kh:open-palette", onOpen);
+    };
   }, []);
 
-  // reset on open
   useEffect(() => {
-    if (open) {
-      setQ("");
-      setCursor(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
+    if (!open) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 0);
+    return () => clearTimeout(t);
   }, [open]);
 
-  const results = useMemo(() => ALL.filter((i) => matches(i, q)).slice(0, 20), [q]);
+  const clusters: Item[] = useMemo(
+    () =>
+      (status?.clusters ?? []).map((c) => ({
+        id: `cluster-${c.id}`,
+        label: c.name,
+        kind: "cluster" as const,
+        hint: `${c.cloud} · ${c.region} · ${c.nodes} nodes`,
+        href: `/clusters/${encodeURIComponent(c.id)}`,
+        icon: Layers,
+      })),
+    [status],
+  );
+
+  const results = useMemo(() => {
+    const text = q.trim();
+    const dynamic: Item[] = text
+      ? [
+          {
+            id: "q-ask",
+            label: `Ask KubeHero: “${text.slice(0, 80)}”`,
+            kind: "query",
+            href: `/ask?q=${encodeURIComponent(text)}`,
+            icon: MessageCircleQuestion,
+            hint: "investigate",
+          },
+          {
+            id: "q-logs",
+            label: `Search logs for “${text.slice(0, 60)}”`,
+            kind: "query",
+            href: `/logs?q=${encodeURIComponent(text.startsWith("{") ? text : `{level=~".+"} |= ${logqlString(text)}`)}`,
+            icon: ScrollText,
+            hint: text.startsWith("{") ? "run as LogQL" : "line contains",
+          },
+        ]
+      : [];
+    return [...NAV_ITEMS, ...ACTIONS, ...clusters, ...DOCS].filter((i) => matches(i, text)).slice(0, 24).concat(dynamic);
+  }, [q, clusters]);
+
   const grouped = useMemo(() => {
-    const out: { kind: Item["kind"]; items: Item[] }[] = [];
-    for (const kind of ["nav", "action", "cluster", "docs"] as const) {
+    const out: { kind: Kind; items: Item[] }[] = [];
+    for (const kind of ["nav", "action", "cluster", "docs", "query"] as const) {
       const items = results.filter((r) => r.kind === kind);
       if (items.length) out.push({ kind, items });
     }
     return out;
   }, [results]);
+  const flat = useMemo(() => grouped.flatMap((g) => g.items), [grouped]);
 
   const go = useCallback(
     (item: Item) => {
       setOpen(false);
-      if (item.external) {
-        window.open(item.href, "_blank", "noopener,noreferrer");
-      } else {
-        router.push(item.href);
-      }
+      setQ("");
+      setCursor(0);
+      if (item.external) window.open(item.href, "_blank", "noopener,noreferrer");
+      else if (item.href.startsWith("/api/")) window.location.href = item.href;
+      else router.push(item.href);
     },
     [router],
   );
@@ -152,15 +174,17 @@ export function CmdPalette() {
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setCursor((c) => Math.min(results.length - 1, c + 1));
+      setCursor((c) => Math.min(flat.length - 1, c + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setCursor((c) => Math.max(0, c - 1));
     } else if (e.key === "Enter") {
-      const item = results[cursor];
+      const item = flat[cursor];
       if (item) go(item);
     }
   };
+
+  const activeId = flat[cursor] ? `cmd-${flat[cursor].id}` : undefined;
 
   return (
     <AnimatePresence>
@@ -169,16 +193,19 @@ export function CmdPalette() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.12 }}
+          transition={{ duration: reduce ? 0 : 0.12 }}
           className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--color-bg-sunken)]/85 px-4 pt-[14vh] backdrop-blur-sm"
           onClick={() => setOpen(false)}
         >
           <motion.div
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -10, opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="w-full max-w-[640px] border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Command palette"
+            initial={reduce ? { opacity: 0 } : { y: -10, opacity: 0 }}
+            animate={reduce ? { opacity: 1 } : { y: 0, opacity: 1 }}
+            exit={reduce ? { opacity: 0 } : { y: -10, opacity: 0 }}
+            transition={{ duration: reduce ? 0 : 0.15 }}
+            className="w-full max-w-[680px] border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-3 border-b border-[var(--color-line)] px-4 py-3">
@@ -192,56 +219,46 @@ export function CmdPalette() {
                   setCursor(0);
                 }}
                 onKeyDown={onKey}
-                placeholder="Search · ⌘K  ·  clusters, workloads, docs, actions"
+                role="combobox"
+                aria-expanded="true"
+                aria-controls="cmd-results"
+                aria-activedescendant={activeId}
+                aria-label="Search views, clusters, actions — or type a question"
+                placeholder="Jump to a view, a cluster, an action — or type a question or a log search…"
                 className="flex-1 bg-transparent font-mono text-[13px] text-[var(--color-fg)] outline-none placeholder:text-[var(--color-fg-faint)]"
               />
-              <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">
-                esc
-              </span>
+              <kbd className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">esc</kbd>
             </div>
 
-            <div className="max-h-[56vh] overflow-y-auto py-1.5">
+            <div id="cmd-results" role="listbox" className="max-h-[56vh] overflow-y-auto py-1.5">
               {grouped.length === 0 ? (
-                <div className="px-4 py-6 text-center font-mono text-[12px] text-[var(--color-fg-faint)]">
-                  no matches
-                </div>
+                <div className="px-4 py-6 text-center font-mono text-[12px] text-[var(--color-fg-faint)]">no matches</div>
               ) : (
                 grouped.map(({ kind, items }) => (
-                  <div key={kind} className="mt-1.5 first:mt-0">
-                    <div className="px-4 pb-1 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">
-                      /// {kindLabel(kind)}
-                    </div>
+                  <div key={kind} className="mt-1.5 first:mt-0" role="group" aria-label={KIND_LABEL[kind]}>
+                    <div className="px-4 pb-1 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">/// {KIND_LABEL[kind]}</div>
                     {items.map((item) => {
-                      const globalIdx = results.findIndex((r) => r.id === item.id);
-                      const active = globalIdx === cursor;
+                      const idx = flat.indexOf(item);
+                      const active = idx === cursor;
                       const Icon = item.icon;
                       return (
                         <button
                           key={item.id}
+                          id={`cmd-${item.id}`}
+                          role="option"
+                          aria-selected={active}
                           type="button"
-                          onMouseEnter={() => setCursor(globalIdx)}
+                          onMouseEnter={() => setCursor(idx)}
                           onClick={() => go(item)}
-                          className={`flex w-full items-center gap-3 px-4 py-2 text-left transition-colors ${
-                            active ? "bg-[var(--color-bg-sunken)]" : ""
-                          }`}
+                          className={`flex w-full items-center gap-3 px-4 py-2 text-left transition-colors ${active ? "bg-[var(--color-bg-sunken)]" : ""}`}
                         >
-                          <Icon
-                            className="h-3.5 w-3.5 shrink-0"
-                            style={{
-                              color: active ? "var(--color-signal)" : "var(--color-fg-faint)",
-                            }}
-                          />
-                          <span className="flex-1 truncate font-mono text-[12.5px] text-[var(--color-fg)]">
-                            {item.label}
-                          </span>
-                          {item.hint && (
-                            <span className="shrink-0 truncate font-mono text-[10px] text-[var(--color-fg-faint)]">
-                              {item.hint}
-                            </span>
+                          <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: active ? "var(--color-signal)" : "var(--color-fg-faint)" }} aria-hidden />
+                          <span className="flex-1 truncate font-mono text-[12.5px] text-[var(--color-fg)]">{item.label}</span>
+                          {item.hint && <span className="shrink-0 truncate font-mono text-[10px] text-[var(--color-fg-faint)]">{item.hint}</span>}
+                          {item.shortcut && (
+                            <kbd className="shrink-0 border border-[var(--color-line)] bg-[var(--color-bg-sunken)] px-1 font-mono text-[9.5px] text-[var(--color-fg-faint)]">{item.shortcut}</kbd>
                           )}
-                          {active && (
-                            <CornerDownLeft className="h-3 w-3 text-[var(--color-signal)]" />
-                          )}
+                          {active && <CornerDownLeft className="h-3 w-3 text-[var(--color-signal)]" aria-hidden />}
                         </button>
                       );
                     })}
@@ -251,8 +268,8 @@ export function CmdPalette() {
             </div>
 
             <div className="flex items-center justify-between border-t border-[var(--color-line)] px-4 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">
-              <span>↑↓ navigate · enter to open</span>
-              <span>KubeHero · ⌘K</span>
+              <span>↑↓ move · ⏎ open · g+key jumps from anywhere · ? all shortcuts</span>
+              <span>⌘K</span>
             </div>
           </motion.div>
         </motion.div>

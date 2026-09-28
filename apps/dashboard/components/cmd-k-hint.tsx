@@ -1,44 +1,29 @@
 // SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) KubeHero contributors
 "use client";
 
 import { Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
-/* Tiny button that lives in the topbar as a keyboard-shortcut hint.
-   Clicking it dispatches the same keydown the palette listens for so
-   people who don't know the shortcut can still discover it. */
+/* Topbar button that opens the command palette (⌘K) for people who don't
+   know the shortcut yet. */
+
+const subscribe = () => () => {};
+const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform);
 
 export function CmdKHint() {
-  const [isMac, setIsMac] = useState(true);
-  useEffect(() => {
-    if (typeof navigator !== "undefined") {
-      setIsMac(/Mac|iPhone|iPad/.test(navigator.platform));
-    }
-  }, []);
-
-  const open = () => {
-    const ev = new KeyboardEvent("keydown", {
-      key: "k",
-      metaKey: isMac,
-      ctrlKey: !isMac,
-      bubbles: true,
-    });
-    window.dispatchEvent(ev);
-  };
-
+  const mac = useSyncExternalStore(subscribe, isMac, () => true);
   return (
     <button
       type="button"
-      onClick={open}
-      className="hidden items-center gap-2 rounded-sm border border-[var(--color-line-bright)] bg-[var(--color-bg-sunken)] px-2 py-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-[var(--color-fg-dim)] hover:text-[var(--color-fg)] sm:flex"
+      onClick={() => window.dispatchEvent(new Event("kh:open-palette"))}
+      className="hidden items-center gap-2 rounded-sm border border-[var(--color-line-bright)] bg-[var(--color-bg-sunken)] px-2 py-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-[var(--color-fg-dim)] hover:text-[var(--color-fg)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-cool)] sm:flex"
       title="Open command palette"
       aria-label="Open command palette"
     >
-      <Search className="h-3 w-3" />
+      <Search className="h-3 w-3" aria-hidden />
       <span>search</span>
-      <span className="ml-1 text-[var(--color-fg-faint)]">
-        {isMac ? "⌘K" : "Ctrl K"}
-      </span>
+      <span className="ml-1 text-[var(--color-fg-faint)]">{mac ? "⌘K" : "Ctrl K"}</span>
     </button>
   );
 }

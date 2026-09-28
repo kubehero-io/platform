@@ -6,44 +6,18 @@
 // Behavior mirrors lib/api/client.ts:
 //   · ADVISOR_URL set  → real Connect-JSON call to the Go advisor
 //   · unset / error    → returns null, callers fall back to the demo fixture
+// Credentials: the signed-in user's token in token mode, else
+// ADVISOR_TOKEN (see rpc.ts).
 
 import "server-only";
 import type { GetBriefingResponse } from "./types";
+import { callOrNull, upstreamBase } from "./rpc";
 
 const SERVICE = "kubehero.v1.AdvisorService";
 
-function endpoint(): string | null {
-  const v = process.env.ADVISOR_URL?.trim();
-  return v && v.length > 0 ? v.replace(/\/$/, "") : null;
-}
-
-async function rpc<Req, Res>(
-  method: string,
-  req: Req,
-  signal?: AbortSignal,
-): Promise<Res | null> {
-  const base = endpoint();
-  if (!base) return null;
-  try {
-    const r = await fetch(`${base}/${SERVICE}/${method}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Connect-Protocol-Version": "1",
-      },
-      body: JSON.stringify(req ?? {}),
-      cache: "no-store",
-      signal,
-    });
-    if (!r.ok) {
-      console.error("[advisor]", method, r.status, await r.text());
-      return null;
-    }
-    return (await r.json()) as Res;
-  } catch (err) {
-    console.error("[advisor] rpc failed", method, err);
-    return null;
-  }
+function rpc<Req, Res>(method: string, req: Req): Promise<Res | null> {
+  // Briefings can take a while when the LLM brain is cold.
+  return callOrNull<Res>("advisor", SERVICE, method, req, { timeoutMs: 30_000 });
 }
 
 export async function getBriefing(
@@ -58,5 +32,5 @@ export async function getBriefing(
 }
 
 export function isAdvisorLive(): boolean {
-  return endpoint() !== null;
+  return upstreamBase("advisor") !== null;
 }

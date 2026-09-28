@@ -24,7 +24,7 @@ export default async function CapacityPage() {
 
   return (
     <>
-      <Topbar crumbs={[{ label: "capacity" }]} />
+      <Topbar crumbs={[{ label: "cost" }, { label: "capacity" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
