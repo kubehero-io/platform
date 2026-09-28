@@ -53,7 +53,7 @@ func TestMain(m *testing.M) {
 // buildLinuxProgram compiles symProgSource for linux/arch with extra
 // `go build` flags and returns the binary's path. Results are cached per
 // test binary run.
-func buildLinuxProgram(t *testing.T, arch string, flags ...string) string {
+func buildLinuxProgram(t testing.TB, arch string, flags ...string) string {
 	t.Helper()
 	goBin, err := exec.LookPath("go")
 	if err != nil {
@@ -96,7 +96,7 @@ func buildLinuxProgram(t *testing.T, arch string, flags ...string) string {
 
 // funcSym returns the address and size of a function from a binary's
 // .symtab, read independently of the code under test.
-func funcSym(t *testing.T, path, name string) (addr, size uint64) {
+func funcSym(t testing.TB, path, name string) (addr, size uint64) {
 	t.Helper()
 	f, err := elf.Open(path)
 	if err != nil {
@@ -118,7 +118,7 @@ func funcSym(t *testing.T, path, name string) (addr, size uint64) {
 
 // fileOffsetOf converts a link-time address into its file offset using
 // the binary's PT_LOAD headers (the inverse of elfSymbols.vaddr).
-func fileOffsetOf(t *testing.T, path string, vaddr uint64) uint64 {
+func fileOffsetOf(t testing.TB, path string, vaddr uint64) uint64 {
 	t.Helper()
 	f, err := elf.Open(path)
 	if err != nil {
@@ -134,7 +134,7 @@ func fileOffsetOf(t *testing.T, path string, vaddr uint64) uint64 {
 	return 0
 }
 
-func readSymbolsFile(t *testing.T, path string) *elfSymbols {
+func readSymbolsFile(t testing.TB, path string) *elfSymbols {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {

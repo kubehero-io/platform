@@ -20,11 +20,11 @@ var discardLog = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // fakeProc lays out the parts of a procfs the symbolizer reads.
 type fakeProc struct {
-	t    *testing.T
+	t    testing.TB
 	root string
 }
 
-func newFakeProc(t *testing.T) *fakeProc {
+func newFakeProc(t testing.TB) *fakeProc {
 	return &fakeProc{t: t, root: t.TempDir()}
 }
 
@@ -57,7 +57,7 @@ func (fp *fakeProc) installBinary(pid int, path, bin string) uint64 {
 
 // execMapsLine renders the maps line the kernel would show for bin's
 // executable segment loaded at base.
-func execMapsLine(t *testing.T, bin string, base uint64, inode uint64, path string) string {
+func execMapsLine(t testing.TB, bin string, base uint64, inode uint64, path string) string {
 	t.Helper()
 	f, err := elf.Open(bin)
 	if err != nil {
@@ -183,7 +183,7 @@ func TestSymbolizerJITWithoutPerfMap(t *testing.T) {
 	}
 }
 
-func mustRead(t *testing.T, path string) string {
+func mustRead(t testing.TB, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -219,5 +219,30 @@ func TestSymbolizerKernelStacks(t *testing.T) {
 func TestCallSite(t *testing.T) {
 	if callSite(0x1000, 0) != 0x1000 || callSite(0x1000, 1) != 0xfff || callSite(0, 3) != 0 {
 		t.Error("callSite must only adjust return addresses (depth > 0)")
+	}
+}
+
+// BenchmarkSymbolizeUserStack measures warm-cache symbolization of a
+// 32-frame user stack (maps already read, binary already parsed): the
+// per-stack cost a profiler drain pays for up to maxStacksPerDrain.
+func BenchmarkSymbolizeUserStack(b *testing.B) {
+	bin := buildLinuxProgram(b, "amd64", "-buildmode=pie")
+	fp := newFakeProc(b)
+	const base = uint64(0x5555_0000_0000)
+	ino := fp.installBinary(1, "/app/symprog", bin)
+	fp.write("1/maps", execMapsLine(b, bin, base, ino, "/app/symprog")+"\n")
+	target, size := funcSym(b, bin, "main.khSymTarget")
+	stack := make([]uint64, 32)
+	for i := range stack {
+		stack[i] = base + target + uint64(i)%size
+	}
+	s := newSymbolizer(fp.root, discardLog)
+	s.beginDrain()
+	s.userFrames(1, stack) // warm: read maps, parse the ELF
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		if f := s.userFrames(1, stack); f[0] != "main.khSymTarget" {
+			b.Fatalf("frame %q", f[0])
+		}
 	}
 }
