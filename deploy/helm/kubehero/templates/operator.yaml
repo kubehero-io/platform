@@ -61,6 +61,11 @@ spec:
             {{- end }}
             - name: CLUSTER_ID
               value: {{ .Values.cluster.id | default .Release.Name | quote }}
+            {{- with .Values.cluster.labels }}
+            # Matched by RightsizingPolicy spec.scope.clusterSelector.
+            - name: CLUSTER_LABELS
+              value: {{ include "kubehero.labelString" . | quote }}
+            {{- end }}
             - name: CONTROL_PLANE_TOKEN
               valueFrom:
                 secretKeyRef:

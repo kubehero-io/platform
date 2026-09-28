@@ -146,3 +146,12 @@ capabilities:
 seccompProfile:
   type: RuntimeDefault
 {{- end -}}
+
+{{/* "k=v,k2=v2" from a map, keys sorted. */}}
+{{- define "kubehero.labelString" -}}
+{{- $out := list -}}
+{{- range $k := keys . | sortAlpha -}}
+{{- $out = append $out (printf "%s=%s" $k (index $ $k)) -}}
+{{- end -}}
+{{- join "," $out -}}
+{{- end -}}

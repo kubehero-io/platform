@@ -34,6 +34,9 @@ imagePullSecrets: []
 cluster:
   id: ""                      # e.g. "eks-use1-prod" — defaults to Release.Name
   tokenSecret: ""             # existing Secret carrying key=token
+  # Labels RightsizingPolicy spec.scope.clusterSelector matches against,
+  # e.g. { env: prod, cloud: aws }.
+  labels: {}
 
 rbac:
   create: true

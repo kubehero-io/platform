@@ -50,7 +50,7 @@ NEXT STEPS
 
 4. Use the CLI (binaries on https://github.com/kubehero-io/platform/releases):
    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ $fullname }}-control-plane {{ .Values.controlPlane.service.port }}:{{ .Values.controlPlane.service.port }}
-   export KUBEHERO_URL=http://localhost:{{ .Values.controlPlane.service.port }} KUBEHERO_TOKEN=<admin token>
+   export KUBEHERO_ENDPOINT=http://localhost:{{ .Values.controlPlane.service.port }} KUBEHERO_TOKEN=<admin token>
    kubehero cost allocation --aggregate namespace --window 7d
    kubehero logs '{namespace="default"} |= "error"' --since 1h
    kubehero ask "what changed in spend this week?"

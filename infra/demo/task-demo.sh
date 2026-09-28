@@ -34,7 +34,7 @@ KUBEHERO DEMO READY
                  $TOKEN
 
   CLI            kubectl -n $NS port-forward svc/kubehero-control-plane 8080:8080
-                 export KUBEHERO_URL=http://localhost:8080 KUBEHERO_TOKEN=$TOKEN
+                 export KUBEHERO_ENDPOINT=http://localhost:8080 KUBEHERO_TOKEN=$TOKEN
                  kubehero cost allocation --aggregate namespace --window 1h
                  kubehero logs '{namespace="shop"} |= "failed"' --since 15m
                  kubehero ask "which service is burning the most CPU?"
