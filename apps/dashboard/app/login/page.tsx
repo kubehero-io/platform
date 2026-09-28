@@ -26,7 +26,7 @@ export default async function LoginPage({
       }
     >
       <form action={signIn} className="flex flex-col gap-4">
-        <input type="hidden" name="next" value={next ?? "/fleet"} />
+        <input type="hidden" name="next" value={next ?? "/overview"} />
         <label className="flex flex-col gap-1.5">
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">
             Work email

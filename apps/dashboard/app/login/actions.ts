@@ -2,11 +2,14 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { safeNextPath } from "@/lib/auth-gate";
 import { orgFromEmail, setSession } from "@/lib/session";
 
 export async function signIn(formData: FormData) {
   const email = String(formData.get("email") || "").trim().toLowerCase();
-  const next = String(formData.get("next") || "/fleet");
+  // Only same-origin paths — `next` comes from the query string, so an
+  // unchecked value would make /login an open redirect.
+  const next = safeNextPath(String(formData.get("next") || "/overview"));
   if (!email || !email.includes("@")) {
     redirect(`/login?error=invalid_email&next=${encodeURIComponent(next)}`);
   }
