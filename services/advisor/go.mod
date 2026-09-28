@@ -9,7 +9,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.75.0
 	github.com/kubehero-io/platform/packages/proto v0.0.0-20260526182454-514b669b0f0f
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/net v0.50.0
+	golang.org/x/net v0.59.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -27,8 +27,8 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 )
 
 replace github.com/kubehero-io/platform/packages/proto => ../../packages/proto
