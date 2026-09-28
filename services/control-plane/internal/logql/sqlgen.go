@@ -212,3 +212,26 @@ func ceilDiv(a, b int64) int64 {
 	}
 	return a/b + 1
 }
+
+// WithSample returns a copy of the plan that keeps about rate (0..1]
+// of the matching lines, picked by a hash of (ts, pod) so the same
+// data always yields the same sample.
+func (p *Plan) WithSample(rate float64) *Plan {
+	if rate >= 1 {
+		return p
+	}
+	threshold := uint64(rate * 1_000_000)
+	cp := *p
+	cp.Where = and([]sqlPart{p.Where, {sql: "cityHash64(toUnixTimestamp64Nano(ts), pod) % 1000000 < ?", args: []any{threshold}}})
+	return &cp
+}
+
+// SeriesQuery lists distinct stream label sets of matching lines.
+// Columns: StreamColumns…, labels.
+func (p *Plan) SeriesQuery(org string, fromNS, toNS int64, limit int) Query {
+	sql := "SELECT DISTINCT " + strings.Join(StreamColumns, ", ") + ", labels FROM logs WHERE org_id = ?" +
+		" AND ts >= fromUnixTimestamp64Nano(toInt64(?)) AND ts < fromUnixTimestamp64Nano(toInt64(?))" +
+		" AND (" + p.Where.sql + ") LIMIT ?"
+	args := append([]any{org, fromNS, toNS}, p.Where.args...)
+	return Query{SQL: sql, Args: append(args, limit)}
+}

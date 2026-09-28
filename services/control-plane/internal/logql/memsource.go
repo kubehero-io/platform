@@ -5,7 +5,6 @@ package logql
 
 import (
 	"context"
-	"fmt"
 	"sort"
 )
 
@@ -30,7 +29,7 @@ func NewBucketer(q RangeQuery) *Bucketer {
 // filters them (| __error__="") — and when the series limit is hit.
 func (b *Bucketer) Add(ts int64, line string, labels map[string]string) error {
 	if v := labels[ErrorLabel]; v != "" {
-		return fmt.Errorf("logql: pipeline error %q for series %s; skip failed lines with | __error__=\"\" (or | __error__!=%q)", v, labelsString(labels), v)
+		return Invalidf("pipeline error %q for series %s; skip failed lines with | __error__=\"\" (or | __error__!=%q)", v, labelsString(labels), v)
 	}
 	bi := b.grid.Bucket(ts)
 	if bi < 0 {

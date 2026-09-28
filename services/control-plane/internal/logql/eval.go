@@ -5,7 +5,6 @@ package logql
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -26,7 +25,7 @@ const (
 )
 
 // ErrTooManySeries is returned when a result would exceed MaxSeries.
-var ErrTooManySeries = errors.New("logql: query returns too many series (limit 10000); aggregate with sum by (…) or narrow the selector")
+var ErrTooManySeries = Limitf("query returns too many series (limit %d); aggregate with sum by (…) or narrow the selector", MaxSeries)
 
 // Grid is where one range aggregation is evaluated: at Steps points
 // Start, Start+Step, …, each over the window (t - Offset - Range,
@@ -70,14 +69,14 @@ func gcd(a, b int64) int64 {
 func stepGrid(start, end time.Time, step time.Duration) (t0, dt int64, steps int, err error) {
 	s, e := start.UnixNano(), end.UnixNano()
 	if e < s {
-		return 0, 0, 0, errors.New("logql: end is before start")
+		return 0, 0, 0, Invalidf("end is before start")
 	}
 	if step <= 0 || s == e {
 		return e, 0, 1, nil
 	}
 	n := (e-s)/int64(step) + 1
 	if n > MaxSteps {
-		return 0, 0, 0, fmt.Errorf("logql: %d evaluation steps exceed the limit of %d; increase the step", n, MaxSteps)
+		return 0, 0, 0, Invalidf("%d evaluation steps exceed the limit of %d; increase the step", n, MaxSteps)
 	}
 	return s, int64(step), int(n), nil
 }
@@ -86,7 +85,7 @@ func stepGrid(start, end time.Time, step time.Duration) (t0, dt int64, steps int
 // end) is an instant evaluation at end.
 func NewGrid(start, end time.Time, step, rng, offset time.Duration) (Grid, error) {
 	if rng <= 0 {
-		return Grid{}, errors.New("logql: range must be positive")
+		return Grid{}, Invalidf("range must be positive")
 	}
 	t0, dt, steps, err := stepGrid(start, end, step)
 	if err != nil {
@@ -100,7 +99,7 @@ func NewGrid(start, end time.Time, step, rng, offset time.Duration) (Grid, error
 	g.Origin = g.Start - g.Offset - g.Range
 	n := (int64(g.Steps-1)*g.Step+g.Range)/g.Width + 1
 	if n > MaxBuckets {
-		return Grid{}, fmt.Errorf("logql: step %s and range %s need %d buckets (limit %d); use a step that divides the range",
+		return Grid{}, Invalidf("step %s and range %s need %d buckets (limit %d); use a step that divides the range",
 			FormatDuration(time.Duration(g.Step)), FormatDuration(time.Duration(g.Range)), n, MaxBuckets)
 	}
 	g.N = int(n)
@@ -258,7 +257,7 @@ func (ev *evaluator) evalRange(ctx context.Context, r *RangeAggExpr, keep []stri
 		keep = []string{}
 	}
 	if int64(grid.N) > maxBucketCells {
-		return nil, fmt.Errorf("logql: query grid too large")
+		return nil, Limitf("query grid too large")
 	}
 	buckets, err := ev.src.Range(ctx, RangeQuery{Expr: r, Grid: grid, Keep: keep})
 	if err != nil {
@@ -266,7 +265,7 @@ func (ev *evaluator) evalRange(ctx context.Context, r *RangeAggExpr, keep []stri
 	}
 	for _, b := range buckets {
 		if v := b.Labels[ErrorLabel]; v != "" {
-			return nil, fmt.Errorf("logql: pipeline error %q for series %s; skip failed lines with | __error__=\"\" (or | __error__!=%q)", v, labelsString(b.Labels), v)
+			return nil, Invalidf("pipeline error %q for series %s; skip failed lines with | __error__=\"\" (or | __error__!=%q)", v, labelsString(b.Labels), v)
 		}
 	}
 	if len(buckets) > MaxSeries {
@@ -390,7 +389,7 @@ func groupLabels(l map[string]string, g *Grouping) map[string]string {
 
 func (ev *evaluator) aggregate(n *VectorAggExpr, in *matrix) (*matrix, error) {
 	if in.scalar {
-		return nil, fmt.Errorf("logql: %s needs a vector, not a scalar", n.Op)
+		return nil, Invalidf("%s needs a vector, not a scalar", n.Op)
 	}
 	if n.Op == VecTopk || n.Op == VecBottomk {
 		return ev.topk(n, in), nil
@@ -706,7 +705,7 @@ func (ev *evaluator) vectorBinop(n *BinOpExpr, l, r *matrix) (*matrix, error) {
 			for _, x := range rs {
 				if x.ok[i] {
 					if match != nil {
-						return nil, fmt.Errorf("logql: many-to-many matching for %s: several series on the right match %s; aggregate them first", n.Op, labelsString(s.labels))
+						return nil, Invalidf("many-to-many matching for %s: several series on the right match %s; aggregate them first", n.Op, labelsString(s.labels))
 					}
 					match = x
 				}
