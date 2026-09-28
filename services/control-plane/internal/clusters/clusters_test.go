@@ -7,6 +7,8 @@ import (
 	"context"
 	"reflect"
 	"testing"
+
+	"github.com/kubehero-io/platform/services/control-plane/internal/auth"
 )
 
 func TestSnapshotAliasesAndDisplay(t *testing.T) {
@@ -54,5 +56,32 @@ func TestNilResolverIsIdentity(t *testing.T) {
 	var nilSnap *Snapshot
 	if nilSnap.Display("y") != "y" || nilSnap.Aliases("y")[0] != "y" {
 		t.Fatal("nil snapshot must be identity")
+	}
+}
+
+func TestScope(t *testing.T) {
+	const id = "0b6c5c4e-8f3a-4c1e-9d55-1d2f3a4b5c6d"
+	snap := NewSnapshot([]Info{{ID: id, Slug: "prod", Name: "Prod"}})
+	user := auth.WithPrincipal(context.Background(), auth.Principal{Sub: "u", Role: auth.RoleViewer})
+	if got, err := Scope(user, snap, "anything"); err != nil || got != "anything" {
+		t.Fatalf("users pass through: %q %v", got, err)
+	}
+	if RequireFleet(user) != nil {
+		t.Fatal("users may read fleet-wide")
+	}
+	tok := auth.WithPrincipal(context.Background(), auth.Principal{Sub: "cluster:" + id, Role: auth.RoleMember, ClusterID: id})
+	if got, err := Scope(tok, snap, ""); err != nil || got != id {
+		t.Fatalf("defaults to own cluster: %q %v", got, err)
+	}
+	for _, alias := range []string{id, "prod", "Prod"} {
+		if _, err := Scope(tok, snap, alias); err != nil {
+			t.Fatalf("own alias %q rejected: %v", alias, err)
+		}
+	}
+	if _, err := Scope(tok, snap, "other"); err == nil {
+		t.Fatal("other cluster must be denied")
+	}
+	if RequireFleet(tok) == nil {
+		t.Fatal("fleet read must be denied for cluster tokens")
 	}
 }
