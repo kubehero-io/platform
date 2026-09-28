@@ -318,7 +318,12 @@ func aggregate(in aggInput) []AllocSet {
 
 	// Separate idle rows; also where sharing is impossible because the
 	// cluster has no non-shared allocation to carry it.
-	multi := clusterCount(in.NodeCost) > 1
+	type idleRow struct {
+		k      clusterKey
+		amount float64
+	}
+	var idleRows []idleRow
+	idleClusters := map[string]bool{}
 	for k, v := range idle {
 		ct := totals[k]
 		shareable := ct != nil && ct.NonShared > 0
@@ -339,14 +344,25 @@ func aggregate(in aggInput) []AllocSet {
 		if amount <= 0 || k.Bucket < 0 || k.Bucket >= len(sets) {
 			continue
 		}
+		idleRows = append(idleRows, idleRow{k, amount})
+		idleClusters[k.Cluster] = true
+	}
+	// Idle rows are "__idle__" in a single-cluster result and
+	// "<cluster>/__idle__" when the result spans clusters.
+	for i := range in.Rows {
+		if !in.Shared[in.Rows[i].Namespace] {
+			idleClusters[in.Rows[i].Cluster] = true
+		}
+	}
+	for _, ir := range idleRows {
 		name := IdleName
-		if multi {
-			name = k.Cluster + "/" + IdleName
+		if len(idleClusters) > 1 {
+			name = ir.k.Cluster + "/" + IdleName
 		}
 		key := make([]string, len(in.Dims))
 		for j, d := range in.Dims {
 			if d.Name == DimCluster {
-				key[j] = k.Cluster
+				key[j] = ir.k.Cluster
 			} else {
 				key[j] = IdleName
 			}
@@ -354,13 +370,13 @@ func aggregate(in aggInput) []AllocSet {
 		a := &Alloc{
 			Name:  name,
 			Key:   key,
-			Props: map[string]string{DimCluster: k.Cluster},
+			Props: map[string]string{DimCluster: ir.k.Cluster},
 			Idle:  true,
-			Start: sets[k.Bucket].Start,
-			End:   sets[k.Bucket].End,
+			Start: sets[ir.k.Bucket].Start,
+			End:   sets[ir.k.Bucket].End,
 		}
-		a.IdleCost = amount
-		sets[k.Bucket].Rows = append(sets[k.Bucket].Rows, a)
+		a.IdleCost = ir.amount
+		sets[ir.k.Bucket].Rows = append(sets[ir.k.Bucket].Rows, a)
 	}
 
 	// A cluster whose only cost sits in shared namespaces has nobody to
@@ -474,12 +490,4 @@ func joinName(vals []string) string {
 		parts[i] = displayValue(v)
 	}
 	return strings.Join(parts, "/")
-}
-
-func clusterCount(m map[clusterKey]float64) int {
-	seen := map[string]bool{}
-	for k := range m {
-		seen[k.Cluster] = true
-	}
-	return len(seen)
 }
