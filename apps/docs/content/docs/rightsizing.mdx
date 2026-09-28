@@ -1,0 +1,120 @@
+---
+title: Rightsizing
+description: Percentile recommendations from measured container usage, and a RightsizingPolicy that applies them only when a human arms it — bounded, OOM-aware and reversible.
+---
+
+KubeHero sizes containers from what they actually use, and — unlike a report — can apply the result. Application is deliberately conservative: it happens only through a `RightsizingPolicy`, only after a human arms it, in bounded steps, and every change can be undone.
+
+## Where the numbers come from
+
+Every `collector.usageInterval` (30s by default) each collector records, per container on its node: CPU usage (cores), working-set memory, requests and limits, restart count and the last termination reason. The control plane rolls these into 5-minute t-digest sketches (`container_usage_5m`) so percentiles over weeks stay cheap and exact enough.
+
+## The math
+
+For each `(cluster, namespace, workload, container)` over the observation window (default `7d`):
+
+| | Rule |
+|---|---|
+| **CPU** | chosen percentile (default **p95**; `p90`, `p99` or `max`) × (1 + headroom, default **15%**), floored at 10m and rounded to 5m. |
+| **Memory** | `max(p99, observed max)` × (1 + headroom), floored at 32 Mi and rounded to 1 Mi — and **never below the observed max**. |
+| **OOM guard** | any OOM kill in the window means memory must not go down; with OOM kills it is raised: +25% over the observed max or the current limit. |
+| **Confidence** | from sample coverage: less than a day → `low`, less than five days → `medium`, otherwise `high`. |
+| **Savings** | priced with the workload's own cost per core-hour and per GiB-hour from the allocation rollups, × average replicas. Negative savings mean the container is under-provisioned. |
+| **Throttle risk** | share of 5-minute buckets where p99 CPU reached 90% of the limit. |
+
+Each recommendation carries a direction (`downsize` / `upsize` / `ok`) and a plain-English reason.
+
+```bash
+kubehero rightsize --namespace payments                       # recommendations, largest savings first
+kubehero rightsize --percentile p99 --headroom 25 --window 14d
+kubehero rightsize list checkout-api --min-savings 50
+```
+
+## RightsizingPolicy
+
+```yaml
+apiVersion: kubehero.kubehero.io/v1
+kind: RightsizingPolicy
+metadata:
+  name: payments-rightsize
+  namespace: kubehero-system
+spec:
+  scope:
+    namespaceSelector:
+      matchLabels: { team: payments }
+  mode: shadow            # recommend | shadow | apply
+  humanArm: true          # default: apply needs an explicit arm
+  minConfidence: medium   # low | medium | high
+  adjustLimits: false     # also scale limits, keeping the ratio
+  exclude: ["payments-db-migrator"]
+  safety:
+    observationWindow: 7d # 1h..90d
+    p95HeadroomPct: 15
+    maxChangePerDay: 1    # per workload, per UTC day; 0 blocks all changes
+    minReplicas: 2        # skip workloads with fewer replicas
+```
+
+### Modes
+
+| Mode | What the operator does |
+|---|---|
+| `recommend` | Writes per-container recommendations into `status.recommendations` (current vs recommended CPU and memory, savings, confidence, reason, OOM kills) and `status.totalSavingsUsdMonth`. Never mutates. |
+| `shadow` | Everything `recommend` does, plus `status.plannedChanges` — exactly what `apply` would change, each with an outcome (`planned` or `blocked`) and the guard that blocked it — and a `rightsize.shadow` audit event. Never mutates. |
+| `apply` | Patches the pod template's **requests** (and limits, if `adjustLimits`) — only when every guard passes. |
+
+Start with `shadow`, read `plannedChanges`, then switch to `apply` and arm it.
+
+### Guards in `apply` mode
+
+A change is applied only if **all** of these hold; otherwise it is recorded as `blocked` with the reason:
+
+- the policy is **armed** (when `humanArm` is true, the default) — see below;
+- the recommendation's confidence is at least `minConfidence`;
+- the step is **bounded**: never shrink more than 50% or grow more than 100% in one change;
+- the workload hasn't hit `maxChangePerDay` today;
+- memory never goes below the observed max, and never down after OOM kills;
+- the workload runs at least `minReplicas` replicas;
+- the workload isn't **mid-rollout** and has no unavailable replicas;
+- no **VerticalPodAutoscaler** targets the container;
+- the workload isn't excluded — by name in `exclude`, or with the annotation `kubehero.io/rightsizing: "disabled"`.
+
+Deployments and StatefulSets are in scope. Requests are never raised above an existing limit unless `adjustLimits` is set.
+
+### Arming
+
+Arming is the annotation `kubehero.kubehero.io/armed: "true"` on the policy, set by a human from the dashboard, with `kubehero cap --arm`, or with kubectl — the operator reads it and never sets it itself:
+
+```bash
+kubectl -n kubehero-system annotate rightsizingpolicy payments-rightsize kubehero.kubehero.io/armed=true
+```
+
+The policy's `Armed` condition shows whether apply mode may act.
+
+### Undo
+
+Every applied change records the previous resources on the workload (`kubehero.io/rightsize-previous`), an audit event and a `RightsizeApplied` Kubernetes event, all carrying a change ID (`rs-…`) that also appears in `status.plannedChanges[].changeId`:
+
+```bash
+kubehero undo rs-5f2c9a1e --dry-run   # print the patch
+kubehero undo rs-5f2c9a1e
+```
+
+`undo` uses your kubeconfig and RBAC, reverts any later KubeHero changes to that workload too, and marks it `kubehero.io/rightsize-reverted` so the operator leaves it alone until you remove the annotation. It refuses if someone else changed the resources since KubeHero's last change (`--force` overrides).
+
+## Status fields
+
+| Field | Meaning |
+|---|---|
+| `workloadsInScope` | workloads the scope matched |
+| `recommendations[]` | per container: `currentCpuRequest`, `recommendedCpuRequest`, `currentMemoryRequest`, `recommendedMemoryRequest`, `savingsUsdMonth`, `confidence`, `reason`, `oomKills` |
+| `totalSavingsUsdMonth` | sum over recommendations |
+| `plannedChanges[]` | `cpuRequest` / `memoryRequest` (and limits) `from` → `to`, `outcome` (`planned` · `applied` · `blocked` · `failed`), `reason`, `changeId` |
+| `lastEvaluated`, `lastApplied` | timestamps |
+
+The operator re-evaluates every 10 minutes and whenever the policy changes. Applying proposals from the [agents](/docs/agents) goes through exactly the same path.
+
+## Limitations
+
+- Recommendations need history: with less than a day of samples confidence is `low` and `apply` (at the default `minConfidence: medium`) won't act.
+- CPU is sized to a percentile — spiky workloads may want `p99` or `max` and more headroom.
+- Rightsizing changes requests, not replica counts; HPA and KEDA keep scaling replicas as before.

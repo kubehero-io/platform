@@ -1,0 +1,130 @@
+---
+title: Alerting
+description: One alert engine over logs, spend rate, budget burn, anomalies, network cost and cluster events — rule kinds, query grammar, state machine, silences and channels.
+---
+
+KubeHero evaluates alert rules over every signal it stores, on the control plane, and routes notifications to the tools your on-call already uses. One rule format, one state machine, one set of silences — whether the condition is an error-log spike, a budget burning 1.5× too fast or a workload OOM-killed three times.
+
+## A rule
+
+```yaml
+name: checkout-error-spike
+description: Checkout is logging errors faster than usual.
+kind: logs
+query: sum by (namespace) (count_over_time({namespace="checkout", level="error"}[5m]))
+op: ">"
+threshold: 100
+pendingFor: 5m        # the condition must hold this long before firing
+evalInterval: 1m      # default 1m, minimum 15s
+severity: critical    # info | warn | critical
+channels:
+  - slack://payments-oncall
+  - pagerduty://checkout
+labels: { team: payments }
+annotations:
+  summary: "{{ $labels.namespace }}: {{ $value }} error lines in 5m"
+  runbook_url: https://runbooks.example.com/checkout-errors
+enabled: true
+```
+
+That is the shape of the `AlertRule` message (`AlertsService.UpsertAlertRule`); the dashboard's rule editor and `kubehero alerts` write the same object. Each **series** the query returns is evaluated separately, so one rule can fire once per namespace or per workload.
+
+## Rule kinds and query grammar
+
+| `kind` | Query | Value |
+|---|---|---|
+| `logs` | a LogQL **metric** query — see [Logs](/docs/logs#logql-support) | the query's value per series |
+| `cost` | `cost{<matchers>} [by (<labels>)]` | spend rate in **$/hour** over the last 15 minutes |
+| `budget` | a BudgetPolicy name, or `*` for every BudgetPolicy, optionally with a window: `prod-monthly[1h]` | burn-rate multiple — 1.0 is spending exactly at budget |
+| `anomaly` | `anomaly{<matchers>}` | each anomaly's **$/month** impact |
+| `network` | `network{<matchers>} [by (<labels>)]` | network spend rate in **$/hour** over the last 15 minutes |
+| `event` | `events{<matchers>}[<window>] [by (<labels>)]` | count of cluster events in the window (default 10m) |
+
+Matchers use `=` `!=` `=~` `!~` (regexes are fully anchored, RE2). The labels each metric understands:
+
+| Metric | Labels |
+|---|---|
+| `cost` | `cluster` `namespace` `workload` `workload_kind` `team` `cost_center` `nodepool` `zone` `region` `cloud` `node` `pod` `lifecycle` |
+| `network` | `cluster` `namespace` `workload` `zone` `dst_namespace` `dst_workload` `dst_kind` `egress` `cross_zone` |
+| `events` | `kind` `cluster` `namespace` `workload` `pod` `container` `node` `reason` `severity` |
+| `anomaly` | `kind` `cluster` `namespace` `workload` `severity` |
+
+Event kinds: `oom_killed`, `crash_loop`, `image_pull_backoff`, `unschedulable`, `evicted`, `node_not_ready`, `node_pressure`, `restarted`, `warning`.
+
+```text
+cost{namespace="ml-inference"}                        # one series
+cost by (team)                                        # one series per team
+network{namespace="edge", egress="true"} by (workload)
+events{kind="oom_killed", namespace="prod"}[10m] by (workload)
+anomaly{kind="spend"}
+prod-monthly[30m]                                     # kind: budget
+```
+
+Limits: queries up to 4,096 characters, 20 matchers, 8 group-by labels, ranges up to 24h.
+
+## States
+
+```
+inactive ──condition true──▶ pending ──held for pendingFor──▶ firing ──condition false──▶ resolved
+```
+
+- **Pending** alerts don't notify. A rule with `pendingFor: 0` fires on the first true evaluation.
+- **Firing** notifies each channel once, then re-notifies every 4 hours while it stays firing.
+- **Resolved** notifies once and is kept for 24 hours.
+- Annotations are templated with `{{ $value }}` and `{{ $labels.<name> }}`.
+
+Each alert has a stable ID per (rule, label set), a start time, a fired-at time and a deep link into the dashboard.
+
+## Silences
+
+A silence is a set of label matchers with a start and end; a matching alert keeps its state (so you still see it) but sends nothing. The special key `alertname` matches the rule name.
+
+```bash
+kubehero alerts silence --matcher alertname="OOM kills" --matcher namespace=batch --duration 2h \
+  --comment "known leak, fix deploying"
+kubehero alerts silence list
+kubehero alerts silence delete <silence-id>
+```
+
+## Channels
+
+Channels use the same URL grammar as policy escalations:
+
+| Channel | URL form |
+|---|---|
+| Slack | `slack://…` |
+| PagerDuty | `pagerduty://…` |
+| Opsgenie | `opsgenie://…` |
+| Microsoft Teams (workflow webhook, Adaptive Card) | `teams://…` or `teams+https://…` |
+| Discord | `discord+https://…` |
+| Generic webhook (JSON body) | `webhook+https://…` |
+| Alertmanager (`POST /api/v2/alerts`) | `alertmanager+https://am.example.com:9093` |
+
+With `alertmanager+https://` KubeHero hands alerts to your existing Alertmanager — its routing, grouping and inhibition then apply.
+
+## Default rules
+
+On first boot, when no rules exist, KubeHero seeds five. They start **enabled with no channels** — visible in the dashboard, notifying nobody until you add a channel.
+
+| Rule | Kind | Query | Fires when |
+|---|---|---|---|
+| Error log spike | `logs` | `sum by (cluster, namespace, workload) (count_over_time({level=~"error\|fatal"}[5m]))` | > 100 for 5m |
+| OOM kills | `event` | `events{kind="oom_killed"}[15m] by (cluster, namespace, workload)` | ≥ 3 |
+| Spend anomaly over $1k/mo | `anomaly` | `anomaly{kind="spend"}` | > $1,000/mo impact |
+| Budget burn over 1.5× | `budget` | `*[1h]` | > 1.5× for 15m |
+| Internet egress over $5/h | `network` | `network{egress="true"} by (cluster, namespace, workload)` | > $5/h for 15m |
+
+## From the CLI
+
+```bash
+kubehero alerts list --state firing
+kubehero alerts rules --kind logs
+kubehero alerts test --kind logs \
+  --query 'sum by (namespace) (count_over_time({level="error"}[5m]))' --op '>' --threshold 100
+```
+
+`TestAlertRule` (the dashboard's **Test** button) evaluates a rule right now and returns every series with its value and whether it would trigger — use it before you save.
+
+## Permissions and storage
+
+Reading rules and alerts needs the `member` role; creating, changing or deleting rules and silences needs `admin`. Rules, alert state, silences and the notification log live in Postgres. Without Postgres, rules are kept in memory and the control plane logs that they are ephemeral.

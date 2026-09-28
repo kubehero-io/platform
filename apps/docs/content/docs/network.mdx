@@ -1,0 +1,88 @@
+---
+title: Network
+description: eBPF flow accounting per workload pair, a live service map, cross-zone and internet egress priced per GB, and TCP retransmits on every edge.
+---
+
+Cross-zone chatter and internet egress are some of the least visible lines on a cloud bill. KubeHero accounts every byte between pods, Services, nodes and the internet with eBPF, attributes it to workloads, and prices it — so a chatty dependency shows up with a dollar figure and a direction.
+
+## How flows are collected
+
+On every node the collector attaches two `BPF_PROG_TYPE_CGROUP_SKB` programs — ingress and egress — to the cgroup v2 root. For each packet they read the IP header (IPv4 and IPv6) and the TCP/UDP ports, and add bytes and packets to an LRU map keyed by the endpoint pair, protocol and direction. The programs **always pass the packet**: nothing is dropped, delayed or rewritten.
+
+TCP retransmits come from the stable `tcp:tcp_retransmit_skb` tracepoint and are merged into the matching egress flow.
+
+Every flush interval the collector drains the maps and resolves both ends through its informer caches:
+
+| Endpoint kind | Resolved from |
+|---|---|
+| `pod` | pod IPs → namespace, pod, workload, zone |
+| `service` | Service cluster IPs → `namespace/name` |
+| `node` | node internal / external IPs |
+| `external` | anything else — the internet, or other clusters |
+
+Flows to the same peer are aggregated before they're sent, so a pod with thousands of ephemeral connections produces one row per peer. The server-side port is a heuristic: the lower of the two ports.
+
+## Direction and de-duplication
+
+Pod-to-pod traffic is seen twice — at the sender (egress) and at the receiver (ingress). Both rows are stored with their direction; the query side prefers **ingress** rows for pod ↔ pod pairs and **egress** rows for anything leaving toward a Service, node or the internet, so bytes are never double-counted.
+
+## Cost model
+
+Each flow is priced at ingest:
+
+- **cross-zone** — both ends have a known zone and the zones differ;
+- **internet egress** — the destination is `external` and the direction is egress;
+- everything else is **free** (same zone).
+
+`cost_usd = bytes ÷ 10⁹ × $/GB`, with per-cloud defaults:
+
+| Cloud | Internet egress $/GB | Cross-zone $/GB |
+|---|---|---|
+| AWS | 0.09 | 0.01 |
+| GCP | 0.12 | 0.01 |
+| Azure | 0.087 | 0 |
+| unknown | 0.09 | 0.01 |
+
+These are list-price approximations. Override them for your contract:
+
+```yaml
+# values.yaml
+controlPlane:
+  pricing:
+    netEgressUSDPerGB: "0.05"      # KUBEHERO_NET_EGRESS_USD_PER_GB
+    netCrossZoneUSDPerGB: "0.01"   # KUBEHERO_NET_CROSS_ZONE_USD_PER_GB
+```
+
+Network cost is attributed to the **source** workload and appears as `networkCost` in [allocation](/docs/allocation).
+
+## Service map
+
+`NetworkService.GetServiceMap` returns workload-level nodes (`"<kind>:<namespace>/<name>"`) and edges with bytes, bytes per second, port, protocol, `cross_zone`, `egress`, retransmits and `cost_usd_month`. It keeps the busiest `max_nodes` (60 by default) and folds the rest into an `other` node. `ListNetworkCosts` ranks workloads by egress and cross-zone GB and dollars, with their top destination.
+
+```bash
+kubehero network map --namespace checkout --since 1h --max-edges 25
+kubehero network costs --since 24h
+```
+
+In the dashboard, cross-zone edges are amber, internet egress uses the accent color and retransmit-heavy edges are dashed. The home page has a [clickable demo map](/#demos).
+
+## Retention
+
+| Table | Holds | TTL |
+|---|---|---|
+| `net_flows` | raw flows per flush window | 30 days |
+| `net_flows_1h` | hourly rollups per endpoint pair | 400 days |
+
+## Settings
+
+| Helm value | Default | Notes |
+|---|---|---|
+| `collector.ebpf.enabled` | `true` | Requires a privileged collector with the cgroup v2 filesystem mounted. |
+| `collector.ebpf.netflow` | `true` | Flow accounting and retransmits. |
+
+## Limitations
+
+- eBPF needs **Linux ≥ 5.8 with cgroup v2** and a privileged collector. Without it, the collector keeps running and skips flows.
+- Loopback traffic is ignored.
+- A NAT gateway or a proxy hides the real destination: traffic to it is attributed to the gateway's address. NAT gateway processing charges are not modelled.
+- Prices are per-GB list prices; tiered egress discounts and private interconnects are not modelled — set your own rates.

@@ -1,97 +1,337 @@
 ---
-title: Identity · SSO · RBAC
-description: OIDC via Dex, role-based access, SCIM user provisioning.
+title: Identity · SSO · SCIM · RBAC
+description: Modern enterprise SSO — Okta, Azure AD, Google Workspace, Keycloak, Auth0, GitHub. LDAP and SAML via the Dex bridge. SCIM 2.0 user provisioning. Group-claim → role mapping.
 ---
 
-Every path into KubeHero is authenticated. We don't ship an identity store of our own — we proxy to whatever your organization already runs.
+KubeHero never ships its own user database. The control plane validates **OIDC bearer tokens** with full JWKS signature verification (RS256/384/512 + ES256/384), maps the token's `groups` claim to one of five roles, and lets your existing identity provider stay the source of truth.
 
-## OIDC via Dex
+For protocols Dex already speaks fluently — LDAP, Active Directory, SAML 2.0 — we **bridge through Dex** instead of writing the protocol again. That lifts every legacy auth mechanism into clean OIDC at the network edge, and keeps our codebase focused on the parts that actually differentiate the product.
 
-Dex is the canonical OIDC proxy in the CNCF ecosystem. It connects to Okta, Azure AD, Google Workspace, GitHub, GitLab, or any LDAP.
+## TL;DR — what you set on the control plane
 
-### Install
+| Env var | What it does |
+|---|---|
+| `OIDC_ISSUER_URL` | The IdP discovery URL (e.g. `https://acme.okta.com`). Triggers JWKS fetch + signature verify. |
+| `OIDC_AUDIENCE` | The audience claim your tokens carry (e.g. `kubehero`). Empty = skip aud check (not recommended). |
+| `KUBEHERO_GROUP_ROLES` | Comma-separated `group=role` pairs. Maps the JWT `groups` claim to one of `viewer`, `member`, `auditor`, `admin`, `owner`. |
+| `KUBEHERO_API_KEYS` | Long-lived bearer tokens for service accounts. Format: `<token>` or `<token>:<role>`. |
+| `KUBEHERO_SCIM_TOKEN` | Header bearer for SCIM 2.0 user/group provisioning. Empty = SCIM disabled. |
+| `KUBEHERO_REQUIRE_AUTH` | `true` = fail-closed on unauthenticated requests. Default open for dev. |
+| `AUDIT_HMAC_KEY` | HMAC-SHA256 secret used to sign audit rows for SIEM tamper-detection. |
 
-```bash
-./infra/demo/stack-install.sh   # interactive, prompts for Dex
-# or
-helm install dex dex/dex \
-  --namespace dex --create-namespace \
-  --values dex-values.yaml
+With the Helm chart you rarely set these by hand — the values map onto them:
+
+| Helm value | Sets |
+|---|---|
+| `controlPlane.auth.oidc.issuerURL` / `.audience` / `.groupRoles` | `OIDC_ISSUER_URL`, `OIDC_AUDIENCE`, `KUBEHERO_GROUP_ROLES` |
+| `controlPlane.auth.apiKeysSecret` (key `api-keys`) | extra entries in `KUBEHERO_API_KEYS` |
+| `controlPlane.auth.scimTokenSecret` (key `token`) | `KUBEHERO_SCIM_TOKEN` |
+| `controlPlane.auth.requireAuth` (default `true`) | `KUBEHERO_REQUIRE_AUTH` |
+| `controlPlane.existingSecret` (key `audit-hmac-key`) — otherwise generated | `AUDIT_HMAC_KEY` |
+
+The chart also generates an admin token, a service token for in-cluster clients and a cluster enrollment token, and persists them in the `kubehero-control-plane` Secret.
+
+## Role taxonomy
+
+| Role | Reads | Mutates |
+|---|---|---|
+| `viewer` | every list/get RPC | nothing |
+| `member` | viewer + own resources | create/update own resources |
+| `auditor` | viewer + the full audit log | nothing |
+| `admin` | member + every cluster | `RegisterCluster`, policy arming |
+| `owner` | admin + IdP config | role grants, integration config |
+
+Auditor sits **alongside** member rather than above. A compliance officer gets read-everything-plus-export without inheriting mutate rights.
+
+The default for any authenticated user with no group match is `viewer` — fail-closed at the role level even when auth itself succeeds.
+
+---
+
+## Okta (OIDC + SCIM)
+
+### 1. Create the OIDC application
+
+In Okta admin → **Applications → Create App Integration → OIDC – OpenID Connect → Web Application**.
+
+| Field | Value |
+|---|---|
+| Sign-in redirect URI | `https://app.kubehero.example.com/api/auth/callback` |
+| Sign-out redirect URI | `https://app.kubehero.example.com/login` |
+| Controlled access | grant the `kubehero-*` groups |
+
+Copy the **Client ID + Client Secret** for your dashboard config.
+
+### 2. Add the groups claim
+
+Okta admin → **Security → API → Authorization Servers → default → Claims → Add Claim**.
+
+| Field | Value |
+|---|---|
+| Name | `groups` |
+| Include in token type | ID Token, Access Token |
+| Value type | Groups |
+| Filter | `Matches regex` `kubehero-.*` |
+
+Now every JWT carries a `groups: ["kubehero-admins", "kubehero-members"]` array.
+
+### 3. Map the cp
+
+```
+OIDC_ISSUER_URL=https://acme.okta.com/oauth2/default
+OIDC_AUDIENCE=kubehero
+KUBEHERO_GROUP_ROLES=kubehero-owners=owner,kubehero-admins=admin,kubehero-auditors=auditor,kubehero-members=member,kubehero-viewers=viewer
 ```
 
-### Configure for Okta
+### 4. SCIM provisioning (optional, recommended)
+
+Generate a long-lived bearer for SCIM and set it on the cp:
+
+```bash
+KUBEHERO_SCIM_TOKEN=$(openssl rand -hex 32)
+```
+
+In Okta → **Application → Provisioning → API integration**:
+
+| Field | Value |
+|---|---|
+| SCIM 2.0 Base URL | `https://api.kubehero.example.com/scim/v2` |
+| Authentication | HTTP Header |
+| Header name | `Authorization` |
+| Header value | `Bearer <KUBEHERO_SCIM_TOKEN>` |
+
+Test connection — Okta will hit `/ServiceProviderConfig`. Then enable **Create / Update / Deactivate** users and **Push Groups** for the `kubehero-*` set.
+
+---
+
+## Azure AD / Microsoft Entra ID
+
+### 1. App registration
+
+Azure portal → **Microsoft Entra ID → App registrations → New registration**.
+
+- Redirect URI: `https://app.kubehero.example.com/api/auth/callback` (Web)
+- Supported account types: single-tenant (recommended)
+
+### 2. Token configuration → groups claim
+
+App → **Token configuration → Add groups claim → Security groups → Group ID**.
+
+(Group ID emits the GUID; if you prefer human-readable names, use **sAMAccountName** — but you'll then write the GUIDs into `KUBEHERO_GROUP_ROLES` instead of names.)
+
+### 3. cp env
+
+```
+OIDC_ISSUER_URL=https://login.microsoftonline.com/<tenant-id>/v2.0
+OIDC_AUDIENCE=<application-client-id>
+KUBEHERO_GROUP_ROLES=8a7f...=admin,3b21...=member
+```
+
+### 4. SCIM via Microsoft Entra ID
+
+Entra ID → **Enterprise apps → KubeHero → Provisioning** with the same Base URL + Bearer pattern as Okta. Entra emits SCIM 2.0 PATCH for deprovisioning, which our endpoint handles natively.
+
+---
+
+## Google Workspace (OIDC)
+
+Workspace doesn't expose group memberships in standard OIDC tokens. Two paths:
+
+### Option A — recommended: bridge through Dex
+
+Dex's `google` connector reads the Workspace Admin SDK directly and emits the groups claim cleanly. See [LDAP / SAML / Dex](#ldap--active-directory--saml--via-dex) below. This is what every CNCF project (Argo CD, Gitea, OpenShift, Tekton) does.
+
+### Option B — direct, no groups
+
+If you only need authentication (no role mapping):
+
+```
+OIDC_ISSUER_URL=https://accounts.google.com
+OIDC_AUDIENCE=<workspace-oauth-client-id>.apps.googleusercontent.com
+```
+
+Every authenticated user lands as `viewer`. Promote individuals via API key + role suffix:
+
+```
+KUBEHERO_API_KEYS=<token>:admin,<token>:member
+```
+
+This is fine for a 5-person platform team. Beyond that, run Dex.
+
+---
+
+## Keycloak (self-hosted OIDC)
+
+In your realm, enable the `groups` claim mapper as a **Group Membership** type on the kubehero client.
+
+```
+OIDC_ISSUER_URL=https://keycloak.acme.internal/realms/main
+OIDC_AUDIENCE=kubehero
+KUBEHERO_GROUP_ROLES=/kubehero-admins=admin,/ml-platform=member
+```
+
+Keycloak prefixes group names with `/` when full-path is enabled. Match what your `groups` claim actually contains.
+
+---
+
+## Auth0
+
+Auth0 → **Applications → Create → Regular Web App → Settings**.
+
+Auth0 doesn't include groups in tokens by default. Add an **Action** in **Auth Pipeline → Login**:
+
+```js
+exports.onExecutePostLogin = async (event, api) => {
+  const groups = event.user.app_metadata?.groups ?? [];
+  api.idToken.setCustomClaim("groups", groups);
+  api.accessToken.setCustomClaim("groups", groups);
+};
+```
+
+```
+OIDC_ISSUER_URL=https://acme.auth0.com/
+OIDC_AUDIENCE=kubehero
+```
+
+Auth0 also does SCIM 2.0 via the same Bearer + Base URL pattern.
+
+---
+
+## GitHub OAuth (small teams)
+
+For a single-org platform team where everyone has GitHub auth already, this is the fastest path. Bridge through Dex's `github` connector:
 
 ```yaml
 # dex-values.yaml
 config:
-  issuer: https://auth.acme.internal/dex
-  storage:
-    type: kubernetes
-    config: { inCluster: true }
   connectors:
-    - type: oidc
-      id: okta
-      name: Okta
+    - type: github
+      id: github
+      name: GitHub
       config:
-        issuer: https://acme.okta.com
-        clientID: 0oa4...
-        clientSecret: "$OKTA_CLIENT_SECRET"
-        scopes: [openid, email, profile, groups]
+        clientID: $GITHUB_OAUTH_CLIENT_ID
+        clientSecret: $GITHUB_OAUTH_CLIENT_SECRET
+        redirectURI: https://auth.acme.internal/dex/callback
+        # Restrict to specific orgs and surface their teams as groups
+        orgs:
+          - name: acme-platform
+            teams: [platform, sre, ml-platform]
+        loadAllGroups: false
 ```
 
-### Wire KubeHero to Dex
+Now Dex's `groups` claim contains entries like `acme-platform:platform`. Map them:
+
+```
+KUBEHERO_GROUP_ROLES=acme-platform:platform=admin,acme-platform:sre=admin,acme-platform:ml-platform=member
+```
+
+---
+
+## LDAP / Active Directory / SAML — via Dex
+
+We deliberately **don't ship a native LDAP client**. Dex specifically exists to translate every legacy auth protocol into clean OIDC, and our control plane already speaks OIDC fluently. The savings are real: ~600-1000 lines of Go we don't write, every LDAP/AD schema dialect we don't have to track, every SAML 2.0 quirk we don't have to test.
+
+### Active Directory
 
 ```yaml
-# kubehero values.yaml
-auth:
-  dex:
-    embedded: false   # installed separately above
-    issuerURL: "https://auth.acme.internal/dex"
+# dex-values.yaml
+config:
+  connectors:
+    - type: ldap
+      id: ad
+      name: Active Directory
+      config:
+        host: ad.acme.internal:636
+        bindDN: CN=KubeHero Service,OU=ServiceAccounts,DC=acme,DC=internal
+        bindPW: $AD_BIND_PASSWORD
+        userSearch:
+          baseDN: OU=Users,DC=acme,DC=internal
+          filter: "(objectClass=person)"
+          username: sAMAccountName
+          idAttr: objectGUID
+          emailAttr: mail
+          nameAttr: displayName
+        groupSearch:
+          baseDN: OU=Groups,DC=acme,DC=internal
+          filter: "(objectClass=group)"
+          userMatchers:
+            - userAttr: distinguishedName
+              groupAttr: member
+          nameAttr: cn
 ```
 
-The dashboard now redirects unauthenticated users through Dex → Okta → back. The CLI uses device-flow or static client credentials.
+cp env:
 
-## RBAC
+```
+OIDC_ISSUER_URL=https://auth.acme.internal/dex
+OIDC_AUDIENCE=kubehero
+KUBEHERO_GROUP_ROLES=Kubehero Admins=admin,Platform Engineering=member,SRE Auditors=auditor
+```
 
-Three built-in roles:
+### OpenLDAP / FreeIPA
 
-| Role | Dashboard | CLI |
-|---|---|---|
-| **Admin** | Read + write everywhere, arm policies | Full |
-| **Operator** | Read + arm policies in scoped clusters | Arm / undo within scope |
-| **Viewer** | Read-only | Read-only |
+Same connector type, different schema. Swap `sAMAccountName` for `uid`, `objectGUID` for `dn`, `member` for `memberOf`. The Dex docs cover every common dialect.
 
-RBAC binds via OIDC group claims. In `values.yaml`:
+### SAML 2.0
 
 ```yaml
-auth:
-  rbac:
-    mapping:
-      admin:    ["acme-sre-admins"]
-      operator: ["acme-sre-oncall", "acme-platform"]
-      viewer:   ["acme-engineering"]
+# dex-values.yaml
+config:
+  connectors:
+    - type: saml
+      id: saml
+      name: SAML SSO
+      config:
+        ssoURL: https://idp.acme.com/saml/sso
+        ca: |
+          -----BEGIN CERTIFICATE-----
+          ...
+        redirectURI: https://auth.acme.internal/dex/callback
+        usernameAttr: email
+        emailAttr: email
+        groupsAttr: groups
+        entityIssuer: kubehero
 ```
 
-Custom scopes per cluster / namespace are supported.
+The cp doesn't know SAML happened. It sees a normal OIDC token with a `groups` claim. Map roles the same way.
 
-## Audit
+---
 
-Every authenticated action writes an `audit_log` row: `actor.sub`, `actor.email`, `actor.groups`, `action`, `target`, `result`, `request_id`. SIEM export via:
+## API keys for service accounts
 
-```bash
-kubehero audit forward --syslog udp://siem.internal:514
-kubehero audit forward --webhook https://siem.internal/hooks/kubehero
-kubehero audit forward --s3 s3://acme-compliance/kubehero/
+Some integrations want a long-lived bearer rather than human SSO — CI pipelines, the operator's `CONTROL_PLANE_TOKEN`, audit-export cron jobs. Each gets its own entry, with the role suffix:
+
+```
+KUBEHERO_API_KEYS=ci-pipeline-key:member,operator-eks-prod:admin,siem-export:auditor
 ```
 
-All three outputs include an HMAC signature so your SIEM can verify authenticity.
+The cp hashes these on first request and never logs the raw token — only the first 16 hex chars of the SHA-256 hash appear as `principal.Sub`.
 
-## Token lifetimes
+Rotation is a `kubectl patch deployment` away — no DB migration, no user re-onboarding. SCIM-managed humans are unaffected.
 
-- **Dashboard session** — 8 hours (sliding, refreshes on activity)
-- **CLI token** — 30 days, rotatable via `kubehero auth rotate`
-- **Agent mTLS cert** — 7 days, cert-manager rotates automatically
+---
 
-## Service-to-service auth
+## Forced auth in production
 
-Intra-platform RPCs use mTLS via cert-manager's CA. The agent holds a per-cluster cert issued at `helm install` time via `kubehero cluster add`. Inbound control-plane calls verify the cert's common name matches a registered cluster.
+```
+KUBEHERO_REQUIRE_AUTH=true
+```
+
+This single flag flips the open-mode default off. Every RPC without a valid Bearer returns `Unauthenticated`. Set it the moment you put the cp in front of real users.
+
+The Helm chart's `values.production.yaml` does this for you.
+
+---
+
+## Token verification — what the cp actually checks
+
+Every JWT goes through, in order:
+
+1. **Three-part structure** — header, payload, signature, base64url-decoded.
+2. **Algorithm match** — RS256/384/512 → RSA, ES256/384 → ECDSA. Symmetric `oct` keys are rejected.
+3. **Signature** — verified against the `kid` from the JWKS cache. Cache TTL is 1h; misses trigger a refetch (so rotated keys don't lock anyone out).
+4. **`iss` matches `OIDC_ISSUER_URL`** exactly.
+5. **`aud` matches `OIDC_AUDIENCE`** when set (string or `[]string`).
+6. **`exp` not in the past, `nbf` not in the future**.
+7. **Group → role resolution.** Highest-ranked match in `KUBEHERO_GROUP_ROLES` wins. Falls back to legacy `kh_roles: ["admin"]` claim, then to `viewer`.
+
+Every step is in `services/control-plane/internal/auth/` if you want to read the implementation.

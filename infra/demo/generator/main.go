@@ -87,24 +87,51 @@ func envOr(k, def string) string {
 }
 
 type sink struct {
-	cp  kuberov1connect.ControlPlaneServiceClient
-	tel kuberov1connect.TelemetryServiceClient
-	log *slog.Logger
+	cp   kuberov1connect.ControlPlaneServiceClient
+	tel  kuberov1connect.TelemetryServiceClient
+	cost kuberov1connect.CostServiceClient
+	log  *slog.Logger
 	// counters for the summary line
 	pods, nodes, usage, logs, profiles, flows, events int
 }
 
+// Per-request limits the control plane enforces (split larger batches).
+const (
+	maxPodSamples  = 20_000
+	maxNodeSamples = 1_000
+	maxLogs        = 10_000
+	maxFlows       = 5_000
+	maxProfiles    = 500 // also bounded by 20k stack samples per request
+	maxUsage       = 10_000
+	maxEvents      = 5_000
+)
+
+// batch accumulates one cluster's signals across ticks so the backfill
+// sends an hour of history per request instead of one request per
+// five-minute step.
+type batch struct {
+	pods     []*kuberov1.PodCostSample
+	nodes    []*kuberov1.NodeCostSample
+	usage    []*kuberov1.ContainerUsage
+	logs     []*kuberov1.LogEntry
+	flows    []*kuberov1.Flow
+	profiles []*kuberov1.Profile
+	events   []*kuberov1.ClusterEvent
+}
+
 func run(ctx context.Context, cfg config, log *slog.Logger) error {
-	httpc := &http.Client{Timeout: 30 * time.Second}
+	// Generous timeout: a backfill request carries an hour of history.
+	httpc := &http.Client{Timeout: 2 * time.Minute}
 	opts := []connect.ClientOption{connect.WithSendGzip()}
 	if cfg.token != "" {
 		opts = append(opts, connect.WithInterceptors(bearer(cfg.token)))
 	}
 	base := strings.TrimRight(cfg.url, "/")
 	s := &sink{
-		cp:  kuberov1connect.NewControlPlaneServiceClient(httpc, base, opts...),
-		tel: kuberov1connect.NewTelemetryServiceClient(httpc, base, opts...),
-		log: log,
+		cp:   kuberov1connect.NewControlPlaneServiceClient(httpc, base, opts...),
+		tel:  kuberov1connect.NewTelemetryServiceClient(httpc, base, opts...),
+		cost: kuberov1connect.NewCostServiceClient(httpc, base, opts...),
+		log:  log,
 	}
 	if err := waitReady(ctx, s, log); err != nil {
 		return err
@@ -115,26 +142,30 @@ func run(ctx context.Context, cfg config, log *slog.Logger) error {
 	r := rand.New(rand.NewPCG(cfg.seed, 7))
 
 	if cfg.backfill > 0 {
-		from := start.Add(-cfg.backfill).Truncate(cfg.step)
-		steps := 0
-		for t := from.Add(cfg.step); !t.After(start); t = t.Add(cfg.step) {
-			if err := tick(ctx, s, fleet, t, start, cfg.step, cfg.backfillLogsPerPod, t.Minute()%30 == 0, r); err != nil {
-				return fmt.Errorf("backfill at %s: %w", t.Format(time.RFC3339), err)
-			}
-			steps++
-			if steps%48 == 0 {
-				log.Info("backfilling", "at", t.Format(time.RFC3339), "steps", steps)
-			}
+		if s.hasHistory(ctx, cfg.backfill) {
+			// A previous run (or a restart of this one) already wrote the
+			// history; writing it again would double every dollar.
+			log.Info("history already present, skipping backfill")
+			s.summary("backfill complete")
+		} else if err := backfill(ctx, s, fleet, cfg, start, r); err != nil {
+			return err
 		}
-		s.summary("backfill complete")
 	}
 
 	ticker := time.NewTicker(cfg.interval)
 	defer ticker.Stop()
 	for {
 		now := time.Now().UTC()
-		if err := tick(ctx, s, fleet, now, start, cfg.interval, cfg.maxLogsPerPod, true, r); err != nil {
-			log.Warn("live tick failed", "err", err)
+		batches := map[string]*batch{}
+		for _, c := range fleet {
+			b := &batch{}
+			collect(b, c, now, start, cfg.interval, cfg.maxLogsPerPod, true, r)
+			batches[c.ID] = b
+		}
+		for _, c := range fleet {
+			if err := s.flush(ctx, c.ID, batches[c.ID]); err != nil {
+				log.Warn("live tick failed", "cluster", c.ID, "err", err)
+			}
 		}
 		if cfg.once {
 			s.summary("done")
@@ -149,54 +180,185 @@ func run(ctx context.Context, cfg config, log *slog.Logger) error {
 	}
 }
 
-// tick writes every signal for every cluster for the interval ending at t.
-func tick(ctx context.Context, s *sink, fleet []*cluster, t, start time.Time, step time.Duration, logsPerPod int, withProfiles bool, r *rand.Rand) error {
+// backfill writes cfg.backfill of history at cfg.step resolution,
+// flushing each cluster once per simulated hour.
+func backfill(ctx context.Context, s *sink, fleet []*cluster, cfg config, start time.Time, r *rand.Rand) error {
+	from := start.Add(-cfg.backfill).Truncate(cfg.step)
+	flushEvery := max(1, int(time.Hour/cfg.step))
+	batches := map[string]*batch{}
 	for _, c := range fleet {
-		states := snapshot(c, t, start, r)
-		pods, nodes := costBatch(c, states, t, step)
-		if _, err := s.cp.IngestPodCost(ctx, connect.NewRequest(&kuberov1.IngestPodCostRequest{ClusterId: c.ID, Samples: pods, Nodes: nodes})); err != nil {
-			return fmt.Errorf("IngestPodCost %s: %w", c.ID, err)
-		}
-		s.pods += len(pods)
-		s.nodes += len(nodes)
-
-		if u := usageBatch(c, states, t); len(u) > 0 {
-			if _, err := s.tel.IngestUsage(ctx, connect.NewRequest(&kuberov1.IngestUsageRequest{ClusterId: c.ID, Usage: u})); err != nil {
-				return fmt.Errorf("IngestUsage %s: %w", c.ID, err)
+		batches[c.ID] = &batch{}
+	}
+	steps := 0
+	flushAll := func(at time.Time) error {
+		for _, c := range fleet {
+			if err := s.flush(ctx, c.ID, batches[c.ID]); err != nil {
+				return fmt.Errorf("backfill at %s: %w", at.Format(time.RFC3339), err)
 			}
-			s.usage += len(u)
+			batches[c.ID] = &batch{}
 		}
-		if ev := eventBatch(c, states, t, step); len(ev) > 0 {
-			if _, err := s.tel.IngestEvents(ctx, connect.NewRequest(&kuberov1.IngestEventsRequest{ClusterId: c.ID, Events: ev})); err != nil {
-				return fmt.Errorf("IngestEvents %s: %w", c.ID, err)
+		return nil
+	}
+	for t := from.Add(cfg.step); !t.After(start); t = t.Add(cfg.step) {
+		for _, c := range fleet {
+			// CPU profiles every 30 simulated minutes keep the history light.
+			collect(batches[c.ID], c, t, start, cfg.step, cfg.backfillLogsPerPod, t.Minute()%30 == 0, r)
+		}
+		steps++
+		if steps%flushEvery == 0 {
+			if err := flushAll(t); err != nil {
+				return err
 			}
-			s.events += len(ev)
-		}
-		logs := logBatch(c, states, t, start, step, logsPerPod, r)
-		for len(logs) > 0 {
-			n := min(len(logs), 5000)
-			if _, err := s.tel.IngestLogs(ctx, connect.NewRequest(&kuberov1.IngestLogsRequest{ClusterId: c.ID, Entries: logs[:n]})); err != nil {
-				return fmt.Errorf("IngestLogs %s: %w", c.ID, err)
-			}
-			s.logs += n
-			logs = logs[n:]
-		}
-		if f := flowBatch(c, states, t, start, step, r); len(f) > 0 {
-			if _, err := s.tel.IngestFlows(ctx, connect.NewRequest(&kuberov1.IngestFlowsRequest{ClusterId: c.ID, Flows: f})); err != nil {
-				return fmt.Errorf("IngestFlows %s: %w", c.ID, err)
-			}
-			s.flows += len(f)
-		}
-		if withProfiles {
-			if p := profileBatch(c, states, t, start, step); len(p) > 0 {
-				if _, err := s.tel.IngestProfiles(ctx, connect.NewRequest(&kuberov1.IngestProfilesRequest{ClusterId: c.ID, Profiles: p})); err != nil {
-					return fmt.Errorf("IngestProfiles %s: %w", c.ID, err)
-				}
-				s.profiles += len(p)
+			if steps%(flushEvery*12) == 0 {
+				s.log.Info("backfilling", "at", t.Format(time.RFC3339), "steps", steps)
 			}
 		}
 	}
+	if err := flushAll(start); err != nil {
+		return err
+	}
+	s.summary("backfill complete")
 	return nil
+}
+
+// collect appends every signal for the interval ending at t.
+func collect(b *batch, c *cluster, t, start time.Time, step time.Duration, logsPerPod int, withProfiles bool, r *rand.Rand) {
+	states := snapshot(c, t, start, r)
+	pods, nodes := costBatch(c, states, t, step)
+	b.pods = append(b.pods, pods...)
+	b.nodes = append(b.nodes, nodes...)
+	b.usage = append(b.usage, usageBatch(c, states, t)...)
+	b.events = append(b.events, eventBatch(c, states, t, step)...)
+	b.logs = append(b.logs, logBatch(c, states, t, start, step, logsPerPod, r)...)
+	b.flows = append(b.flows, flowBatch(c, states, t, start, step, r)...)
+	if withProfiles {
+		b.profiles = append(b.profiles, profileBatch(c, states, t, start, step)...)
+	}
+}
+
+// flush sends a cluster's batch, split to the control plane's limits.
+func (s *sink) flush(ctx context.Context, clusterID string, b *batch) error {
+	for lo := 0; lo < len(b.pods); lo += maxPodSamples {
+		req := &kuberov1.IngestPodCostRequest{ClusterId: clusterID, Samples: window(b.pods, lo, maxPodSamples)}
+		if err := s.retry(ctx, "IngestPodCost", func() error {
+			_, err := s.cp.IngestPodCost(ctx, connect.NewRequest(req))
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	for lo := 0; lo < len(b.nodes); lo += maxNodeSamples {
+		req := &kuberov1.IngestPodCostRequest{ClusterId: clusterID, Nodes: window(b.nodes, lo, maxNodeSamples)}
+		if err := s.retry(ctx, "IngestPodCost(nodes)", func() error {
+			_, err := s.cp.IngestPodCost(ctx, connect.NewRequest(req))
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	s.pods += len(b.pods)
+	s.nodes += len(b.nodes)
+
+	send := func(what string, n, limit int, call func(lo, hi int) error) error {
+		for lo := 0; lo < n; lo += limit {
+			hi := min(n, lo+limit)
+			if err := s.retry(ctx, what, func() error { return call(lo, hi) }); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := send("IngestUsage", len(b.usage), maxUsage, func(lo, hi int) error {
+		_, err := s.tel.IngestUsage(ctx, connect.NewRequest(&kuberov1.IngestUsageRequest{ClusterId: clusterID, Usage: b.usage[lo:hi]}))
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := send("IngestEvents", len(b.events), maxEvents, func(lo, hi int) error {
+		_, err := s.tel.IngestEvents(ctx, connect.NewRequest(&kuberov1.IngestEventsRequest{ClusterId: clusterID, Events: b.events[lo:hi]}))
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := send("IngestLogs", len(b.logs), maxLogs, func(lo, hi int) error {
+		_, err := s.tel.IngestLogs(ctx, connect.NewRequest(&kuberov1.IngestLogsRequest{ClusterId: clusterID, Entries: b.logs[lo:hi]}))
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := send("IngestFlows", len(b.flows), maxFlows, func(lo, hi int) error {
+		_, err := s.tel.IngestFlows(ctx, connect.NewRequest(&kuberov1.IngestFlowsRequest{ClusterId: clusterID, Flows: b.flows[lo:hi]}))
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := send("IngestProfiles", len(b.profiles), maxProfiles, func(lo, hi int) error {
+		_, err := s.tel.IngestProfiles(ctx, connect.NewRequest(&kuberov1.IngestProfilesRequest{ClusterId: clusterID, Profiles: b.profiles[lo:hi]}))
+		return err
+	}); err != nil {
+		return err
+	}
+	s.usage += len(b.usage)
+	s.events += len(b.events)
+	s.logs += len(b.logs)
+	s.flows += len(b.flows)
+	s.profiles += len(b.profiles)
+	return nil
+}
+
+// retry runs call, backing off on errors that clear on their own
+// (overload, timeouts, restarts). Validation errors fail fast.
+func (s *sink) retry(ctx context.Context, what string, call func() error) error {
+	backoff := time.Second
+	for attempt := 1; ; attempt++ {
+		err := call()
+		if err == nil {
+			return nil
+		}
+		switch connect.CodeOf(err) {
+		case connect.CodeUnavailable, connect.CodeDeadlineExceeded, connect.CodeResourceExhausted,
+			connect.CodeAborted, connect.CodeUnknown, connect.CodeInternal:
+		default:
+			return fmt.Errorf("%s: %w", what, err)
+		}
+		if attempt == 6 {
+			return fmt.Errorf("%s after %d attempts: %w", what, attempt, err)
+		}
+		s.log.Warn("retrying", "rpc", what, "attempt", attempt, "in", backoff.String(), "err", err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, 20*time.Second)
+	}
+}
+
+// hasHistory reports whether this fleet's history is already stored —
+// the check that makes a restarted generator skip the backfill.
+func (s *sink) hasHistory(ctx context.Context, backfill time.Duration) bool {
+	win := fmt.Sprintf("%dh", max(2, int(backfill.Hours())-1))
+	res, err := s.cost.GetAllocation(ctx, connect.NewRequest(&kuberov1.GetAllocationRequest{
+		Window: win, Aggregate: []string{"cluster"},
+	}))
+	if err != nil || res.Msg.GetSource() == "demo" {
+		return false
+	}
+	start := res.Msg.GetStartUnixMs()
+	for _, a := range res.Msg.GetAllocations() {
+		if a.GetName() == "eks-use1-prod" && a.GetTotalCost() > 0 {
+			// History covering (most of) the window, not just live ticks.
+			return a.GetMinutes() > 0.5*float64(res.Msg.GetEndUnixMs()-start)/60000
+		}
+	}
+	return false
+}
+
+func window[T any](xs []T, lo, n int) []T {
+	if lo >= len(xs) {
+		return nil
+	}
+	return xs[lo:min(len(xs), lo+n)]
 }
 
 func (s *sink) summary(msg string) {

@@ -1,35 +1,50 @@
 ---
 title: Concepts
-description: Attribution, rightsizing, ceilings — the three ideas that power KubeHero.
+description: Attribution, signals, rightsizing, ceilings and guarded automation — the ideas the rest of KubeHero is built from.
 ---
-
-KubeHero is built around three ideas. Once you understand these, the rest of the product falls out naturally.
 
 ## Attribution
 
-**Who is spending the money, right now, at pod resolution?**
+**Who is spending, and on what?** Every pod is priced from the node it runs on: its share of the node — `max(requests, measured usage)` for CPU and memory — times the node's price. The price comes from a node annotation you set (`kubehero.io/node-hourly-usd`), the pricing engine's live cloud price lists, or an estimate, and the source is recorded. GPU nodes attribute most of their price to accelerators by GPU count.
 
-Most K8s cost tools price a pod's *requests* — paid-for air included. KubeHero prices **measured utilization**: every 5 seconds the collector reads each pod's actual CPU (`usageNanoCores`) and working-set memory from the kubelet Summary API and attributes cost from `max(requests, measured)` — without relying on `metrics-server`. eBPF scheduler probes, for 1-second cgroup-accurate burst attribution, are the roadmap's next accuracy step.
+What's left of a node's price after its pods is **idle cost**, which you can keep separate or share back. Network transfer and log volume are attributed to the workload that produced them. See [Cost allocation](/docs/allocation).
 
-Each sample carries: pod, CPU millicores, memory bytes, and the node it ran on. That maps to a **cost-per-pod-per-second** using the pricing engine's normalized SKU table.
+Allocation is an estimate reconciled to node prices, not to your invoice.
+
+## Signals
+
+Cost, logs, profiles, flows, container usage and cluster events all land in one ClickHouse store with the **same labels**: `cluster`, `namespace`, `workload`, `workload_kind`, `pod`, `container`, `node`, `team`, `zone`. That shared vocabulary is what lets a dashboard page, an alert rule or an investigation move from a cost spike to the log pattern, the hot function and the network edge behind it.
+
+Teams come from the `kubehero.io/team` pod label (configurable), with a namespace fallback and an optional namespace → team map; pods without a team roll up under `unattributed` rather than disappearing.
 
 ## Rightsizing
 
-**What's the smallest safe config that still honors my SLOs?**
+**What's the smallest safe request?** KubeHero sizes each container from its measured usage over an observation window (default 7 days): CPU to a percentile (default p95) plus headroom (default 15%); memory to the larger of p99 and the observed maximum, plus headroom, never below that maximum, and never down after an OOM kill. Confidence comes from how much of the window has samples.
 
-Rightsizing is a statistical decision, not a heuristic. KubeHero tracks the p95 of each workload's actual use over a configurable observation window (default 14 days) and proposes a new request that leaves a configurable headroom (default 40%). The recommendation ships with an exact YAML patch and a dry-run preview.
+A `RightsizingPolicy` decides what happens with those numbers:
 
-Three modes, set via `RightsizingPolicy.spec.mode`:
-- **recommend** — surfaces suggestions, never mutates anything
-- **shadow** — mutates a shadow copy of the resource for comparison, no production effect
-- **apply** — mutates the real resource, bounded by `safety.maxChangePerDay`
+- **recommend** — write them to the policy's status; change nothing;
+- **shadow** — also record exactly what would change, and why anything would be blocked; change nothing;
+- **apply** — patch requests, only when the policy is armed and every guard passes (confidence, bounded step, daily limit, no rollout in progress, no VPA, enough replicas).
 
-## Ceilings
+See [Rightsizing](/docs/rightsizing).
 
-**When spend runs away faster than humans can react, what should happen automatically?**
+## Budgets and ceilings
 
-A `BudgetPolicy` sets a declarative spending limit (e.g. $100k/month for all `env=prod` clusters). A `CeilingPolicy` references it and defines what to do when the burn rate crosses a threshold — cap HPAs, evict low-priority pods, cordon burst pools. Each step waits a configurable delay before the next runs.
+A `BudgetPolicy` declares a spending limit for a scope (e.g. `$100000/mo` for every `env=prod` cluster). A `CeilingPolicy` references it and defines what to do when the **burn rate** — spend rate extrapolated against the budget — crosses a multiple for a sustained window: alert, cap HPAs, evict low-priority pods, cordon a node pool, one step at a time with a wait between steps.
 
-**`humanArm: true` is the default.** Nothing fires until an operator arms it from the dashboard or CLI. This is intentional — we optimize for operators not getting fired, not for magical self-healing.
+## Guarded automation
 
-Every action is reversible within the cooldown window. `kubehero undo <audit-id>` restores the original state.
+Every mutation in KubeHero follows one path:
+
+1. something **proposes** a change — you, or an agent;
+2. a **human arms** the policy (`humanArm: true` is the default);
+3. the **operator executes** it in bounded steps, dry-run first;
+4. it's **audited** in an append-only, HMAC-signed log;
+5. it's **reversible** with `kubehero undo` inside the cooldown.
+
+Agents can only do step 1. See [Agents & MCP](/docs/agents).
+
+## Demo data
+
+A fresh install should never look empty, but it should never lie either. When a signal's store isn't configured, its APIs return fixtures labelled `source: "demo"` and the dashboard shows a demo badge. Set `controlPlane.demoMode: "false"` in production to make missing stores fail loudly instead.

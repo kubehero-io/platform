@@ -1,0 +1,125 @@
+---
+title: Logs
+description: Container log collection into ClickHouse, LogQL queries, live tail, Drain patterns, log cost per team, and drop-in Loki and OTLP APIs.
+---
+
+KubeHero stores every container's logs next to its cost, profiles and flows. The collector tails logs on each node into ClickHouse; the control plane runs **LogQL** over them, live-tails, mines patterns and prices log volume. It also speaks the **Loki push and query APIs** and **OTLP/HTTP logs**, so Promtail, Grafana Alloy, Fluent Bit, the OpenTelemetry Collector and Grafana's Loki datasource work without changes.
+
+## Collection
+
+The collector DaemonSet reads `/var/log/pods/<namespace>_<pod>_<uid>/<container>/*.log` on its own node:
+
+- **Formats** — CRI (`<timestamp> <stdout|stderr> <P|F> <message>`, partial lines reassembled up to 64 KiB) and docker `json-file`.
+- **Rotation-safe** — files are discovered with fsnotify plus a periodic rescan; offsets are checkpointed (`/var/lib/kubehero/log-positions.json`) so a restart, rotation or truncation never loses or duplicates lines.
+- **Levels and trace IDs** — `level` is detected from JSON (`level`, `lvl`, `severity`, `log.level`, `@l`), logfmt `level=`, klog prefixes (`I0928`, `W…`, `E…`, `F…`) and common tokens (`ERROR:`, `panic:`, `Traceback`), normalised to `trace | debug | info | warn | error | fatal`. W3C `traceparent` and `trace_id` fields populate `trace_id`.
+- **Labels** — `cluster`, `namespace`, `pod`, `container`, `workload`, `workload_kind`, `node`, `team`, `stream`, `level`, plus allow-listed pod labels such as `app`.
+- **Protection** — a per-container token bucket (2,000 lines/s by default, bursts to 4,000); dropped lines are counted in `kubehero_collector_log_lines_dropped_total`. The collector's own namespace is always excluded.
+
+| Helm value | Default | Notes |
+|---|---|---|
+| `collector.logs.enabled` | `true` | Turn log collection off entirely. |
+| `collector.logs.rateLimit` | `2000` | Lines per second per container. |
+| `collector.logs.excludeNamespaces` | `[]` | Extra namespaces to skip. |
+| `collector.logs.startFrom` | `end` | For files that already exist at first start: `end` (no backfill) or `start`. |
+
+## LogQL support
+
+Queries are compiled to parameterised ClickHouse SQL: selectors and line filters are pushed down (the `ngrambf` index serves `|=`), parsed labels are extracted in SQL where possible, and count/bytes metric queries over column labels are answered from per-minute volume rollups.
+
+| Feature | Support |
+|---|---|
+| Stream selectors `=` `!=` `=~` `!~` | ✓ — over the labels above and any extra label key |
+| Line filters `\|=` `!=` `\|~` `!~` (chained) | ✓ |
+| Parsers `json`, `logfmt`, `regexp` | ✓ |
+| Parser `pattern` | not in v0.3 |
+| Label filters (`\| status >= 500`, `and` / `or`, numbers, durations, strings, regex) | ✓ |
+| `line_format` (Go template subset), `drop`, `keep` | ✓ |
+| Range aggregations: `count_over_time`, `rate`, `bytes_over_time`, `bytes_rate`, `absent_over_time` | ✓ |
+| Vector aggregations: `sum`, `avg`, `min`, `max`, `count`, `topk`, `bottomk` with `by` / `without` | ✓ |
+| Binary operations with scalars (`> 100`, `* 60`) | ✓ |
+| `unwrap` / `quantile_over_time` | not in v0.3 |
+| Multi-tenant queries (`X-Scope-OrgID` with `\|`) | no — query one cluster at a time |
+
+```logql
+# errors mentioning a timeout, parsed and filtered
+{namespace="checkout", level="error"} |= "timeout" | json | status >= 500
+
+# error lines per namespace, per 5 minutes
+sum by (namespace) (count_over_time({level=~"error|fatal"}[5m]))
+
+# the three chattiest workloads
+topk(3, sum by (workload) (rate({cluster="eks-use1-prod"}[5m])))
+```
+
+Try it without installing anything: the home page runs a [LogQL playground](/#demos) over demo logs in your browser.
+
+## From the CLI
+
+```bash
+kubehero logs '{namespace="payments", level="error"}' --since 1h
+kubehero logs '{namespace="payments"} |= "timeout"' -f            # live tail
+kubehero logs '{namespace="payments"}' --patterns --since 24h     # Drain patterns
+kubehero logs '{level="error"}' --volume --group-by namespace     # volume + $/mo
+kubehero logs 'sum by (namespace) (count_over_time({level="error"}[5m]))'
+```
+
+`--since` (default `1h`) or `--from` / `--to` (RFC 3339) set the range; `--limit` caps lines (1–5,000); `--direction forward` reads oldest first.
+
+## Patterns
+
+`GetLogPatterns` clusters matching lines with the **Drain** algorithm: tokens that vary — numbers, UUIDs, hex IDs, IPs, durations — are masked to `<_>`, and lines join the most similar template of the same shape. A million lines read as a handful of templates, each with a count, share, dominant level, per-step trend and one sample line. Up to 50,000 sampled lines are analysed per request.
+
+## Live tail
+
+`TailLogs` is a server stream: it polls every second for lines newer than the cursor, de-duplicates at the boundary, caps lines per push and reports how many it had to skip (`dropped`) to keep up. The dashboard proxies it to the browser as server-sent events; the CLI prints it with `-f`.
+
+## What logs cost
+
+`GetLogVolume` returns lines per step split by a label (level by default), total lines and bytes, and `est_cost_usd_month` — bytes per day × 30 × your price per GB of ingested logs. Set that price with `controlPlane.pricing.logUSDPerGB` (environment variable `KUBEHERO_LOG_USD_PER_GB`, default `0.50`). Allocation rows carry `logIngestGb`, so log volume shows up next to compute in chargeback.
+
+## Retention
+
+| Table | Holds | TTL |
+|---|---|---|
+| `logs` | raw log lines | 14 days |
+| `log_volume_1m` | per-minute line and byte counts by stream | 90 days |
+
+TTLs are set in the ClickHouse schema; change them with `ALTER TABLE … MODIFY TTL` on your ClickHouse if you need longer.
+
+## Loki API compatibility
+
+The control plane serves Loki's HTTP API on its service port (8080):
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /loki/api/v1/push` | ingest — JSON and protobuf + snappy (Promtail, Alloy `loki.write`, Fluent Bit `loki` output) |
+| `GET /loki/api/v1/query_range`, `/query` | LogQL queries, Loki's `streams` / `matrix` / `vector` JSON |
+| `GET /loki/api/v1/labels`, `/label/{name}/values`, `/series` | label and series discovery |
+| `GET /loki/api/v1/index/volume`, `/index/stats` | volume and stats for Grafana's log volume panel |
+| `GET /loki/api/v1/status/buildinfo`, `/ready` | health and version probes |
+
+Loki's tenant header `X-Scope-OrgID` maps to a **cluster**; pushes can also set the cluster with a `cluster` stream label. Unmapped stream labels are kept in the labels map. Authenticate with the same bearer tokens as the rest of the API.
+
+## OTLP logs
+
+`POST /v1/logs` accepts OTLP/HTTP (protobuf and JSON). Resource attributes `k8s.namespace.name`, `k8s.pod.name`, `k8s.container.name`, `k8s.deployment.name` and `service.name` map onto the columns; `severity_text` / `severity_number` become `level`; the trace ID is kept.
+
+## Grafana setup
+
+Add a **Loki** data source that points at the control plane:
+
+```yaml
+# grafana provisioning: datasources.yaml
+apiVersion: 1
+datasources:
+  - name: KubeHero logs
+    type: loki
+    access: proxy
+    url: http://kubehero-control-plane.kubehero-system.svc:8080
+    jsonData:
+      httpHeaderName1: Authorization
+    secureJsonData:
+      httpHeaderValue1: "Bearer <a viewer token>"
+```
+
+Explore, dashboards and alerting in Grafana then query KubeHero with LogQL. Shipper configurations are on [Compatibility](/docs/compatibility).

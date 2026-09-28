@@ -1,70 +1,58 @@
 ---
 title: Chargeback
-description: Attribute every dollar to a team, nodepool, or cost center. Grafana dashboards included.
+description: Attribute spend to teams, cost centers, namespaces and node pools with the labels you already use — in KubeHero, in Prometheus and in Grafana.
 ---
 
-KubeHero rolls up every pod-second of spend into **team**, **namespace**, **nodepool**, **cloud**, **region**, and (for GPUs) **gpu_kind** dimensions. The chart ships three Grafana dashboards that render those rollups out of the box.
+Chargeback is allocation grouped by who pays. KubeHero reads ownership from labels you already have, so there's no new configuration layer.
 
-## The label convention
+## Labels
 
-KubeHero reads existing Kubernetes labels — no new configuration layer. Tag your workloads with one label and you're done.
-
-| Label (default) | What it means | Override via |
+| Label (default) | Meaning | Override |
 |---|---|---|
-| `kubehero.io/team` | Owning team — the primary chargeback axis | `chargeback.teamLabel` |
-| `kubehero.io/cost-center` | Optional BU / cost center | `chargeback.costCenterLabel` |
-| nodepool label (cloud-native) | `cloud.google.com/gke-nodepool`, `agentpool`, `eks.amazonaws.com/nodegroup` | `chargeback.nodepoolLabel` |
+| `kubehero.io/team` | the owning team — the primary chargeback axis | `chargeback.teamLabel` |
+| `kubehero.io/cost-center` | an optional business unit / cost center | `chargeback.costCenterLabel` |
+| node pool (auto-detected per cloud) | `eks.amazonaws.com/nodegroup`, `cloud.google.com/gke-nodepool`, `agentpool` | `chargeback.nodepoolLabel` |
 
-Pods without a team label roll up under the `unattributed` bucket — unallocated spend stays visible instead of silently dropped.
+Pods without a team label fall back to `chargeback.namespaceToTeam` (e.g. `kube-system: platform`), then to `chargeback.defaultTeam` (`unattributed`) — unallocated spend stays visible instead of disappearing.
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vectordb-ingress
-  labels:
-    kubehero.io/team: retrieval
-    kubehero.io/cost-center: ml-platform
+  name: checkout-api
+spec:
+  template:
+    metadata:
+      labels:
+        kubehero.io/team: payments
+        kubehero.io/cost-center: commerce
 ```
 
-## The metrics the collector exports
+## In KubeHero
 
-| Metric | Labels | Units |
-|---|---|---|
-| `kubehero_pod_cost_usd_per_second` | `namespace, pod, team, cost_center, nodepool, cloud, region, gpu_kind` | USD/sec |
-| `kubehero_pod_recoverable_usd_per_second` | same | USD/sec (request minus actual use, priced out) |
-| `kubehero_pod_cpu_millicores` | same | millicores |
-| `kubehero_pod_memory_bytes` | same | bytes |
-| `kubehero_pod_gpu_util_ratio` | same | 0..1, GPU pods only |
-| `kubehero_node_cost_usd_per_hour` | `node, nodepool, cloud, region, sku, lifecycle` | USD/hr |
+```bash
+kubehero cost allocation --aggregate team --window month --idle --share-idle weighted
+kubehero cost allocation --aggregate team,nodepool --window lastmonth
+kubehero cost timeseries --group-by team --window 30d
+kubehero cost export --format focus --window lastmonth --aggregate workload --file chargeback.csv
+```
 
-## Recording rules shipped with the chart
+Team rows include CPU, RAM, GPU and **network** cost, **log volume**, idle cost shared back, and what rightsizing would recover — see [Cost allocation](/docs/allocation). The dashboard's chargeback page shows the same by team and cost center, with a cloud split.
 
-`deploy/helm/kubehero/templates/prometheusrule.yaml` installs:
+## In Prometheus and Grafana
+
+The collector exports per-pod `kubehero_pod_cost_usd_per_second` and `kubehero_pod_recoverable_usd_per_second` with `team`, `cost_center`, `nodepool`, `cloud`, `region` and `gpu_kind` labels. The chart's recording rules roll them up:
 
 ```text
-# Monthly projected spend per team
-kubehero:team_cost_usd:rate30d
-
-# Hourly burn per nodepool
+kubehero:team_cost_usd:rate1h        # $/hour per team
+kubehero:team_cost_usd:rate30d       # projected 30-day spend per team
 kubehero:nodepool_cost_usd:rate1h
-
-# GPU idle cost — $ teams spend on GPUs they aren't using
+kubehero:cost_center_cost_usd:rate1h
 kubehero:team_gpu_idle_cost_usd:rate1h
-
-# Recoverable via rightsizing, per team
 kubehero:team_recoverable_usd:rate1h
 ```
 
-## Grafana dashboards
-
-The chart ships three dashboards as ConfigMaps labeled `grafana_dashboard=1` — kube-prometheus-stack's sidecar auto-discovers them.
-
-- **KubeHero — Chargeback by team** — hourly rate, 30-day projection, nodepool breakdown, GPU idle cost, ranked workload table
-- **KubeHero — Fleet** — total spend, recoverable, per-cluster time series
-- **KubeHero — GPU panel** — utilization heatmap + per-GPU idle cost ranking
-
-Disable any of them in values:
+With kube-prometheus-stack, the chart also ships Grafana dashboards — **Chargeback by team**, **Fleet** and **GPU** — as ConfigMaps picked up by the Grafana sidecar:
 
 ```yaml
 grafana:
@@ -74,24 +62,8 @@ grafana:
     gpu: false
 ```
 
-## Budgets + alerts
+See [Prometheus + Grafana](/docs/integrations/prometheus-grafana) and the [metrics reference](/docs/metrics-reference).
 
-Pair chargeback with a `BudgetPolicy` to get alerting on projected overspend. Two alerts ship by default:
+## Budgets
 
-- **`KubeHeroTeamOverBudgetProjected`** — `predict_linear` over 6h projects the team's 30-day spend past their budget; fires at 15m sustained.
-- **`KubeHeroGPUIdleExcessive`** — team burns > $500/hr on idle GPUs for 1h.
-
-See [`CRD reference`](/docs/crd-reference#budgetpolicy) for the full policy spec.
-
-## Verifying in a fresh cluster
-
-```bash
-helm install kubehero kubehero/kubehero \
-  --namespace kubehero-system --create-namespace \
-  --set prometheus.release=kube-prometheus-stack
-
-kubectl -n kubehero-system port-forward svc/kubehero-collector 8081:8081
-curl -s localhost:8081/metrics | grep kubehero_pod_cost_usd_per_second | head -5
-```
-
-You should see live `team=`, `nodepool=`, `cloud=` labels flowing within a minute.
+Put a `BudgetPolicy` on a team's namespaces to get threshold alerts (50 / 80 / 95 / 100%) and, if you arm it, an escalation plan — see the [CRD reference](/docs/crd-reference#budgetpolicy). The default **Budget burn over 1.5×** alert rule watches every BudgetPolicy ([Alerting](/docs/alerts#default-rules)).

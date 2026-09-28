@@ -1,49 +1,34 @@
 ---
-title: Getting started
-description: Install the agent, connect your first cluster, and see recoverable spend in under five minutes.
+title: KubeHero docs
+description: Every signal, every dollar, one agent — open-source Kubernetes observability and FinOps for AKS, GKE and EKS.
 ---
 
-KubeHero is a unified cost and efficiency plane for AKS, GKE, and EKS. This page walks you through the fastest path from zero to "I can see which pods are wasting money."
-
-## Prerequisites
-
-- A Kubernetes cluster running 1.28 or newer
-- `kubectl` authenticated to that cluster
-- `helm` 3.x
-
-## Install the agent
+KubeHero is **one open-source install** for cost allocation, logs, continuous profiling, eBPF network cost, alerting and rightsizing that actually adjusts — with read-only agents that connect every signal to the dollar it costs. It runs in your cluster; nothing leaves it.
 
 ```bash
-helm repo add kubehero https://charts.kubehero.io
-helm install kubehero kubehero/kubehero \
-  --namespace kubehero-system --create-namespace \
-  -f values.yaml
+helm install kubehero oci://ghcr.io/kubehero-io/charts/kubehero \
+  -n kubehero-system --create-namespace
 ```
 
-That's the whole install. The agent runs read-only by default — no write permissions on your workloads.
+<Cards>
+  <Card title="Quickstart" href="/docs/quickstart" description="helm install to every signal in about five minutes." />
+  <Card title="Overview" href="/docs/overview" description="What ships in v0.3, the principles, the honest limits." />
+  <Card title="Compatibility" href="/docs/compatibility" description="Grafana, Promtail, Alloy, Fluent Bit, OTel, Pyroscope SDKs, OpenCost clients." />
+  <Card title="Comparison" href="/docs/comparison" description="Against OpenCost, Kubecost, Loki, Pyroscope, Datadog and Cast AI." />
+</Cards>
 
-## Confirm telemetry is flowing
+## The signals
 
-```bash
-kubectl -n kubehero-system get pods
-kubectl -n kubehero-system logs daemonset/kubehero-collector --tail=20
-```
+<Cards>
+  <Card title="Cost allocation" href="/docs/allocation" description="OpenCost-compatible, idle + shared cost, FOCUS export." />
+  <Card title="Logs" href="/docs/logs" description="LogQL, live tail, Drain patterns, Loki and OTLP APIs." />
+  <Card title="Profiling" href="/docs/profiling" description="eBPF CPU profiles, pprof scraping, $/month per function." />
+  <Card title="Network" href="/docs/network" description="Service map with cross-zone and egress cost." />
+  <Card title="Rightsizing" href="/docs/rightsizing" description="Percentile recommendations, applied only when armed." />
+  <Card title="Alerting" href="/docs/alerts" description="One engine over logs, spend, budgets, events." />
+  <Card title="Agents & MCP" href="/docs/agents" description="Briefings, Ask KubeHero, kubehero mcp — read-only." />
+</Cards>
 
-You should see `attribution ok · pods=NNN · nodes=NN` within 30 seconds. If not, see [Troubleshooting](/docs/deploy#troubleshooting).
+## Reference
 
-## Your first scan
-
-The CLI works against your self-hosted control plane:
-
-```bash
-kubehero cluster list
-kubehero scan --cluster prod-us-east-1 --report waste
-```
-
-A minute later you'll see the top wasting workloads ranked by recoverable $/mo.
-
-## What's next
-
-- [Architecture](/docs/architecture) — how the pieces fit together
-- [CRD reference](/docs/crd-reference) — `BudgetPolicy`, `CeilingPolicy`, `RightsizingPolicy`
-- [CLI reference](/docs/cli) — every subcommand, every flag
+[CLI](/docs/cli) · [CRDs](/docs/crd-reference) · [APIs](/docs/api-reference) · [Metrics](/docs/metrics-reference) · [Deploy](/docs/deploy) · [Production](/docs/production) · [Security](/docs/security) · [Troubleshooting](/docs/troubleshooting)

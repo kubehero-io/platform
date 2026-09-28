@@ -1,147 +1,58 @@
 ---
 title: Cloud providers
-description: AWS, GCP, and Azure integration — auth, pricing, security findings, autoscaler signals.
+description: What KubeHero does per cloud on AKS, GKE and EKS — node pricing, zones, node pools, spot, network rates — and what it doesn't need from your cloud account.
 ---
 
-Each cloud integration ships as a drop-in adapter in the control plane. A single Go interface (`CloudProvider { Pricing · Discover · Security }`) means adding Oracle / IBM / Alibaba later is a new file.
+KubeHero works from inside the cluster. It doesn't need credentials to your cloud accounts to attribute cost, collect logs, profile or map the network: everything it needs comes from the Kubernetes API, the nodes, and public price lists.
 
-## AWS
+## What is detected from the cluster
 
-### Auth — IRSA
+| | How |
+|---|---|
+| **Cloud** | the node's `spec.providerID` prefix (`aws://`, `gce://`, `azure://`), falling back to labels |
+| **Region, zone** | `topology.kubernetes.io/region`, `topology.kubernetes.io/zone` |
+| **Instance type** | `node.kubernetes.io/instance-type` (or the legacy `beta.` label) |
+| **Node pool** | `eks.amazonaws.com/nodegroup` (EKS), `cloud.google.com/gke-nodepool` (GKE), `agentpool` / `kubernetes.azure.com/agentpool` (AKS), or `chargeback.nodepoolLabel` |
+| **Lifecycle** | `eks.amazonaws.com/capacityType`, `karpenter.sh/capacity-type`, `cloud.google.com/gke-spot` / `gke-preemptible`, `kubernetes.azure.com/scalesetpriority` → `on-demand` · `spot` · `reserved`; override with the `kubehero.io/lifecycle` node label (e.g. `savings-plan`, `committed`) |
+| **GPUs** | `nvidia.com/gpu` and `amd.com/gpu` requests and node capacity |
 
-We use IAM Roles for Service Accounts. Your cluster admin creates a role the control-plane pod assumes; no static keys.
+## Node prices
 
-```yaml
-# values.yaml
-cloud:
-  aws:
-    enabled: true
-    roleArn: "arn:aws:iam::742190123456:role/kubehero-control-plane"
-    regions: []   # empty = discover all enabled regions
-```
+The pricing engine (`pricingEngine.enabled`, on by default) answers `Quote(cloud, sku, region, lifecycle)` from a layered catalog: an in-memory cache, then the cloud's **public** price list, then a built-in static table — so a quote never fails because a price API is down.
 
-Your role trust policy binds to the `kubehero-control-plane` ServiceAccount in `kubehero-system`. Required permissions:
+| Cloud | Source | Credentials |
+|---|---|---|
+| AWS (EKS) | AWS Price List | none |
+| Azure (AKS) | Azure Retail Prices API | none |
+| GCP (GKE) | Cloud Billing Catalog API | an API key in a Secret: `pricingEngine.gcpBillingSecret` (key `api-key`); without it GKE nodes use the static table |
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    { "Effect": "Allow", "Action": [
-        "pricing:GetProducts",
-        "savingsplans:Describe*",
-        "ec2:Describe*",
-        "eks:Describe*",
-        "inspector2:List*",
-        "inspector2:Get*",
-        "ce:GetCostAndUsage"
-      ], "Resource": "*" }
-  ]
-}
-```
-
-### Pricing catalog
-
-- **On-demand** — AWS Pricing API (`pricing.us-east-1.amazonaws.com`). Refreshed every 6h by the `kubehero-pricing-engine` CronJob.
-- **Spot** — EC2 Spot price history; we pull the last 24h and use the median per-AZ.
-- **Savings Plans** — `savingsplans:DescribeSavingsPlans`. Commitments trigger the Savings Plan Replay pass (see [Concepts · Retroactive cost](/docs/concepts)).
-- **Reserved Instances** — `ec2:DescribeReservedInstances`.
-- **Cost Explorer** — `ce:GetCostAndUsage` as a cross-check against our eBPF attribution.
-
-### Security
-
-- **Inspector v2** — `inspector2:List*` for CVE findings on running instances, ECR images, and Lambda functions.
-- **GuardDuty** — optional; we surface runtime anomalies in the Posture view.
-- **Security Hub** — aggregator findings ingested and ranked by workload cost.
-
-### Autoscaler signals
-
-- **Karpenter** — we read node-class provisioning events from Karpenter CRDs.
-- **Cluster Autoscaler** — we read the scale-up/down events log.
-
-## GCP
-
-### Auth — Workload Identity
-
-```yaml
-cloud:
-  gcp:
-    enabled: true
-    serviceAccount: "kubehero-control@acme-prod.iam.gserviceaccount.com"
-    projects: ["acme-prod", "acme-staging"]
-```
-
-Bind the GSA to the KSA `kubehero-control-plane` in `kubehero-system`. Required IAM:
-
-- `roles/billing.viewer`
-- `roles/bigquery.dataViewer` on the billing export dataset
-- `roles/recommender.computeViewer`
-- `roles/securitycenter.findingsViewer`
-- `roles/container.viewer`
-
-### Pricing catalog
-
-- **Cloud Billing export → BigQuery** — canonical cost source on GCP. We run scheduled queries against the detailed export table.
-- **Committed Use Discounts** — `google.cloud.recommender.v1` recommender API surfaces what CUDs would save; we factor them into forecasts.
-- **Spot VMs** — live prices via the Compute pricing API.
-
-### Security
-
-- **Security Command Center** — `securitycenter.findings` API. Project and organization scope both supported.
-- **Container Analysis** — CVE findings on images in Artifact Registry.
-
-### Autoscaler signals
-
-- **GKE Autoscaler** — read-only via the `container` API.
-- **Node Auto-Provisioning** — same.
-
-## Azure
-
-### Auth — Workload Identity
-
-```yaml
-cloud:
-  azure:
-    enabled: true
-    clientId: "83a1...c4fe"
-    tenantId: "81c7...fe9b"
-    subscriptions: ["81c7...fe9b", "a3b9...0e11"]
-```
-
-Federate the KSA against an Entra ID application. Required role assignments:
-
-- `Cost Management Reader` on each subscription
-- `Security Reader` on each subscription
-- `Reader` on the resource groups hosting AKS clusters
-
-### Pricing catalog
-
-- **Retail Prices API** — `prices.azure.com/api/retail/prices`. Unauthenticated, no rate limit worth worrying about.
-- **Cost Management API** — `Microsoft.CostManagement/query` for cross-check and historical reconciliation.
-- **Reservations + Savings Plans** — `Microsoft.Capacity/reservationOrders` and `Microsoft.BillingBenefits/savingsPlanOrders`.
-
-### Security
-
-- **Defender for Cloud** — `Microsoft.Security/assessments` for recommendations, `Microsoft.Security/alerts` for active findings.
-- **Defender for Containers** — CVE scans on AKS-hosted workloads.
-
-### Autoscaler signals
-
-- **AKS Cluster Autoscaler** — read-only via the `ManagedClusters` API.
-- **(future) Karpenter for Azure** — alpha at the time of writing; we'll wire as it matures.
-
-## Multi-account / multi-subscription
-
-KubeHero federates across arbitrary cloud boundaries as long as the control plane can assume each identity. The `cloud.<provider>.{accounts,projects,subscriptions}` arrays are the enumeration; leave empty to autodiscover from whatever the role has access to.
-
-Outputs:
+Prices are list prices for the node's SKU, region and lifecycle. Label nodes covered by a commitment with `kubehero.io/lifecycle` to price them at that lifecycle, or set your exact negotiated rate — which always wins — with an annotation:
 
 ```bash
-kubehero cluster list
-# Typical multi-cloud fleet:
-# aks-westeu-prod-01   azure   westeurope    142 nodes
-# aks-ne-staging       azure   northeurope    24 nodes
-# gke-usc1-prod        gcp     us-central1    88 nodes
-# gke-euw4-batch       gcp     europe-west4   62 nodes
-# eks-use1-prod        aws     us-east-1     210 nodes
-# eks-usw2-dev         aws     us-west-2      38 nodes
+kubectl annotate node ip-10-0-12-34.ec2.internal kubehero.io/node-hourly-usd=2.35
 ```
+
+For nodes that come and go, set it in the node template where your provisioner supports annotations (for example a Karpenter `NodePool`'s template metadata). The `kubehero.io/lifecycle` override is a label, so managed node pools on AKS, GKE and EKS can set it directly.
+
+<Callout title="List prices, not your bill">
+  Savings Plans, CUDs, reservations and enterprise discounts aren't replayed onto allocations in v0.3. Use node
+  annotations for effective rates, and reconcile totals with your provider's billing export.
+</Callout>
+
+## Network rates
+
+Internet egress and cross-zone transfer are priced per GB with per-cloud defaults — AWS $0.09 / $0.01, GCP $0.12 / $0.01, Azure $0.087 / $0 — overridable with `controlPlane.pricing.netEgressUSDPerGB` and `netCrossZoneUSDPerGB`. See [Network](/docs/network#cost-model).
+
+## Platform notes
+
+| | |
+|---|---|
+| **EKS** | AL2023 and Bottlerocket nodes run cgroup v2 and support the eBPF signals. Amazon Linux 2 nodes use cgroup v1 — eBPF is skipped there. |
+| **GKE Standard** | Container-Optimized OS nodes run cgroup v2. |
+| **GKE Autopilot** | privileged pods aren't allowed: set `collector.ebpf.enabled: false`. Cost, logs, pprof profiles and events still work. |
+| **AKS** | Ubuntu 22.04+ and Azure Linux nodes run cgroup v2. |
+| **Windows nodes** | not supported by the collector. |
+
+## The `cloud.*` values
+
+The chart's `cloud.aws`, `cloud.gcp` and `cloud.azure` blocks (IRSA / Workload Identity bindings for the control plane) are reserved for account-level integrations. The v0.3 components don't read them — you don't need to configure any cloud identity to run KubeHero.

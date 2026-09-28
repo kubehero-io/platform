@@ -1,39 +1,102 @@
 ---
 title: Security
-description: Runbook for auditors — how to verify each of our security commitments.
+description: A runbook for auditors — how to verify each of KubeHero's security properties on a running install.
 ---
 
-Everything on [kubehero.io/security](https://kubehero.io/security) has a corresponding runbook here. If you're an auditor or compliance reviewer, this is the page you want.
+Every commitment on [kubehero.io/security](/security) is an engineering property you can check. This page shows how.
 
-## Read-only agent verification
+## Read-only collection
 
-```bash
-kubectl auth can-i --as=system:serviceaccount:kubehero-system:kubehero-collector \
-  patch deployments --all-namespaces
-# Expected: no
-```
-
-The agent's `ClusterRole` only grants `get`, `list`, `watch` on pods, nodes, services, and deployments. No `update`, `patch`, `create`, or `delete` anywhere.
-
-## mTLS pinning
-
-Pin to our root CA — rotated weekly via `cert-manager`. Fingerprint and rotation history are published at `https://kubehero.io/.well-known/kubehero-ca.pem`.
-
-## Audit log export
-
-Three outputs, all first-class:
+The collector's ClusterRole grants `get`, `list`, `watch` on pods, nodes, services, endpoints, namespaces and their owners (Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs), `get` on `nodes/proxy` for kubelet stats, read on events, and a namespaced Lease for leader election. No create, update, patch or delete on anything else.
 
 ```bash
-# syslog — forwards every audit event
-kubehero audit forward --syslog udp://siem.internal:514
-
-# webhook — HMAC-signed JSON per event
-kubehero audit forward --webhook https://siem.internal/hooks/kubehero
-
-# s3 — hourly JSONL dumps, GPG-signed
-kubehero audit forward --s3 s3://acme-compliance/kubehero/
+kubectl auth can-i --list --as=system:serviceaccount:kubehero-system:kubehero-collector
+kubectl auth can-i patch deployments -A \
+  --as=system:serviceaccount:kubehero-system:kubehero-collector   # no
 ```
 
-## Disclosure
+## eBPF privileges
 
-Email [security@kubehero.io](mailto:security@kubehero.io). PGP on request. We acknowledge within 2 business days and keep you informed through resolution.
+With `collector.ebpf.enabled: true` (the default) the collector container is **privileged** and uses `hostPID`:
+
+- loading BPF programs, opening `perf_event` samplers and attaching `cgroup_skb` programs to the cgroup v2 root require it;
+- `hostPID` gives access to `/proc/<pid>` for stack symbolisation and cgroup → container attribution;
+- mounts: `/var/log/pods` (read-only), `/var/lib/kubehero` (log checkpoints), the cgroup v2 filesystem and tracefs.
+
+What the programs do and don't do:
+
+- `cgroup_skb` programs **always return "allow"** — they count bytes and packets per endpoint pair, never drop, delay or modify traffic;
+- the retransmit program reads a stable tracepoint (`tcp:tcp_retransmit_skb`);
+- the profiler samples stacks at 49 Hz per CPU;
+- programs use stable kernel interfaces only (no CO-RE/BTF dependency) and are loaded from the collector image — no runtime compilation.
+
+To run without privileges set `collector.ebpf.enabled: false`: the collector then runs with a read-only root filesystem and every capability dropped except `DAC_READ_SEARCH` (to read pod logs), and loses eBPF profiles and flows. pprof scraping, logs, cost and events keep working.
+
+```bash
+kubectl -n kubehero-system get ds kubehero-collector \
+  -o jsonpath='{.spec.template.spec.hostPID}{" "}{.spec.template.spec.containers[0].securityContext}'
+```
+
+## Only the operator writes
+
+The operator is the only component with write verbs on workloads (Deployments, StatefulSets, HPAs, pod evictions, node cordon), and it only uses them for **armed** policies.
+
+```bash
+kubectl auth can-i patch deployments -A \
+  --as=system:serviceaccount:kubehero-system:kubehero-operator    # yes — gated by arming
+kubectl get rightsizingpolicy,ceilingpolicy,budgetpolicy -A \
+  -o custom-columns='KIND:.kind,NAME:.metadata.name,ARMED:.metadata.annotations.kubehero\.kubehero\.io/armed'
+```
+
+Every applied rightsizing change records the previous resources on the workload (`kubehero.io/rightsize-previous`) and can be reverted with `kubehero undo`.
+
+## The advisor can't act
+
+The advisor's ServiceAccount has no role bindings.
+
+```bash
+kubectl auth can-i --list --as=system:serviceaccount:kubehero-system:kubehero-advisor
+kubectl get rolebinding,clusterrolebinding -A -o wide | grep kubehero-advisor   # nothing
+```
+
+It calls only read RPCs; proposals are validated against the CRD whitelist before they're returned.
+
+## What leaves the cluster
+
+Nothing, by default. The only optional egress is the advisor's LLM brain: when `advisor.anthropic.existingSecret` is set, the snapshot and tool results the model reasons over — which can include capped samples of log lines — are sent to Anthropic's API under your key. Check what's configured:
+
+```bash
+helm -n kubehero-system get values kubehero -a | grep -A3 anthropic
+```
+
+With network policies enabled (`networkPolicies.enabled: true`), you can also restrict the advisor's egress to the control plane and the Anthropic API — or to the control plane only.
+
+## Authentication and roles
+
+- **API keys** with roles `owner`, `admin`, `auditor`, `member`, `viewer` (`controlPlane.auth.apiKeysSecret`).
+- **Per-cluster enrollment tokens** from `kubehero cluster add` — only their SHA-256 hash is stored.
+- **OIDC** with JWKS signature verification and group → role mapping (`controlPlane.auth.oidc.*`); **SCIM 2.0** provisioning.
+- `controlPlane.auth.requireAuth: true` (default) rejects anonymous RPCs; the compatibility APIs (Loki, OTLP, Pyroscope, OpenCost) use the same tokens.
+
+See [Identity](/docs/integrations/identity).
+
+## Audit log
+
+Policy changes, arming, enforcement actions and rightsizing applies are written to an append-only table, each row signed with the HMAC key in the `kubehero-control-plane` Secret (`audit-hmac-key`). `ListAuditLog` (auditor role) exports them.
+
+## Supply chain
+
+Images are signed with cosign (keyless, by the release workflow) and carry SPDX SBOM attestations; releases are scanned with Trivy.
+
+```bash
+cosign verify ghcr.io/kubehero-io/control-plane:0.3.0 \
+  --certificate-identity-regexp 'https://github.com/kubehero-io/platform/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+cosign verify-attestation --type spdxjson ghcr.io/kubehero-io/control-plane:0.3.0 \
+  --certificate-identity-regexp 'https://github.com/kubehero-io/platform/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+## Reporting a vulnerability
+
+Email [security@kubehero.io](mailto:security@kubehero.io) with reproduction steps. We aim to acknowledge within 2 business days. Please don't open public GitHub issues for security reports.

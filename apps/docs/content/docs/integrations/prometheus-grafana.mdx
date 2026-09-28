@@ -3,7 +3,7 @@ title: Prometheus + Grafana
 description: How KubeHero plugs into kube-prometheus-stack and what you get for free.
 ---
 
-KubeHero is designed to ride your existing Prometheus + Grafana stack. The chart ships three resource types that plug into [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack):
+KubeHero keeps Prometheus as your metrics TSDB and rides your existing Prometheus + Grafana stack. The chart ships three resource types that plug into [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack):
 
 - **ServiceMonitor** — tells Prometheus where to scrape our `/metrics`
 - **PrometheusRule** — chargeback recording rules + alerts
@@ -111,18 +111,23 @@ grafana:
     gpu: false
 ```
 
+## Logs in Grafana
+
+KubeHero also implements Loki's query API, so Grafana can read KubeHero's logs through a regular **Loki** data source — Explore, log panels and Grafana-managed alerts all work. See [Compatibility](/docs/compatibility#grafana) for the provisioning snippet.
+
 ## Custom PromQL for your own dashboards
 
+The chargeback series are gauges in USD per second, so aggregate them with `sum`, not `rate`:
+
 ```text
-# Monthly projected spend per team
+# $/hour per team, right now
+sum by (team) (kubehero_pod_cost_usd_per_second) * 3600
+
+# projected monthly spend per team (recording rule)
 kubehero:team_cost_usd:rate30d
 
-# Rank workloads by hourly recoverable $
-topk(20, sum(rate(kubehero_pod_recoverable_usd_per_second[5m])) by (namespace, pod)) * 3600
-
-# CVEs priced — workload cost × severity (requires Posture integration)
-kubehero_pod_cost_usd_per_second * on(pod, namespace) group_left
-  max(kubehero_workload_cve_severity_score) by (pod, namespace)
+# the 20 pods with the most recoverable $/hour
+topk(20, sum by (namespace, pod) (kubehero_pod_recoverable_usd_per_second) * 3600)
 ```
 
-See [Metrics reference](/docs/metrics-reference) for the complete label set.
+See [Metrics reference](/docs/metrics-reference) for the complete list, including the collector's own health series.

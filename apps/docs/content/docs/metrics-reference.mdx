@@ -1,167 +1,86 @@
 ---
 title: Metrics reference
-description: Every metric KubeHero exports, the labels it carries, and the PromQL recording rules we ship.
+description: The Prometheus series KubeHero exports, the recording rules and alerts the chart installs, and the collector's own health metrics.
 ---
 
-This is the complete contract the collector's `/metrics` endpoint publishes. Our PrometheusRule, Grafana dashboards, and every Connect-RPC reader assume these exact names and label sets. A schema change here breaks everything downstream, which is why there's a test in `services/collector/internal/metrics/` that pins it.
+KubeHero keeps Prometheus as your metrics TSDB. The collector exposes a small, stable set of chargeback series on `/metrics` (port 8081); the chart installs a `ServiceMonitor`, recording rules and alerts for kube-prometheus-stack. Everything richer — logs, profiles, flows, usage history, allocation over any window — lives in ClickHouse and is served by the [APIs](/docs/api-reference).
 
-## Labels — the chargeback axis
+## Chargeback series
 
-Every pod-level metric carries these labels. They are the primary grouping dimension for every dashboard and recording rule.
+Every series carries the chargeback labels below.
 
-| Label | Populated by | Example | Notes |
-|---|---|---|---|
-| `namespace` | Pod's namespace | `ml-inference` | |
-| `pod` | Pod's name | `vectordb-ingress-7b9fc` | |
-| `team` | `kubehero.io/team` pod label | `retrieval` | falls back to `chargeback.defaultTeam` value |
-| `cost_center` | `kubehero.io/cost-center` pod label | `ml-platform` | optional BU-level rollup |
-| `nodepool` | cloud-native nodepool label on host node | `aks-nc24ads` · `gke-g2` · `eks-p5` | chart auto-detects; override with `chargeback.nodepoolLabel` |
-| `cloud` | derived from node's provider label | `aws` · `gcp` · `azure` | |
-| `region` | node's `topology.kubernetes.io/region` | `us-east-1` · `westeurope` | |
-| `cluster` | cluster name from control-plane config | `eks-use1-prod` | |
-| `gpu_kind` | only when pod requests GPU | `A100 80GB` · `H100 80GB` · `L4 24GB` | via DCGM device metadata |
+| Metric | Type | Unit |
+|---|---|---|
+| `kubehero_pod_cost_usd_per_second` | gauge | USD per second attributed to the pod |
+| `kubehero_pod_recoverable_usd_per_second` | gauge | USD per second rightsizing could recover |
+| `kubehero_pod_cpu_millicores` | gauge | CPU, millicores |
+| `kubehero_pod_gpu_util_ratio` | gauge | GPU utilization 0–1 (GPU pods only) |
 
-The `team`, `cost_center`, and `nodepool` labels are the chargeback primary axis. See [Chargeback](/docs/chargeback) for how they're used.
+| Label | From | Example |
+|---|---|---|
+| `namespace`, `pod` | the pod | `payments`, `payments-worker-5c7b9d8f6-9tj2l` |
+| `team` | `kubehero.io/team` pod label (`chargeback.teamLabel`), namespace map, else `unattributed` | `payments` |
+| `cost_center` | `kubehero.io/cost-center` pod label | `fin-platform` |
+| `nodepool` | the node's pool label (auto-detected for AKS / GKE / EKS, or `chargeback.nodepoolLabel`) | `gpu-a100` |
+| `cloud`, `region` | the node's provider and `topology.kubernetes.io/region` | `aws`, `us-east-1` |
+| `gpu_kind` | GPU pods only | `A100 80GB` |
 
-## Series catalogue
-
-### Cost (the headline numbers)
-
-#### `kubehero_pod_cost_usd_per_second` (gauge)
-
-Attributed $/sec for one pod-second of compute. The product of:
-
-- the pod's share of its node's resources (blended 50/50 across CPU and memory)
-- the node's per-second list price from the [Pricing engine](/docs/architecture#pricing-engine)
-- the active lifecycle discount (on-demand / spot / savings-plan / committed)
-
-GPU pods additionally attribute their node's GPU cost proportional to their reserved count (or MIG-slice fraction).
-
-```text
-sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (team) * 3600
+```promql
+# $/hour per team, averaged over 5 minutes
+sum by (team) (kubehero_pod_cost_usd_per_second) * 3600
 ```
 
-→ "Team's $/hour, averaged over the last 5 minutes."
+## Recording rules
 
-#### `kubehero_pod_recoverable_usd_per_second` (gauge)
+Installed by the chart's `PrometheusRule` (`prometheus.enabled: true`, requires prometheus-operator CRDs):
 
-Portion of pod cost reclaimable via rightsizing: `(requested − used)` resources, priced out. Equals zero when the pod is already within its p95 + headroom target.
+| Rule | Meaning |
+|---|---|
+| `kubehero:pod_cost_usd:rate1m` | per-pod $/minute |
+| `kubehero:team_cost_usd:rate1h` / `rate24h` / `rate30d` | per-team spend projected per hour / day / 30 days |
+| `kubehero:nodepool_cost_usd:rate1h` | per-nodepool $/hour |
+| `kubehero:cost_center_cost_usd:rate1h` | per-cost-center $/hour |
+| `kubehero:team_gpu_idle_cost_usd:rate1h` | $/hour teams spend on idle GPU |
+| `kubehero:team_recoverable_usd:rate1h` | $/hour recoverable by rightsizing, per team |
 
-```text
-sum(kubehero:team_recoverable_usd:rate1h) by (team)
+## Alerts
+
+| Alert | Fires when |
+|---|---|
+| `KubeHeroTeamOverBudgetProjected` | a team's 24h spend, projected over 30 days, exceeds its budget series for 15 minutes |
+| `KubeHeroGPUIdleExcessive` | a team spends more than $500/hour on idle GPU for an hour |
+
+These are Prometheus alerts for teams that alert from Prometheus. KubeHero's own [alert engine](/docs/alerts) covers logs, spend, budgets, anomalies, network and events without Prometheus.
+
+## Collector health
+
+The collector also exports its own health on `/metrics`:
+
+| Metric | What it tells you |
+|---|---|
+| `kubehero_collector_pods` | pods on this node the collector is tracking |
+| `kubehero_collector_leader` | 1 on the elected leader (cluster-scoped scans) |
+| `kubehero_collector_scan_duration_seconds`, `kubehero_collector_scan_errors_total` | cost scan timing and failures |
+| `kubehero_collector_items_sent_total`, `kubehero_collector_items_dropped_total` | items shipped / dropped |
+| `kubehero_collector_send_errors_total`, `kubehero_collector_payload_bytes_total` | shipping errors and bytes |
+| `kubehero_collector_queue_items`, `kubehero_collector_queue_bytes` | in-memory queue depth (bounded) |
+| `kubehero_collector_last_success_timestamp_seconds` | last successful ship — alert on staleness |
+| `kubehero_collector_log_files`, `kubehero_collector_log_lines_read_total`, `kubehero_collector_log_bytes_read_total` | log tailing |
+| `kubehero_collector_log_lines_dropped_total`, `kubehero_collector_log_lines_truncated_total` | rate-limited and over-long lines |
+| `kubehero_collector_log_file_events_total` | rotations, truncations, new files |
+| `kubehero_collector_profile_scrapes_total` | pprof scrapes |
+| `kubehero_collector_events_emitted_total` | cluster events emitted |
+| `kubehero_collector_ebpf_enabled`, `kubehero_collector_ebpf_attached` | eBPF requested / actually attached |
+| `kubehero_collector_ebpf_total` | eBPF subsystem counters (flows and profiles emitted, drain errors) |
+
+```promql
+# a collector that hasn't shipped for 5 minutes
+time() - kubehero_collector_last_success_timestamp_seconds > 300
+
+# nodes where eBPF was requested but couldn't attach
+kubehero_collector_ebpf_enabled == 1 and kubehero_collector_ebpf_attached == 0
 ```
 
-#### `kubehero_node_cost_usd_per_hour` (gauge)
+## Cardinality
 
-Per-hour cost of a node given its SKU + lifecycle + region. Populated by the [Pricing engine](/docs/architecture#pricing-engine), refreshed every 6 hours by default.
-
-Labels: `node`, `nodepool`, `cloud`, `region`, `sku`, `lifecycle`.
-
-### Resource usage
-
-#### `kubehero_pod_cpu_millicores` (gauge)
-
-Pod CPU usage in millicores, eBPF-attributed at 1-second resolution. Pairs with the node's allocatable CPU for share calculation.
-
-#### `kubehero_pod_memory_bytes` (gauge)
-
-Resident set size of the pod's cgroup, in bytes.
-
-### GPU (only when pod uses GPUs)
-
-#### `kubehero_pod_gpu_util_ratio` (gauge)
-
-GPU utilization, 0.0–1.0. For MIG-partitioned devices, this is the utilization of the allocated slice, not the full device.
-
-```text
-1 - avg(kubehero_pod_gpu_util_ratio) by (team)
-```
-
-→ "Idle fraction per team — the chargeback penalty for provisioned-but-unused GPU."
-
-#### `kubehero_pod_gpu_memory_bytes` (gauge)
-
-VRAM usage in bytes, DCGM-reported.
-
-### Liveness
-
-#### `kubehero_up` (gauge)
-
-Value is `1` when the emitting process is healthy. Labeled with `service` (`collector`, `control-plane`, `pricing-engine`, `operator`).
-
-```text
-up{service="kubehero-collector"} == 0
-```
-
-→ classic Prometheus alerting signal.
-
-## Recording rules (shipped in the PrometheusRule)
-
-The chart's `templates/prometheusrule.yaml` installs these at chart install time. They exist so Grafana queries and alerts don't recompute at read time.
-
-### Chargeback
-
-```text
-kubehero:pod_cost_usd:rate1m
-  = sum(rate(kubehero_pod_cost_usd_per_second[1m]))
-    by (namespace, pod, team, cost_center, nodepool, cloud, region, gpu_kind)
-    * 60
-
-kubehero:team_cost_usd:rate1h
-  = sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (team) * 3600
-
-kubehero:team_cost_usd:rate24h
-  = sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (team) * 86400
-
-kubehero:team_cost_usd:rate30d
-  = sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (team) * 86400 * 30
-
-kubehero:nodepool_cost_usd:rate1h
-  = sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (nodepool, cloud, region) * 3600
-
-kubehero:cost_center_cost_usd:rate1h
-  = sum(rate(kubehero_pod_cost_usd_per_second[5m])) by (cost_center) * 3600
-
-kubehero:team_gpu_idle_cost_usd:rate1h
-  = sum(
-      rate(kubehero_pod_cost_usd_per_second{gpu_kind!=""}[5m])
-      * on(pod, namespace) group_left
-      (1 - max(kubehero_pod_gpu_util_ratio) by (pod, namespace))
-    ) by (team) * 3600
-
-kubehero:team_recoverable_usd:rate1h
-  = sum(rate(kubehero_pod_recoverable_usd_per_second[5m])) by (team) * 3600
-```
-
-### Alerts
-
-```yaml
-- alert: KubeHeroTeamOverBudgetProjected
-  expr: |
-    predict_linear(kubehero:team_cost_usd:rate24h[6h], 86400 * 30)
-      > on(team) group_left
-    kubehero_team_budget_usd
-  for: 15m
-  labels: { severity: warning, team_scope: "true" }
-  annotations:
-    summary: Team on track to exceed monthly budget
-
-- alert: KubeHeroGPUIdleExcessive
-  expr: kubehero:team_gpu_idle_cost_usd:rate1h > 500
-  for: 1h
-  labels: { severity: warning }
-  annotations:
-    summary: Team burning > $500/hr on idle GPUs
-```
-
-## Cardinality notes
-
-The label set is intentionally small. We do not emit:
-
-- Per-container series (pod-level is the contract).
-- Per-node kernel telemetry (cluster-level aggregates instead).
-- Request-level latency (that's APM territory; use your existing OTel setup).
-
-Target cardinality for a 500-node cluster is roughly 50k active series. Most of that is `kubehero_pod_cost_usd_per_second` at one series per running pod.
-
-If you need finer labels, query ClickHouse directly — that's the intended escape hatch for custom analytics. See [Architecture · ClickHouse](/docs/architecture#storage).
+The chargeback series are per pod: expect roughly one series per running pod per metric. Per-container, per-flow and per-log-line data never becomes Prometheus series — query it through the APIs.

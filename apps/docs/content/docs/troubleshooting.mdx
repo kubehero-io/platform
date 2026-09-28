@@ -1,186 +1,115 @@
 ---
 title: Troubleshooting
-description: Known failure modes and their runbooks.
+description: Known failure modes and their fixes — install, sign-in, demo data, collector, eBPF, logs, profiles, network, rightsizing, alerts, Grafana, MCP and the advisor.
 ---
 
-If your issue isn't listed, check the [GitHub issues](https://github.com/kubehero-io/platform/issues) or reach out to `support@kubehero.io`.
+If your problem isn't here, check [GitHub issues](https://github.com/kubehero-io/platform/issues) or ask in [Discussions](https://github.com/kubehero-io/platform/discussions).
 
-## Agent pods aren't ready
+## Install
 
-```bash
-kubectl -n kubehero-system get pods -l app.kubernetes.io/component=collector
-```
+### Pods stay `Pending` or the control plane restarts
 
-### Check 1 — RBAC
-
-The collector needs read access on pods, nodes, services, deployments. `helm install` creates a ClusterRole via `rbac.create: true`. If you disabled that or run in a locked-down cluster:
+The control plane waits for its stores for `controlPlane.storeWait` (2 minutes) and exits if they aren't reachable, so it restarts until they are. Check the embedded stores first:
 
 ```bash
-kubectl auth can-i --as=system:serviceaccount:kubehero-system:kubehero-collector \
-  list pods --all-namespaces
-# Expected: yes
+kubectl -n kubehero-system get pods,pvc
+kubectl -n kubehero-system logs deploy/kubehero-control-plane --tail=50
 ```
 
-If `no`: apply `templates/rbac.yaml` from the chart manually, or set `rbac.create: true` and re-run `helm upgrade`.
+`Pending` stores usually mean no default StorageClass — set `postgresql.storage.storageClass` / `clickhouse.storage.storageClass`.
 
-### Check 2 — `hostPID` / `hostNetwork`
+### I can't sign in to the dashboard
 
-The collector requests `hostPID: true` to attribute CPU to pod cgroups. GKE Autopilot and some hardened OpenShift clusters disallow this. Fallback:
-
-```yaml
-# values.yaml
-collector:
-  useCadvisorFallback: true
-  # Disables eBPF attribution in favor of cadvisor scraping — accuracy
-  # drops from 1s to 60s but the collector runs in any cluster.
-```
-
-### Check 3 — kernel version
-
-eBPF programs need Linux kernel ≥5.10. Check:
+Sign-in takes a token. Read the admin token from the Secret:
 
 ```bash
-kubectl -n kubehero-system exec ds/kubehero-collector -- uname -r
+kubectl -n kubehero-system get secret kubehero-control-plane \
+  -o jsonpath='{.data.admin-token}' | base64 -d; echo
 ```
 
-If older: use the cadvisor fallback above, or upgrade nodes.
+## Pages show a "demo" badge
 
-## "no telemetry at control plane"
+A signal whose store isn't configured serves labelled demo data. On a default install this clears once the stores are up. If you disabled the embedded stores, configure `postgresql.external` / `clickhouse.external`. In production set `controlPlane.demoMode: "false"` so a misconfiguration fails loudly instead.
+
+## Collector
 
 ```bash
-kubectl -n kubehero-system logs ds/kubehero-collector --tail=30 | grep -i error
+kubectl -n kubehero-system get pods -l app.kubernetes.io/component=collector -o wide
+kubectl -n kubehero-system logs ds/kubehero-collector --tail=50
 ```
 
-### `ebpf: load: invalid argument`
+### Costs look N× too high (pre-0.3 collectors)
 
-Kernel is too old or BPF is restricted (AppArmor / SELinux / Talos hardening). Fallback to cadvisor (see above).
+Before v0.3 every collector reported every pod in the cluster. Upgrade the chart: v0.3 collectors report only their own node (`NODE_NAME` from the downward API). A collector without `NODE_NAME` logs a loud warning because it would double-count.
 
-### `x509: certificate signed by unknown authority`
+### Node prices look wrong
 
-mTLS cert doesn't match the control plane's CA. Rotate:
+Each node sample records where its price came from: the `kubehero.io/node-hourly-usd` annotation, the pricing engine, or an estimate. Set the annotation for negotiated prices, and make sure the pricing engine is running (`pricingEngine.enabled`). GCP's catalog needs an API key (`pricingEngine.gcpBillingSecret`).
+
+### eBPF didn't attach
+
+```promql
+kubehero_collector_ebpf_enabled == 1 and kubehero_collector_ebpf_attached == 0
+```
+
+The collector logs one line and keeps collecting everything else. Common causes:
+
+- kernel older than **5.8** or **cgroup v1** — check `uname -r` and `stat -fc %T /sys/fs/cgroup` (should print `cgroup2fs`) on the node;
+- the platform forbids privileged pods (e.g. GKE Autopilot) — set `collector.ebpf.enabled: false`;
+- a security module (SELinux, AppArmor, locked-down kernels) blocks BPF.
+
+## Logs
+
+- **Nothing appears for old pods.** `collector.logs.startFrom: end` (default) skips what was already on disk at the collector's first start; new lines flow. Use `start` to backfill.
+- **Lines are missing under load.** The per-container rate limit dropped them — see `kubehero_collector_log_lines_dropped_total`; raise `collector.logs.rateLimit`.
+- **A namespace is missing.** Check `collector.logs.excludeNamespaces`; the collector's own namespace is always excluded.
+- **A LogQL feature errors.** See the [support matrix](/docs/logs#logql-support) — `unwrap`, `quantile_over_time` and the `pattern` parser aren't supported in v0.3.
+
+## Profiles
+
+- **No eBPF profiles.** See [eBPF didn't attach](#ebpf-didnt-attach). Annotated pods are still scraped over pprof.
+- **Stacks full of `[unknown]` or truncated.** User-space stacks need frame pointers: fine for Go and Rust; add `-XX:+PreserveFramePointer` for the JVM; rebuild C/C++ with frame pointers. JIT frames need perf maps — or use pprof / a Pyroscope SDK.
+- **A pod isn't scraped.** Check the annotations (`profiles.grafana.com/cpu.scrape: "true"` plus the port) and that `collector.profiling.scrape` is on.
+
+## Network
+
+- **The service map is empty.** Flows need eBPF (above) and `collector.ebpf.netflow: true`; they appear after the first flush.
+- **Everything goes to one external address.** A NAT gateway or proxy hides destinations; traffic is attributed to its address.
+- **Egress prices are off.** Set `controlPlane.pricing.netEgressUSDPerGB` / `netCrossZoneUSDPerGB` to your rates.
+
+## Rightsizing doesn't apply
+
+Read the policy's status — every blocked change says why:
 
 ```bash
-kubehero cluster rotate-cert --name <cluster>
+kubectl -n kubehero-system get rightsizingpolicy <name> -o jsonpath='{range .status.plannedChanges[*]}{.workload}{"\t"}{.outcome}{"\t"}{.reason}{"\n"}{end}'
 ```
 
-Re-apply the updated secret, restart the collector DaemonSet.
+Usual reasons: the policy isn't **armed** (`Armed` condition false), confidence is below `minConfidence` (less than a day or five days of data), `maxChangePerDay` reached, a rollout is in progress, a VPA owns the container, fewer than `minReplicas` replicas, or the workload is annotated `kubehero.io/rightsizing: "disabled"`.
 
-### `rpc error: code = Unauthenticated`
+## Alerts don't notify
 
-The cluster token expired. cert-manager rotates the mTLS cert weekly by default. To rotate a static token manually:
+- The five default rules are **seeded without channels** — add channels to them.
+- Check the rule's `pendingFor`: pending alerts don't notify.
+- Check silences: `kubehero alerts silence list`.
+- Use **Test** in the rule editor, or `kubehero alerts test`, to see the evaluated series.
 
-```bash
-kubehero auth rotate
-# then kubectl edit secret kubehero-creds and paste the new token
-```
+## Grafana's Loki data source errors
 
-## Dashboards don't render in Grafana
+- `401` — set the `Authorization: Bearer <token>` header on the data source.
+- "multi-tenant queries are not supported" — `X-Scope-OrgID` contains `|`; use one cluster per data source.
 
-### Check 1 — dashboard ConfigMaps
+## MCP and the CLI
 
-```bash
-kubectl -n monitoring get configmap -l grafana_dashboard=1 | grep kubehero
-```
+- `unauthenticated` — set `KUBEHERO_ENDPOINT` and `KUBEHERO_TOKEN` (or `--endpoint` / `--token`, or `kubehero auth login`).
+- An HTTP MCP server isn't reachable from another machine — `--http :8765` binds `127.0.0.1` only; pass an explicit host if you really mean to expose it.
 
-You should see 3 ConfigMaps (chargeback / fleet / gpu). If absent, the `grafana.enabled` value is false or your Grafana sidecar isn't watching this namespace.
+## The advisor uses the rules brain
 
-### Check 2 — sidecar label match
+- Check the key: `advisor.anthropic.existingSecret` must name a Secret with the key in `advisor.anthropic.secretKey` (default `api-key`).
+- Network policies may block egress to the Anthropic API.
+- The advisor falls back to the rules brain on any API error, refusal or timeout — its logs say why.
 
-kube-prometheus-stack's Grafana sidecar watches ConfigMaps with a specific label. Default: `grafana_dashboard=1`. Your chart may use a different label — check:
+## Prometheus doesn't scrape KubeHero
 
-```bash
-kubectl -n monitoring get deploy kps-grafana -o yaml | grep -A2 LABEL
-```
-
-Match it in KubeHero's values:
-
-```yaml
-grafana:
-  sidecarLabel: "your_label_here"
-  sidecarLabelValue: "1"
-```
-
-### Check 3 — PromQL returns empty
-
-Open Grafana → Explore → paste `kubehero:team_cost_usd:rate1h`. Empty?
-
-- **No data source**: make sure your dashboard's variable `${DS_PROMETHEUS}` is bound to your Prometheus datasource.
-- **Rules didn't install**: `kubectl get prometheusrule -A | grep kubehero-chargeback` — if absent, prometheus-operator CRDs aren't in the cluster or the discovery label doesn't match (see [Prometheus integration](/docs/integrations/prometheus-grafana)).
-- **Metrics not flowing**: port-forward the collector and curl `/metrics` — you should see `kubehero_pod_cost_usd_per_second` series.
-
-## "policies not firing"
-
-A policy observes by default. Nothing runs until armed.
-
-```bash
-kubectl get budgetpolicy -A -o wide
-# NAME                   HUMANARM   ARMED   STATUS
-# prod-monthly-ceiling   true       false   awaiting arm
-```
-
-Arm it:
-
-```bash
-kubehero cap --arm --policy prod-monthly-ceiling
-```
-
-If you don't want `humanArm`:
-
-```yaml
-spec:
-  humanArm: false   # not recommended for production — disables the safety gate
-```
-
-## Recording rules don't evaluate
-
-Prometheus picks up `PrometheusRule` resources via a label selector. Default mismatch is the most common reason they're ignored.
-
-```bash
-kubectl get prometheusrule -A -l release=kube-prometheus-stack | grep kubehero
-```
-
-If empty, set `prometheus.release: <your-kps-release-name>` in KubeHero's values and `helm upgrade`. Your Prometheus CR's `spec.ruleSelector.matchLabels.release` has to match.
-
-## Postgres / ClickHouse isn't reachable
-
-Check the connection string from within the control-plane pod:
-
-```bash
-kubectl -n kubehero-system exec deploy/kubehero-control-plane -- \
-  sh -c 'psql "$DATABASE_URL" -c "select 1"'
-
-kubectl -n kubehero-system exec deploy/kubehero-control-plane -- \
-  sh -c 'clickhouse-client --host=$CLICKHOUSE_HOST --secure -q "SELECT 1"'
-```
-
-Both should return `1`. If either fails:
-
-- Verify the `existingSecret` value references a real Secret in the right namespace.
-- If using `embedded: true`, confirm the subchart (CloudNativePG or clickhouse-operator) installed its own resources in the expected namespace.
-- Network policies may block egress to the DB namespace. The chart ships NetworkPolicies for this; re-apply.
-
-## Pricing quotes return `not_found`
-
-The pricing engine refreshes its SKU catalog every 6 hours. On first install, pricing data may be absent for ~6h.
-
-Force a refresh:
-
-```bash
-kubectl -n kubehero-system create job pricing-refresh-now \
-  --from=cronjob/kubehero-pricing-engine
-```
-
-## Audit log is empty
-
-The audit log persists to Postgres. Check the forwarders are configured:
-
-```bash
-kubehero audit status
-```
-
-If no forwarders are attached, events still accumulate in Postgres — you just don't get push to syslog / webhook / S3. Configure per [Production · Backups](/docs/production#backups).
-
-## Getting support
-
-- Community: [GitHub Discussions](https://github.com/kubehero-io/platform/discussions) and [issues](https://github.com/kubehero-io/platform/issues).
-- Security: `security@kubehero.io` (PGP key on the [Security](/docs/security) page).
+The ServiceMonitor and PrometheusRule are matched by the `prometheus.release` label (default `kube-prometheus-stack`). Set it to your Prometheus release name, or disable label selection in kube-prometheus-stack (`serviceMonitorSelectorNilUsesHelmValues: false`, `ruleSelectorNilUsesHelmValues: false`).

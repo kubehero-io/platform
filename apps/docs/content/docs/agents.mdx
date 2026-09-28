@@ -1,0 +1,154 @@
+---
+title: Agents & MCP
+description: Advisor briefings (text and voice), Ask KubeHero investigations with cited evidence, the kubehero mcp server for Claude and other agents, bring-your-own Anthropic key — and why none of it can change your cluster.
+---
+
+KubeHero's agentic layer is the **advisor** service. It does three things over the same read-only tools:
+
+1. **Briefings** — a headline, a markdown report, a TTS-ready spoken script and a ranked list of proposed actions.
+2. **Investigations** — "Ask KubeHero": a free-form question answered by a bounded tool loop over every signal, with cited evidence.
+3. **MCP** — `kubehero mcp` exposes the same tools to Claude and any other Model Context Protocol client.
+
+The constraint comes first, because everything else follows from it: **the advisor is read-only by construction.** It runs under a ServiceAccount with no role bindings, holds no Kubernetes credentials, and calls only the control plane's read RPCs. Its output is text and *proposals* — never a write.
+
+## Brains
+
+| Brain | When | What leaves the cluster |
+|---|---|---|
+| `rules` | default — no API key configured | nothing |
+| `llm` | an Anthropic API key is configured | the snapshot and tool results the model reasons over (see below) |
+| `demo` | no data sources wired (evaluation) | nothing |
+
+The **rules brain** is not a stub: it runs the same statistics as the rightsizing and anomaly engines and a deterministic investigator that matches your question against the workloads, namespaces and clusters it knows and the intent in it (cost, errors, latency/CPU, egress, OOM), queries the matching signals and writes a grounded answer with evidence.
+
+The **LLM brain** uses Claude — **Claude Opus 5 by default**, configurable — with adaptive thinking and server-side refusal fallbacks. On any error, a refusal or a timeout it falls back to the rules brain, so briefings and answers keep arriving.
+
+### Bring your own key
+
+```bash
+kubectl -n kubehero-system create secret generic kubehero-anthropic \
+  --from-literal=api-key="$ANTHROPIC_API_KEY"
+```
+
+```yaml
+# values.yaml
+advisor:
+  enabled: true
+  model: ""                               # empty = the release's default (Claude Opus 5); KUBEHERO_ADVISOR_MODEL
+  anthropic:
+    existingSecret: kubehero-anthropic    # leave empty for the rules brain
+    secretKey: api-key
+```
+
+<Callout type="warn" title="What an LLM sees">
+  In `llm` mode, the telemetry snapshot and the tool results the model reasons over are sent to Anthropic's API under
+  your key and terms. For investigations that can include **capped samples of log lines**, pattern templates, top
+  functions and service-map edges. No secrets, no raw bulk data. If that isn't acceptable, don't set a key: the rules
+  brain does the job and nothing leaves. Air-gapped installs run the rules brain by definition.
+</Callout>
+
+## Briefings
+
+`AdvisorService.GetBriefing` returns, for a cluster or the whole fleet over `24h` or `7d`:
+
+- `headline` — one line for a card;
+- `markdown` — the full report;
+- `spoken_script` — 45–90 seconds of plain prose, written to be heard: numbers rounded, no tables. The dashboard plays it with the browser's own SpeechSynthesis — no audio service involved;
+- `actions` — proposed guarded actions, each with a title, $ impact, risk, target, rationale and a ready-to-apply CRD manifest.
+
+Briefings are cached for ten minutes.
+
+## Investigations — Ask KubeHero
+
+```bash
+kubehero ask "why did checkout-api spend jump last night?"
+kubehero ask "which namespaces pay the most for egress?" --window 7d --cluster eks-use1-prod
+kubehero ask "is payments-worker leaking memory?" --speak     # also print the spoken summary
+```
+
+`Investigate` / `InvestigateStream` run a bounded, read-only tool loop — at most around a dozen tool calls and two minutes — over:
+
+| Tool | Reads |
+|---|---|
+| `get_cost_allocation`, `get_cost_timeseries` | allocation and spend over time |
+| `list_anomalies` | spend anomalies |
+| `query_logs`, `get_log_patterns`, `get_log_volume` | LogQL results (line count capped), Drain patterns, volume |
+| `get_top_functions`, `get_flamegraph_summary` | the hottest frames only |
+| `get_service_map`, `list_network_costs` | top edges and egress / cross-zone spend |
+| `list_alerts`, `list_rightsizing`, `get_workload` | firing alerts, recommendations, a workload's details |
+| `list_capacity_demands` | unschedulable pods and what the capacity would cost |
+
+Tool inputs are validated and results truncated to keep the model's context small. Every tool call is returned as a **step** (tool, input, one-line summary, duration, error), streamed live by `InvestigateStream`. The answer comes back as markdown plus a spoken summary, **evidence** items (kind, title, detail, a dashboard deep link and the query that produced it) and proposals. Identical questions are cached for a minute.
+
+## Guardrails
+
+Hard rules, none configurable:
+
+- **Read-only.** The advisor has no Kubernetes RBAC and calls no mutation RPCs. This is enforced by RBAC and code, not by a prompt.
+- **Whitelisted proposals.** Every action from every brain is validated: known action kinds only, finite non-negative impact, and a manifest that must parse as a `BudgetPolicy`, `CeilingPolicy` or `RightsizingPolicy`. Anything else is downgraded to investigate-only.
+- **Humans arm, the operator executes.** A proposal is an inert manifest. It becomes a change only when a person applies it and arms it; then the deterministic [operator](/docs/rightsizing#guards-in-apply-mode) enforces bounded steps and OOM guards, audits the action and can undo it.
+
+```
+agent drafts          →  RightsizingPolicy manifest (proposed, inert)
+you review            →  diff, $ impact, risk, cited evidence
+kubectl apply -f …    →  policy exists; recommend / shadow modes never mutate
+kubehero cap --arm …  →  a human arms it; apply mode may now act, in bounded steps
+kubehero undo <id>    →  previous resources restored
+```
+
+At no point does the model hold the pen.
+
+## MCP server
+
+`kubehero mcp` runs a Model Context Protocol server exposing KubeHero as **read-only tools**:
+
+`list_clusters` · `get_cost_allocation` · `get_cost_timeseries` · `list_rightsizing` · `query_logs` · `get_log_patterns` · `get_top_functions` · `get_service_map` · `list_network_costs` · `list_alerts` · `list_anomalies` · `get_briefing` · `investigate`
+
+Tools call the control plane (and the advisor, for `get_briefing` and `investigate`) with the CLI's configured endpoint and token. `investigate` and `get_briefing` return guarded proposals — the same whitelist applies.
+
+<Tabs items={["Claude Code", "Claude Desktop", "Streamable HTTP"]}>
+  <Tab value="Claude Code">
+```bash
+claude mcp add kubehero -- kubehero mcp
+```
+  </Tab>
+  <Tab value="Claude Desktop">
+```json
+{
+  "mcpServers": {
+    "kubehero": {
+      "command": "kubehero",
+      "args": ["mcp"],
+      "env": {
+        "KUBEHERO_ENDPOINT": "https://kubehero.example.com",
+        "KUBEHERO_TOKEN": "<a viewer token>"
+      }
+    }
+  }
+}
+```
+  </Tab>
+  <Tab value="Streamable HTTP">
+```bash
+kubehero mcp --http :8765          # binds 127.0.0.1:8765 only
+claude mcp add --transport http kubehero http://127.0.0.1:8765/
+```
+  </Tab>
+</Tabs>
+
+<Callout title="Use a viewer token">
+  MCP clients act with the token you give them. A `viewer` token can read everything the tools expose and nothing
+  more. With `--http`, a bare port binds to `127.0.0.1`; pass an explicit host (`0.0.0.0:8765`) only if you mean to —
+  anyone who can reach it reads your fleet with that token.
+</Callout>
+
+## Can the AI break prod?
+
+No — not because the model behaves, but because the system gives it no way to:
+
+- **Can it evict a pod or patch a Deployment?** No. It has no Kubernetes permissions at all.
+- **Can it write a malicious policy?** It can *propose* one. A proposal is inert until a human applies and arms it, and it passes through your admission control and code review like any manifest.
+- **Can a bad answer mislead you?** That is the real risk — the same as a dashboard or a teammate. That's why every claim cites evidence with the query behind it.
+- **What if the API is down or the key is revoked?** The advisor falls back to the rules brain.
+
+Next: [Rightsizing](/docs/rightsizing) for how proposals are applied, [Security](/docs/security) for how to verify all of this.

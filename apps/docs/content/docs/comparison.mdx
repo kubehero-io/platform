@@ -1,111 +1,91 @@
 ---
 title: How we compare
-description: Honest matrix vs Flexera, Kubecost, OpenCost, CAST AI, PerfectScale, Grafana + Prometheus alone.
+description: An honest comparison with OpenCost, Kubecost, Grafana Loki, Grafana Pyroscope, Datadog and Cast AI — where they win, where KubeHero differs, with sources.
 ---
 
-Every vendor comparison page eventually turns into marketing. This one tries not to — we tell you exactly what each competitor does well and exactly where we think we're different. If we're wrong about anything, open an issue.
+Every tool on this page does part of what KubeHero does, and several do their part better or with more polish. KubeHero's claim is narrower and checkable: **all of these signals, in one open install you run yourself, with automation a human arms.** If a cell below is wrong or out of date, [open an issue](https://github.com/kubehero-io/platform/issues) and we'll fix it.
+
+<Callout title="Checked 2026-09-28">
+  Based on each vendor's public documentation on that date. ✓ = built in · ◐ = partial (see the note) · ✗ = not
+  offered · — = nothing to guard (the tool doesn't automate changes).
+</Callout>
 
 ## The matrix
 
-| | **KubeHero** | Flexera / Cloudability | Kubecost | OpenCost | CAST AI | PerfectScale | Grafana + Prom only |
+| | **KubeHero** | OpenCost | Kubecost | Grafana Loki | Grafana Pyroscope | Datadog | Cast AI |
 |---|---|---|---|---|---|---|---|
-| Attribution accuracy | Measured usage (kubelet), 5s scans; eBPF on roadmap | Billing records, 24h stale | cadvisor 5-min avg | cadvisor 5-min avg | proprietary | proprietary | DIY |
-| GPU / TPU first-class | ✓ DCGM + MIG + TPU API | Partial | Limited | No | No | No | DIY |
-| Retroactive Savings Plan replay | ✓ | No | No | No | N/A | N/A | No |
-| Multi-cloud normalization | AWS + GCP + Azure, single schema | Strong | Limited | Limited | AWS-bias | Limited | DIY |
-| Policy enforcement CRDs | `BudgetPolicy` / `CeilingPolicy` / `RightsizingPolicy` | Alerts only | No | No | Proprietary | Proprietary | No |
-| `humanArm` default | ✓ | N/A | N/A | N/A | Varies | Varies | N/A |
-| Reversible within cooldown | ✓ 10-min default | N/A | N/A | N/A | Partial | Partial | N/A |
-| Open-source | Apache 2.0 + BSL 1.1, fully self-hostable | Closed | Core open, adv. features paid | Full CNCF | Closed | Closed | Upstream |
-| Self-host + air-gap | ✓ Helm + `values.airgap.yaml` | Limited | ✓ | ✓ | No | No | ✓ |
-| Audit log export | syslog · webhook · S3 · SIEM | ✓ | Limited | No | Limited | Limited | DIY |
-| Keyboard-first UX | ✓ cmd-K, URL state, actions | No | Limited | N/A | Proprietary | Proprietary | Grafana |
-| License | Apache 2.0 / BSL 1.1, no gated tier | Enterprise-seat + platform fee | Free core + Enterprise | Free | % of savings | Enterprise | OSS |
-| Runs on Prometheus stack | ✓ ServiceMonitor + PrometheusRule + Grafana ConfigMap | Separate stack | Bundled | Separate | Separate | Separate | Native |
+| Cost allocation (idle, shared, labels) | ✓ | ✓ | ✓ | ✗ | ✗ | ✓ | ✓ |
+| Logs (store + LogQL-class query) | ✓ | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
+| Continuous profiling (incl. no-code eBPF) | ✓ | ✗ | ✗ | ✗ | ✓ | ✓ | ✗ |
+| Network cost per workload (cross-zone, egress) | ✓ eBPF | ◐ ³ | ✓ ³ | ✗ | ✗ | ✓ ⁵ | ✓ ⁶ |
+| Rightsizing that applies | ✓ | ✗ | ✓ ² | ✗ | ✗ | ✓ ⁵ | ✓ |
+| Human-armed guardrails (armed · bounded · audited · undo) | ✓ | — | ◐ ² | — | — | ◐ ⁵ | ◐ ⁶ |
+| Built-in AI investigation with cited evidence | ✓ | ✗ | ✗ | ✗ ⁴ | ✗ ⁴ | ✓ ⁵ | ✗ |
+| MCP server | ✓ | ✓ ¹ | ✓ ² | ◐ ⁴ | ◐ ⁴ | ✓ ⁵ | ✓ ⁶ |
+| Self-hosted, data stays in your cluster | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+| License | Apache-2.0 + BSL-1.1 ⁷ | Apache-2.0 | proprietary (free tier) | AGPL-3.0 | AGPL-3.0 | proprietary | proprietary |
+| Price | free, self-hosted | free | free tier + enterprise | free OSS; Grafana Cloud paid | free OSS; Grafana Cloud paid | usage-based SaaS | quote-based SaaS |
 
-## Head-to-head, honestly
+1. OpenCost ships a built-in MCP server from v1.118 — [docs](https://opencost.io/docs/integrations/mcp/).
+2. Kubecost 3.0 added automated container request sizing (the free tier covers up to 250 cores) with suspendable, audited resize runs; an MCP server ships by default from v3.3 — [Kubecost 3.0](https://www.apptio.com/blog/ibm-kubecost-3-0-faster-smarter-and-built-for-scale/), [mcp-kubecost](https://github.com/kubecost/mcp-kubecost).
+3. OpenCost and Kubecost network costs come from a separate network-costs DaemonSet that classifies egress as cross-zone, cross-region or internet; there's no service map — [network cost configuration](https://www.ibm.com/docs/en/kubecost/self-hosted/1.x?topic=configuration-network-cost).
+4. Loki and Pyroscope are AGPL-3.0. MCP access goes through the separate [mcp-grafana](https://github.com/grafana/mcp-grafana) server; Grafana's AI assistant is a Grafana Cloud feature, not part of the OSS projects.
+5. Datadog: [Kubernetes Autoscaling](https://www.datadoghq.com/product/kubernetes-autoscaling/) applies workload rightsizing (in-app or via GitOps); data-transfer cost allocation comes from Cloud Network Monitoring (eBPF) plus Cloud Cost Management; Bits AI SRE and the [MCP server](https://www.datadoghq.com/about/latest-news/press-releases/datadog-launches-mcp-server/) are generally available.
+6. Cast AI: [network cost monitoring](https://docs.cast.ai/docs/network-cost) (egress, cross-AZ), policy-driven workload autoscaling, and an MCP server; a SaaS control plane with an in-cluster agent.
+7. The CLI, collector, cost model and protos are Apache-2.0; the control plane, operator, advisor, pricing engine and dashboard are BSL-1.1 — source-available and free to self-host, but not OSI-approved open source.
 
-### Flexera / Cloudability
+## Tool by tool
 
-**What they get right**: Multi-cloud ingest is polished — AWS, Azure, GCP, Oracle, IBM. Enterprise-ready commercial surface. Finance-team-friendly reporting and chargeback workflows.
+### OpenCost
 
-**Where we differ**:
-- Their Kubernetes attribution runs on billing records + tag-based allocation rules. 24–48h stale by design. Ours is measured from the kubelet on 5-second scans, minutes-fresh not days-stale — with eBPF 1-second resolution on the roadmap.
-- Their GPU visibility is vendor-level (EC2 p4d spend) not pod-level.
-- Their policy engine is alerts. No enforcement, no `humanArm`, no reversible actions.
-- Their Savings Plan handling applies forward from the commit date; historical numbers don't restate.
+**What it gets right.** The CNCF reference model for Kubernetes cost allocation: free, open, vendor-neutral, and now with a built-in MCP server. Kubecost's core is built on it.
 
-**Pick them if**: you're a Fortune 500 CFO office needing multi-cloud billing rollup for 20+ accounts and your Kubernetes footprint is small. **Pick us if**: Kubernetes is >40% of your compute and you want sub-minute accuracy.
+**Where KubeHero differs.** OpenCost is an allocation engine and API; KubeHero implements the same allocation API (`/allocation/compute`) and adds logs, profiles, an eBPF service map, alerting, rightsizing that applies and an investigation agent on the same data.
 
-### Kubecost / Stackwatch
+**Pick OpenCost if** you want only the allocation model and will build the rest. **Pick KubeHero if** you want allocation joined to the signals that explain it. Your OpenCost-based scripts keep working — point them at KubeHero.
 
-**What they get right**: Kubernetes-focused from day one. Great allocation model for namespace / label / team attribution. Open core with a credible enterprise offering.
+### Kubecost
 
-**Where we differ**:
-- Same 5-minute cadvisor averaging ceiling as everyone in that product generation.
-- GPU support is there but not first-class. No MIG-slice attribution, no tensor-core utilization.
-- No policy enforcement CRDs. Their "Actions" feature is client-side recommendations, not reconciler-driven.
-- Savings Plan / CUD handling is billing-based, not replay-based.
+**What it gets right.** A mature, polished FinOps product for Kubernetes: allocation, network costs, savings insights, and — since 3.0 — automated request sizing with audited runs, plus an MCP server. Strong enterprise features.
 
-**Pick them if**: you need allocation for a single-cloud shop and are happy with 5-min accuracy. **Pick us if**: GPUs matter, or you want enforcement teeth.
+**Where KubeHero differs.** Kubecost is cost-first; it doesn't store logs or profiles. KubeHero's automation is armed per policy by a human and enforced by a Kubernetes operator from CRDs you can review in Git. And KubeHero is free to self-host at any size.
 
-### OpenCost (CNCF sandbox)
+**Pick Kubecost if** cost and savings reporting is the whole job and you value its maturity. **Pick KubeHero if** you want cost, logs, profiles and network in one place.
 
-**What they get right**: It's the canonical cost allocation model in the CNCF ecosystem. Free, open, actively maintained. Kubecost's open core is built on it.
+### Grafana Loki
 
-**Where we differ**:
-- No UI. It's a library + a server exposing `/allocation`. You build the product.
-- Same cadvisor accuracy as Kubecost.
-- No enforcement layer.
+**What it gets right.** Battle-tested, horizontally scalable log storage on object storage, with LogQL and the Grafana ecosystem around it.
 
-**Pick them if**: you have engineering capacity to build on top. **Pick us if**: you want a product.
+**Where KubeHero differs.** KubeHero implements LogQL and Loki's push and query APIs on ClickHouse, next to cost and profiles, and prices log volume per team. It supports the common LogQL surface, not all of it — see the [support matrix](/docs/logs#logql-support). For very large log volumes, Loki's object-storage architecture is purpose-built.
 
-We can **ingest OpenCost allocation rules** via an importer if you've already built on their label schema — continuity matters.
+**Pick Loki if** logs are the main job at very large scale. **Pick KubeHero if** you want logs correlated with cost, profiles and the network — and Grafana keeps working via the Loki data source.
 
-### CAST AI
+### Grafana Pyroscope
 
-**What they get right**: Genuine autoscaling + rightsizing product. Strong on savings delivered. Commercial polish.
+**What it gets right.** A dedicated continuous-profiling database with broad SDK support, eBPF profiling through Grafana Alloy, and excellent flamegraph tooling.
 
-**Where we differ**:
-- AWS-first, GCP okay, Azure catch-up.
-- Black-box attribution. You trust their number; you can't audit the derivation.
-- No CRD surface. Their actions don't survive a CAST AI uninstall — they run in their infrastructure.
-- Proprietary policy engine, no `humanArm`-level safety guarantees exposed.
+**Where KubeHero differs.** KubeHero's eBPF profiler is built into the collector you already run, it accepts Pyroscope's `/ingest` and scrapes with Pyroscope's annotations, and it prices every function with the workload's real CPU spend.
 
-**Pick them if**: AWS-only, comfortable with SaaS-owned policy. **Pick us if**: multi-cloud, or you need every action to live as code in your cluster.
+**Pick Pyroscope if** you want the deepest profiling feature set. **Pick KubeHero if** you want profiles with dollar figures, next to everything else.
 
-### PerfectScale / ScaleOps
+### Datadog (Kubernetes + Cloud Cost Management)
 
-**What they get right**: Rightsizing specifically. Good observation windows, statistical confidence scores.
+**What it gets right.** The broadest commercial platform here: metrics, logs, APM and profiling, network monitoring, cost management with data-transfer allocation, Kubernetes autoscaling that applies recommendations, a GA AI SRE agent and MCP server — managed for you.
 
-**Where we differ**:
-- Single-capability. They rightsize well; they don't attribute multi-cloud cost or run budget policies.
-- No K8s-native CRD surface for their actions.
-- No GPU story.
+**Where KubeHero differs.** KubeHero is self-hosted and free: your telemetry never leaves your infrastructure, which matters for regulated and air-gapped environments and for the size of the bill. KubeHero doesn't do APM or traces.
 
-**Pick them if**: you just want rightsizing and are happy running multiple FinOps tools. **Pick us if**: you want one tool.
+**Pick Datadog if** you want a managed, all-in-one SaaS including APM and budget for it. **Pick KubeHero if** data residency, cost or open source matter more.
 
-### Grafana + Prometheus alone
+### Cast AI
 
-**What they get right**: The actual data plane. Everyone else (including us) runs on top.
+**What it gets right.** Aggressive, automated optimization — node selection, spot automation, workload autoscaling — with cost and network cost monitoring and an MCP server.
 
-**Where we differ**:
-- They're a library, not a product. You need to build attribution, recommendations, and actions yourself. That's a two-year engineering project.
+**Where KubeHero differs.** Cast AI's strength is autonomous optimization run from its SaaS control plane. KubeHero is observability first, self-hosted, and its automation is deliberately conservative: human-armed, bounded, reversible, and expressed as CRDs in your cluster.
 
-**Pick them + us**: we use both. KubeHero ships a ServiceMonitor, a PrometheusRule, and three Grafana dashboards so your existing stack is our UI.
+**Pick Cast AI if** you want hands-off optimization and are comfortable with a SaaS control plane. **Pick KubeHero if** you want every change to be yours to arm and undo.
 
-## The seven moats
+## What KubeHero doesn't replace
 
-Pulled out of the matrix — each is a feature Flexera / Kubecost / OpenCost / CAST AI / PerfectScale structurally cannot ship without rewriting their data plane.
-
-1. **Measured-utilization attribution, minutes-fresh** — billing-record tools are a day stale; our roadmap's eBPF probes push this to 1s resolution
-2. **Retroactive Savings Plan replay** — historical cost restates when a SP kicks in
-3. **`humanArm: true` default** — enforcement with safety rails, not alerts
-4. **Multi-cloud cost-per-second normalization** — one number across AWS / GCP / Azure SKUs
-5. **Keyboard-first operator UX** — cmd-K, URL state, action buttons everywhere
-6. **Open source, self-hostable** — collector + CLI + proto + cost-model under Apache 2.0, the rest under BSL 1.1
-7. **Posture + cost correlation** — CVE findings ranked by workload $/day (see [Posture](/docs/concepts#posture))
-
-## "What about X?"
-
-We'll add rows to the matrix as people ask. If we missed your tool or you think we're wrong about a row, [open an issue](https://github.com/kubehero-io/platform/issues).
+- **Your metrics TSDB** — keep Prometheus or Mimir; KubeHero exports to it.
+- **Your tracing backend** — v0.3 doesn't store traces.
+- **Your cloud bill** — allocation is an estimate reconciled to node prices; reconcile to the invoice in your FinOps tool (the [FOCUS export](/docs/allocation#finops-focus-export) helps).

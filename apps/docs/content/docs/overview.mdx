@@ -1,169 +1,93 @@
 ---
 title: Overview
-description: What KubeHero is, why it exists, and the principles behind every design decision.
+description: What KubeHero is, the problem it solves, what ships in v0.3, and the principles behind it.
 ---
 
-KubeHero is the control surface a Kubernetes operator wants at 3 AM when a bad deploy is spawning 400 GPU nodes: **attribution** of every dollar to the pod that spent it, **recommendation** of the precise config change that recovers it without breaking SLOs, and **enforcement** when human action isn't fast enough.
+**KubeHero is open-source Kubernetes observability and FinOps in one install** — cost allocation, logs, continuous profiling, eBPF network cost, alerting and rightsizing that actually adjusts, with read-only AI agents on top. It runs in your cluster on AKS, GKE, EKS or any Kubernetes ≥ 1.28, from one Helm chart. Nothing leaves your cluster.
 
-This document is the long form — the market we're entering, the design decisions behind every component, and how the pieces fit together. For a 5-minute install and first-scan, jump to [Quickstart](/docs/quickstart).
+For a five-minute install, jump to the [Quickstart](/docs/quickstart).
 
-## The market, briefly
+## The problem
 
-Kubernetes won. So did the cost problem. Three concrete patterns recur in every cluster over ~50 nodes:
+To understand a Kubernetes fleet, teams run five tools: a cost allocator, a log store, a continuous profiler, a network observer and an alerting stack. Each has its own agent on every node, its own storage, its own query language and its own UI — and none of them shares a cost model. So none of them can answer the questions that matter at 3 AM:
 
-1. **Requests are fiction.** Developers set CPU/memory requests once to survive the 3 AM page, and never revisit. Published data shows real utilization around 13% of requested. The other 87% is paid-for air.
-2. **GPU idle is invisible.** A single idle A100 burns ~$32/hr. H100s worse. Most clusters have 30–60% GPU idle time that never surfaces until the invoice does.
-3. **Autoscalers don't know your budget.** Karpenter and Cluster Autoscaler optimize for scheduling pressure, not spend. A bad deploy spawns hundreds of nodes before Slack lights up.
+- **What changed?** — the log spike, the hot function and the chatty edge are the same incident seen from three tools.
+- **What does it cost?** — per workload, per team, including network and logs, not just CPU and memory.
+- **What exactly should we do?** — a concrete, safe change, not "consider rightsizing".
 
-Today's tooling addresses these unevenly:
+## What KubeHero does
 
-- **Flexera / Cloudability** — strong multi-cloud ingest, enterprise polish. Kubernetes cost is bolted-on, 24–48h stale, GPU effectively invisible, no enforcement layer.
-- **Kubecost** — K8s-focused and open-core. Cadvisor-driven 5-minute averages, limited GPU awareness, no policy enforcement.
-- **OpenCost (CNCF)** — allocation rules and a canonical cost model, but no UI, same cadvisor accuracy ceiling, no enforcement.
-- **CAST AI / PerfectScale / ScaleOps** — autoscaling and rightsizing, but proprietary, single-cloud bias, no audit surface.
-- **Grafana + Prometheus alone** — data plane. Not a product. You still need attribution, recommendations, and actions.
+It collects every signal once, stores it once with the same labels (cluster, namespace, workload, team), prices it, and puts a read-only agent on top:
 
-KubeHero's positioning is explicit: **one pane of glass for every cluster, showing every dollar, with a trigger you can pull when things go wrong.** We don't rebuild what these incumbents get right — we build the 40% they can't.
+| Signal | What you get | Replaces |
+|---|---|---|
+| [Cost allocation](/docs/allocation) | allocation by any dimension with idle and shared cost, CPU/RAM/GPU/network split, OpenCost-compatible API, FOCUS export, forecasts, efficiency | OpenCost / Kubecost |
+| [Logs](/docs/logs) | every container's logs, LogQL, live tail, Drain patterns, log $ per team, Loki push + query API, OTLP logs | Loki + Promtail |
+| [Profiling](/docs/profiling) | eBPF whole-node CPU profiles with no code changes, pprof scraping, Pyroscope ingest, diff flamegraphs, $/month per function | Pyroscope + agents |
+| [Network](/docs/network) | eBPF flow accounting, a service map with cross-zone and internet egress $, TCP retransmits | a network observability agent |
+| [Rightsizing](/docs/rightsizing) | percentile recommendations from measured usage, applied only through human-armed, bounded, reversible policies | VPA / rightsizing tools |
+| [Alerting](/docs/alerts) | one engine over logs, spend, budgets, anomalies, network $ and cluster events; Slack, PagerDuty, Opsgenie, Teams, Discord, webhooks, Alertmanager | per-tool rule sprawl |
+| [Agents](/docs/agents) | briefings (text + voice), Ask KubeHero investigations that cite evidence, an MCP server for Claude — read-only, bring your own key | — |
+
+It keeps what you already run: Prometheus scrapes it, Grafana reads its logs as a Loki datasource, OpenCost clients read its allocation API. See [Compatibility](/docs/compatibility).
 
 ## What ships
 
-The product is five services plus a CLI, packaged as a Helm chart:
+One Helm chart installs:
 
-```
-┌─────────── CUSTOMER CLUSTER (K8s 1.28+) ─────────────────────────────┐
-│                                                                        │
-│   ┌─────────────┐   ┌─────────────┐    ┌─────────────────────────┐   │
-│   │  Collector  │   │  Operator   │    │  Customer workloads     │   │
-│   │  DaemonSet  │   │  Deployment │    │  Deployments · STS · …  │   │
-│   │  kubelet    │   │  watches    │    │                         │   │
-│   │  stats API  │   │  BudgetPol  │    │                         │   │
-│   │  read-only  │   │  humanArm   │    │                         │   │
-│   └──────┬──────┘   └──────▲──────┘    └─────────────────────────┘   │
-│          │ gRPC (mTLS)     │ K8s API                                   │
-│          │                 │                                           │
-└──────────┼─────────────────┼───────────────────────────────────────────┘
-           │                 │                 ┌── DASHBOARD + CLI ───┐
-           ▼                 │                 │  Next.js  ·  kubehero │
-     ┌──────────┐            │                 └──────────▲────────────┘
-     │ CP ingest│            │                            │ Connect-RPC
-     │ (Connect)│            │                            │
-     └────┬─────┘            │         ┌──────────────────┴──────────┐
-          │                  └─────────┤  Control Plane (Go)         │
-          ▼                            │  · RPC surface              │
-    ┌──────────┐                       │  · policy evaluation         │
-    │ClickHouse│◄──────────────────────┤  · audit log                │
-    │time-series│                      └─────┬───────────────────────┘
-    └──────────┘                             │
-          ▲                                  ▼
-          │                          ┌──────────┐
-    ┌──────┴────┐                    │PostgreSQL│
-    │Pricing Eng│                    │metadata  │
-    │cron · CUD │                    │policies  │
-    │Spot · SP  │                    │audit     │
-    └───────────┘                    └──────────┘
-```
-
-Every edge labeled. Every box replaceable. See [Architecture](/docs/architecture) for per-component detail; [Stack](/docs/stack) for the OSS we ride (Prometheus, Grafana, Dex, cert-manager, Trivy, Tetragon, ClickHouse operator, CloudNativePG, Valkey).
-
-## The seven design principles
-
-Each is a filter that's rejected at least one reasonable-sounding feature request.
-
-### 1. eBPF or it didn't happen
-
-Traditional `metrics-server` + Prometheus cadvisor scrape reports CPU averaged over 15s–1m windows. That averaging **hides** the bursts that matter for right-sizing, misattributes noisy-neighbor steal, and can't see memory pressure events as they happen.
-
-That 1-second, cgroup-accurate resolution is the destination — and we're honest about where we are on the road. Today the collector reports **measured utilization** from the kubelet Summary API (`cpu.usageNanoCores`, `memory.workingSetBytes`) on a 5-second scan and prices `max(requests, measured)`, which already beats the request-based-only math most cost tools settle for. eBPF scheduler probes are the next step; the collector's probe stubs are in the tree waiting for them.
-
-Closing that gap fully is the top line item on the [roadmap](/docs/architecture).
-
-### 2. `humanArm: true` is the default
-
-Kubernetes tools that auto-mutate production under a budget emergency are a tail-risk disaster. The same Postgres CVE that prompts a rapid image roll can absolutely co-occur with a billing spike, and the last thing you want is automation cordoning your stateful set while you're trying to patch.
-
-Every enforcement CRD (`BudgetPolicy`, `CeilingPolicy`) has a `humanArm` field that defaults `true`. The operator watches, evaluates, logs, and waits for an operator to explicitly arm the policy via `kubehero cap --arm <name>` or a dashboard click. Only then will any escalation step invoke.
-
-Every action the operator takes is reversible within the cooldown window (default 10 minutes). `kubehero undo <audit-id>` restores the original state — the eviction's pod spec, the HPA's replica count, the node's schedulable flag.
-
-### 3. Open-core, not open-baiting
-
-The split is semantic, not tactical:
-
-- **Apache 2.0** — agent, CLI, collector, `cost-model` library, proto schemas. The code running in customer clusters collecting telemetry should be inspectable and forkable.
-- **BSL 1.1 → Apache 2.0 after 3 years** — control plane, operator, pricing engine, dashboard. Source-available now, fully open after the change date.
-
-Operators with compliance requirements can audit every line of what runs in their cluster. All of it is self-hostable today.
-
-### 4. K8s-native, not K8s-adjacent
-
-Configuration is CRDs, not a YAML schema we invented. Authentication is OIDC (via Dex or WorkOS), not bearer tokens. Metrics are Prometheus exposition format, not a proprietary JSON. Secrets go through [external-secrets](https://external-secrets.io) so customers keep AWS Secrets Manager / Azure Key Vault / GCP Secret Manager / Vault as their source of truth.
-
-This pays off immediately: a customer's existing GitOps pipeline manages `BudgetPolicy` objects with zero new tooling. Their existing Grafana instance shows our dashboards via the ConfigMap sidecar. Their existing OIDC provider authenticates operators. No new platform.
-
-### 5. Retroactive cost is a first-class primitive
-
-The scenario: on the 15th of the month, finance commits a 1-year Savings Plan covering your AWS compute spend. Every cost metric flat-lines 17% lower going forward — but the first 14 days of the month are now over-attributed by the same 17%.
-
-Every FinOps tool we've looked at shows the SP discount *from the commit date forward*. Historical numbers don't update. Teams see inconsistent rollups, dashboards flicker, and trust erodes.
-
-KubeHero reprocesses the affected time range when a commitment lands. Pod-seconds in scope are re-priced against the new effective rate, ClickHouse's `ALTER TABLE UPDATE` rewrites the affected windows, and a timeline event records *what* was restated and *why*. The invariant: the number you see at any time window is the number you'd compute if you ran that pricing rule forever.
-
-Savings Plans are the obvious case. The same machinery handles mid-month Reserved Instances, GCP Committed Use Discounts, and Azure Reservations.
-
-### 6. Keyboard-first operator UX
-
-Dashboards for engineers should be boring and fast. Every view is a URL. Every filter is URL-encoded (pin one and share it on Slack). Every panel has an action button, not just a chart. `cmd-K` fuzzy-searches across clusters, workloads, policies, and docs.
-
-We'll never be the dashboard that wins a design award. We *will* be the dashboard where an engineer who's been on-call for three hours can get something done without thinking about the UI.
-
-### 7. We don't rebuild what's already great
-
-Not a principle, a table:
-
-| We use | For | Why not rebuild |
+| Component | Runs as | Does |
 |---|---|---|
-| Prometheus | Scraping, alerting, queries | 10 years of operator-hours have hardened it |
-| Grafana | Visualization | Unmatched; we ship ConfigMap dashboards |
-| DCGM exporter | GPU metrics | NVIDIA's own library; reinventing is folly |
-| cilium/ebpf | BPF program loading | Gold standard; used by Isovalent, Pixie, Parca |
-| cert-manager | Certificate rotation | Canonical K8s-native PKI |
-| Dex | OIDC proxy | Purpose-built, CNCF-sandbox |
-| kubebuilder | Operator scaffolding | If you don't, your operator is worse — guaranteed |
-| buf | Proto toolchain | Best ergonomics for gRPC/Connect |
-| ClickHouse | Time-series | What Cloudflare, PostHog, Signoz use |
-| CloudNativePG | Postgres operator | CNCF sandbox, operator-managed backups |
-| Trivy | CVE scans | Aqua's implementation, nobody touches it |
-| Tetragon | eBPF runtime security | Composes with our collector; shares kernel hooks |
+| **collector** | DaemonSet | cost + usage for its node's pods, container logs, pprof scraping, eBPF flows and CPU profiles, cluster events |
+| **control-plane** | Deployment | ingest, ClickHouse + Postgres, the LogQL / allocation / rightsizing / alerting engines, compatibility APIs |
+| **operator** | Deployment | reconciles `BudgetPolicy`, `CeilingPolicy`, `RightsizingPolicy` — the only component that writes to workloads |
+| **advisor** | Deployment | briefings and investigations; read-only, no Kubernetes credentials |
+| **pricing-engine** | Deployment | live AWS / GCP / Azure price lists |
+| **dashboard** | Deployment | the UI |
+| **Postgres 18, ClickHouse 26.8** | StatefulSets (embedded) | single-replica stores to start; point at managed stores in production |
 
-See [Stack](/docs/stack) for the full dependency catalogue and why we picked each.
+Plus the `kubehero` CLI, which is also the MCP server. See [Architecture](/docs/architecture).
 
-## What we explicitly don't do
+## Principles
 
-Staying focused is the job.
+### One store, one cost model
 
-- **We are not rebuilding Grafana.** The dashboard has opinionated views for operators. Customers who want custom charts use Grafana against our `/metrics`.
-- **We are not rebuilding Datadog APM.** Traces, spans, logs — out of scope. Integrate with your existing stack.
-- **We are not chasing every cloud.** AWS / GCP / Azure today. Oracle / IBM / Alibaba when someone contributes them.
-- **We are not building a CMDB.** Reading cluster inventory is a side effect, not a product.
-- **We are not automating what shouldn't be automated.** `humanArm: true` by default. We optimize for operators not getting fired, not for self-healing drama.
+Every signal lands in the same ClickHouse with the same labels, so it can be joined — and so every signal carries a dollar figure. That join is what lets an investigation connect a cost jump to a retry storm in the logs, a hot TLS handshake in a flamegraph and a cross-zone edge in the service map.
 
-## How to run it
+### Read-only by default
 
-Everything runs in your own cluster. The stack install script sets up kube-prometheus-stack, CloudNativePG, ClickHouse operator, Valkey, Dex, Trivy, and Tetragon in the right order, then installs KubeHero on top.
+The collector's Kubernetes permissions are read-only. Its eBPF programs observe traffic and CPU; they never drop or alter anything. The advisor has no Kubernetes permissions at all.
 
-```bash
-./infra/demo/stack-install.sh --all
-```
+### Humans arm, the operator acts, everything is reversible
 
-Air-gap capable — images can be mirrored to an internal registry via the `values.airgap.yaml` overlay.
+Automation exists — rightsizing that applies, spend ceilings that escalate — but only through policy CRDs a human arms, executed by a deterministic operator in bounded steps, audited, and reversible with `kubehero undo`. Agents propose; they never hold the pen.
 
-KubeHero is open source (Apache 2.0 / BSL 1.1). SSO/SCIM/RBAC, audit export, and federation across clusters are all included — there is no gated tier.
+### Your data stays in your cluster
 
-## Where to go next
+No SaaS control plane and no phone-home. The only optional exception is the advisor's LLM brain, which uses your own Anthropic key; without a key nothing leaves.
 
-- [Quickstart](/docs/quickstart) — 5 minutes, `helm install` to first waste scan
-- [Architecture](/docs/architecture) — component-level detail
-- [Concepts](/docs/concepts) — attribution, rightsizing, ceilings
-- [CRD reference](/docs/crd-reference) — `BudgetPolicy`, `CeilingPolicy`, `RightsizingPolicy`
-- [Chargeback](/docs/chargeback) — team / namespace / cost-center rollup
-- [Comparison](/docs/comparison) — against every other tool in this space
+### Compatible beats proprietary
+
+Loki push and query, the OpenCost allocation API, Pyroscope ingest, OTLP logs, Alertmanager and MCP — so adopting KubeHero is a configuration change.
+
+### Honest limits
+
+- eBPF needs Linux ≥ 5.8 with cgroup v2 (the default on current AKS, GKE and EKS node images) and a privileged collector; user-space stacks need frame pointers.
+- Allocation is an estimate reconciled to node prices, not your cloud invoice; commitments and discounts are not yet replayed onto allocations.
+- KubeHero keeps Prometheus as the metrics TSDB and doesn't store distributed traces; trace IDs in logs link out.
+
+## What we don't build
+
+- **A general-purpose metrics database.** Prometheus and Mimir do that well; KubeHero exports to them.
+- **A tracing backend** — OTLP traces are a direction, not a v0.3 feature.
+- **Automation nobody armed.** Guardrails first, always.
+- **Every cloud.** AKS, GKE and EKS are first-class; other clusters work with estimated or annotated node prices.
+
+## Deployment shapes
+
+- **Single cluster** — `helm install` puts everything in `kubehero-system`, with embedded stores. See [Quickstart](/docs/quickstart).
+- **Federated** — one control plane in a hub cluster; only the collector and operator in each workload cluster, enrolled with a per-cluster token. See [Deploy](/docs/deploy#federated-collectors).
+- **Air-gapped** — every image mirrors to your registry; the rules brain needs no network. See [Deploy](/docs/deploy#air-gapped).
+
+## Licensing
+
+Apache 2.0 for the CLI, collector, cost model and protos — the code that runs on your nodes. BSL 1.1 for the control plane, operator, advisor, pricing engine and dashboard: source-available and free to self-host. Source: [github.com/kubehero-io/platform](https://github.com/kubehero-io/platform).

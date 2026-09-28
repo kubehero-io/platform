@@ -17,7 +17,7 @@
 #   · postgres 18 on :5432 (metadata), clickhouse 26.8 LTS on :9000/:8123
 #   · grafana on :3000 (admin / kubehero) with Prometheus + KubeHero-as-Loki
 #     datasources, prometheus on :9090
-#   · collector on :8081 — idles without a cluster (it needs a kubeconfig);
+#   · collector (metrics on the compose network) — idles without a cluster;
 #     run it against kind for the real node agent (see LOCAL_DEV.md)
 #
 # Tear down:
@@ -57,7 +57,7 @@ services:
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -105,7 +105,7 @@ services:
       CONTROL_PLANE_URL: "http://control-plane:8080"
       PRICING_ENGINE_URL: "http://pricing-engine:8082"
       CLUSTER_ID: "local-compose"
-    ports: ["8081:8081"]
+    # No host port: Prometheus scrapes it on the compose network.
     depends_on: [control-plane]
 
   dashboard:

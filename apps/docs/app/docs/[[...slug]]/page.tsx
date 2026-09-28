@@ -8,7 +8,25 @@ import {
   DocsPage,
   DocsTitle,
 } from "fumadocs-ui/page";
+import defaultMdxComponents from "fumadocs-ui/mdx";
+import { Callout } from "fumadocs-ui/components/callout";
+import { Card, Cards } from "fumadocs-ui/components/card";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import { source } from "@/lib/source";
+
+// Components every docs page may use without an import — the same set
+// the kubehero.io docs register, so content is shared verbatim.
+const mdxComponents = {
+  ...defaultMdxComponents,
+  Callout,
+  Card,
+  Cards,
+  Step,
+  Steps,
+  Tab,
+  Tabs,
+};
 
 type Params = { slug?: string[] };
 
@@ -42,7 +60,7 @@ export default async function Page({
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>
-        <MDX />
+        <MDX components={mdxComponents} />
       </DocsBody>
     </DocsPage>
   );

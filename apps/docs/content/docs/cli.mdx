@@ -1,123 +1,158 @@
 ---
 title: CLI reference
-description: Every subcommand and every flag of the kubehero binary.
+description: Every kubehero command — cost, logs, profiles, network, rightsizing, alerts, ask, mcp, policies and undo.
 ---
 
-The `kubehero` binary is a Go single-static binary. Install with `brew install kubehero`, `apt install kubehero`, or download from [GitHub Releases](https://github.com/kubehero-io/platform/releases).
+`kubehero` is a single static Go binary. Download it from [GitHub Releases](https://github.com/kubehero-io/platform/releases). It talks to the control plane over Connect-RPC and is also KubeHero's [MCP server](#kubehero-mcp).
 
-## Global flags
+## Configuration
 
-| Flag | Default | Description |
+Settings resolve in this order — flags, then environment, then `~/.kubehero/config.yaml` (written by `kubehero auth login`):
+
+| Flag | Environment | Meaning |
 |---|---|---|
-| `--cluster` | | Target cluster name. Falls back to `current-context` from kubeconfig. |
-| `--context` | current | kubeconfig context to use. |
-| `--output`, `-o` | `table` | `table`, `json`, `yaml`, `wide`. |
-| `--verbose`, `-v` |  | Verbose logging. |
-| `--dry-run` | `true` for mutating commands | Preview changes without applying. |
-
-## `kubehero cluster`
-
-Manage cluster registrations against the control plane.
-
-### `kubehero cluster list`
-
-List clusters registered to your org. Honours `--output` for table / json / yaml / wide.
+| `--endpoint` | `KUBEHERO_ENDPOINT` | Control-plane URL, e.g. `https://kubehero.example.com` or a port-forward `http://localhost:8080` |
+| `--token` | `KUBEHERO_TOKEN` | Bearer token (API key or admin token) |
+| `--org` | `KUBEHERO_ORG` | Organization slug |
+| `-o, --output` | | `table` (default) · `json` · `yaml` · `wide` |
+| `--insecure` | | Skip TLS verification (development only) |
 
 ```bash
-kubehero cluster list
-kubehero cluster list -o json
+kubehero auth login          # save endpoint + token to ~/.kubehero/config.yaml
+kubehero auth status
+kubehero health
 ```
 
-### `kubehero cluster add`
-
-Register a new cluster with the control plane. The server generates a UUID + a 32-byte enrollment token, stores **only the SHA-256 hash**, and returns the token to you exactly once. Pipe the token straight into `helm install` on the target cluster — there is no way to retrieve it later.
+## Cost
 
 ```bash
-kubehero cluster add \
-  --name "prod-eu-1" \
-  --cloud aws \
-  --region eu-west-1
+kubehero cost allocation --aggregate namespace --window 7d --idle --share-idle weighted
+kubehero cost timeseries --window 30d --group-by team --top 5
+kubehero cost efficiency --window 7d
+kubehero cost export --format focus --window 30d --aggregate workload --file focus.csv
 ```
 
-| Flag | Required | Notes |
+| `cost allocation` flag | Default | |
 |---|---|---|
-| `--name` | yes | Human-readable cluster name. |
-| `--cloud` | yes | `aws` · `gcp` · `azure`. |
-| `--region` | yes | Cloud region, e.g. `eu-west-1`. |
-| `--slug` |  | URL-safe slug; defaults to a normalised `--name`. |
+| `--aggregate` | `namespace` | comma-separated: `cluster`, `namespace`, `workload`, `controller`, `pod`, `container`, `node`, `nodepool`, `team`, `cost_center`, `zone`, `label:<key>` |
+| `--window` | `7d` | `24h` · `7d` · `30d` · `today` · `yesterday` · `week` · `month` · `lastmonth` · `"<RFC3339>,<RFC3339>"` |
+| `--idle` | off | add an `__idle__` row per cluster |
+| `--share-idle` | | `weighted` · `even` |
+| `--filter` | | `key=value`, repeatable |
+| `--shared-namespaces` | | namespaces redistributed to the rest |
+| `--cluster`, `--limit` | | |
 
-The output looks like:
+`cost timeseries` takes `--window` (30d), `--step` (`1h` · `1d`), `--group-by` (`namespace` · `team` · `cluster` · `nodepool` · `workload`), `--top` (5), `--filter`, `--cluster`. `cost export` takes `--format focus`, `--window` (30d), `--aggregate` (`workload` · `namespace` · `cluster`) and `--file`. See [Cost allocation](/docs/allocation).
 
-```
-✓ cluster registered
-
-  id      e718a979-23b6-4bd0-968e-a96126e6822a
-  name    prod-eu-1
-  cloud   aws · eu-west-1
-
-  ENROLLMENT TOKEN (shown once · keep secret):
-
-    f0c45f2c0ba322507041b82253445c3367e14dfb5bf7fe9d8a1b384bc020fa88
-
-  Install on the target cluster:
-
-helm install kubehero kubehero/kubehero \
-  --namespace kubehero-system --create-namespace \
-  --set cluster.id=e718a979-23b6-4bd0-968e-a96126e6822a \
-  --set cluster.token=f0c45f2c0ba322507041b82253445c3367e14dfb5bf7fe9d8a1b384bc020fa88
-```
-
-Treat the token as a credential. If you lose it, run `cluster add` again to regenerate.
-
-## `kubehero scan`
-
-Scan a cluster for rightsizing opportunities.
+## Logs
 
 ```bash
-kubehero scan --cluster prod-us-east-1 --report waste
-kubehero scan --report gpu
+kubehero logs '{namespace="payments", level="error"}' --since 1h
+kubehero logs '{namespace="payments"} |= "timeout"' -f
+kubehero logs '{namespace="payments"}' --patterns --since 24h
+kubehero logs '{level="error"}' --volume --group-by namespace
+kubehero logs 'sum by (namespace) (count_over_time({level="error"}[5m]))'
 ```
 
-| Flag | Values | Notes |
+| Flag | Default | |
 |---|---|---|
-| `--report` | `waste` · `gpu` · `overcommit` | Which signal to rank by. |
-| `--namespace`, `-n` | | Narrow to a single namespace. |
-| `--since` | `7d` | Observation window (`1h`, `24h`, `7d`, `30d`). |
+| `--since` | `1h` | lookback, e.g. `15m`, `6h`, `7d` |
+| `--from`, `--to` | | RFC 3339; `--from` overrides `--since` |
+| `--limit` | `100` | lines (1–5,000) or patterns |
+| `--direction` | `backward` | `backward` (newest first) · `forward` |
+| `-f, --tail` | | stream new lines |
+| `--patterns` | | cluster lines into Drain templates |
+| `--volume`, `--group-by` | `level` | line volume by a label, with $/mo |
+| `--cluster` | | or `{cluster="…"}` in the query |
 
-## `kubehero rightsize`
+`--tail`, `--patterns` and `--volume` are mutually exclusive. See [Logs](/docs/logs).
 
-Recommend or apply rightsizing for a workload.
+## Profiles
 
 ```bash
-kubehero rightsize vectordb-ingress --dry-run=true
-kubehero rightsize vectordb-ingress --dry-run=false
+kubehero profile targets --since 1h
+kubehero profile top --service checkout-api --since 30m --order self
+kubehero profile flame --service checkout-api --diff-since 24h --depth 14
 ```
 
-| Flag | Default | Notes |
-|---|---|---|
-| `--dry-run` | `true` | When `false`, mutates the workload. Safety caps from the matching `RightsizingPolicy` still apply. |
-| `--target-utilization` | policy | Override `targetUtilization` for this call. |
+Shared flags: `--service` (required for `top` / `flame`), `--namespace`, `--type` (`cpu` default · `alloc_space` · `alloc_objects` · `inuse_space` · `inuse_objects` · `goroutine` · `mutex` · `block`), `--since` (30m), `--cluster`. `top` adds `--limit` (20) and `--order` (`self` · `total`); `flame` adds `--diff-since`, `--depth` (14) and `--min-pct` (1). See [Profiling](/docs/profiling).
 
-## `kubehero apply`
+## Network
 
-Apply a `BudgetPolicy`, `CeilingPolicy`, or `RightsizingPolicy` from a YAML file.
+```bash
+kubehero network map --namespace checkout --since 1h --max-edges 25
+kubehero network costs --since 24h --limit 25
+```
+
+See [Network](/docs/network).
+
+## Rightsizing
+
+```bash
+kubehero rightsize                                   # all recommendations
+kubehero rightsize list checkout-api --namespace payments
+kubehero rightsize --percentile p99 --headroom 25 --window 14d --min-savings 50
+```
+
+Flags: `--namespace`, `--window` (7d), `--headroom` (server default 15), `--percentile` (`p90` · `p95` · `p99` · `max`), `--min-savings`, `--limit` (50), `--cluster`. See [Rightsizing](/docs/rightsizing).
+
+## Alerts
+
+```bash
+kubehero alerts list --state firing
+kubehero alerts rules --kind logs
+kubehero alerts test --kind logs \
+  --query 'sum by (namespace) (count_over_time({level="error"}[5m]))' --op '>' --threshold 100
+kubehero alerts silence --matcher alertname="OOM kills" --matcher namespace=batch --duration 2h --comment "known"
+kubehero alerts silence list --include-expired
+kubehero alerts silence delete <silence-id>
+```
+
+See [Alerting](/docs/alerts).
+
+## Ask KubeHero
+
+```bash
+kubehero ask "why did checkout-api spend jump last night?"
+kubehero ask "which workloads pay the most for egress?" --window 7d --cluster eks-use1-prod --speak
+```
+
+Streams each tool call as it runs, then prints the answer, evidence and proposals. Flags: `--cluster` (default fleet-wide), `--window` (`1h` · `24h` · `7d`), `--context` (a dashboard path the question is about), `--speak` (also print the spoken summary), `-q, --quiet`. See [Agents & MCP](/docs/agents).
+
+## kubehero mcp
+
+```bash
+kubehero mcp                 # stdio — for Claude Desktop, Claude Code and other MCP hosts
+kubehero mcp --http :8765    # streamable HTTP; a bare port binds 127.0.0.1
+```
+
+See [Agents & MCP](/docs/agents#mcp-server) for client configuration.
+
+## Policies
 
 ```bash
 kubehero apply -f policies/prod-budget.yaml
+kubehero cap --arm --policy prod-ceiling --cluster eks-use1-prod --reason "runaway GPU spend"
+kubehero cap --disarm --policy prod-ceiling --cluster eks-use1-prod
 ```
 
-## `kubehero cap --arm`
+`cap` arms or disarms a policy through the control plane, writes an audit row with your `--reason`, and notifies the configured channels. Policies are also plain CRDs — `kubectl apply -f` works. See the [CRD reference](/docs/crd-reference).
 
-Arm a `CeilingPolicy` so its escalation plan can execute when triggered. No-op if the policy already has `humanArm: false`.
+## kubehero undo
 
 ```bash
-kubehero cap --arm --policy prod-monthly-ceiling
+kubehero undo rs-5f2c9a1e
+kubehero undo rs-5f2c9a1e --namespace payments --dry-run
 ```
 
-## `kubehero undo`
+Restores the requests and limits a rightsizing change replaced. The change ID (`rs-…`) is in the policy's `status.plannedChanges`, the `rightsize.apply` audit event and the `RightsizeApplied` Kubernetes event on the workload. `undo` runs `kubectl` with **your** kubeconfig and RBAC, reverts later changes too, and marks the workload `kubehero.io/rightsize-reverted` so the operator leaves it alone until you remove the annotation. It refuses if someone else changed the resources since KubeHero's last change (`--force` overrides). Flags: `-n, --namespace`, `--kubeconfig`, `--context`, `--force`, `--dry-run`.
 
-Reverse the last action for an audit-log entry, within the cooldown window (default 10 minutes).
+## Clusters and pricing
 
 ```bash
-kubehero undo <audit-id>
+kubehero cluster list
+kubehero cluster add --name eks-use1-prod --cloud aws --region us-east-1   # prints a one-time enrollment token
+kubehero quote --cloud gcp --sku n2-standard-8 --region europe-west4 --lifecycle spot
 ```
+
+`cluster add` creates a registration and prints its enrollment token exactly once — only its SHA-256 hash is stored. Use it for [federated collectors](/docs/deploy#federated-collectors).

@@ -1,35 +1,96 @@
 ---
 title: Deploy
-description: Helm install for self-hosted and air-gapped environments.
+description: Install shapes — single cluster with embedded stores, external stores, federated collectors, air-gapped — and the settings that matter.
 ---
 
-## Full stack
+One chart, `oci://ghcr.io/kubehero-io/charts/kubehero`, installs everything. Images come from `ghcr.io/kubehero-io/*`, tagged to the chart's app version.
 
-Everything runs inside your own cluster. No egress required.
+## Single cluster (default)
 
 ```bash
-helm repo add kubehero https://charts.kubehero.io
-helm install kubehero kubehero/kubehero \
-  --namespace kubehero-system --create-namespace \
-  -f values.yaml
+helm install kubehero oci://ghcr.io/kubehero-io/charts/kubehero \
+  -n kubehero-system --create-namespace
 ```
 
-See `deploy/helm/kubehero/values.yaml` in the source for every tunable.
+Every component, plus single-replica **Postgres 18** (10 Gi) and **ClickHouse 26.8 LTS** (50 Gi) with persistent volumes. The chart generates and persists the audit HMAC key, the admin / service / cluster tokens and the dashboard session key in the `kubehero-control-plane` Secret, requires auth on every RPC, and wires each in-cluster client to its token. Follow the [Quickstart](/docs/quickstart) from here.
+
+## External stores
+
+For production, point at managed Postgres and ClickHouse with DSN Secrets:
+
+```bash
+kubectl -n kubehero-system create secret generic kubehero-postgres \
+  --from-literal=url='postgres://kubehero:***@pg.internal:5432/kubehero?sslmode=verify-full'
+kubectl -n kubehero-system create secret generic kubehero-clickhouse \
+  --from-literal=url='clickhouse://kubehero:***@ch.internal:9000/kubehero?secure=true'
+```
+
+```yaml
+# values.yaml
+postgresql:
+  embedded: false
+  external: { existingSecret: kubehero-postgres, existingSecretKey: url }
+clickhouse:
+  embedded: false
+  external: { existingSecret: kubehero-clickhouse, existingSecretKey: url }
+controlPlane:
+  demoMode: "false"   # missing stores fail loudly instead of serving demo data
+```
+
+The control plane migrates both stores on start and waits up to `controlPlane.storeWait` (2m) for them. The chart's `values.production.yaml` overlay sets external stores, three control-plane replicas, autoscaling, PDBs, network policies and restricted security contexts — see [Production](/docs/production).
+
+## The collector and eBPF
+
+| Value | Default | |
+|---|---|---|
+| `collector.logs.enabled` | `true` | container logs from `/var/log/pods` |
+| `collector.ebpf.enabled` | `true` | kernel telemetry — **privileged** container with `hostPID` |
+| `collector.ebpf.netflow` / `.profiler` | `true` / `true` | flows + retransmits / CPU profiling |
+| `collector.ebpf.profileHz` | `49` | |
+| `collector.profiling.scrape` / `.interval` | `true` / `60s` | pprof scraping of annotated pods |
+| `collector.usageInterval` | `30s` | usage history for rightsizing |
+| `collector.events` | `true` | OOM kills, crash loops, unschedulable pods |
+
+eBPF needs Linux ≥ 5.8 with cgroup v2 on the nodes. With `collector.ebpf.enabled: false` the collector runs unprivileged (read-only root filesystem, all capabilities dropped except `DAC_READ_SEARCH` for pod logs) and skips profiles-by-eBPF and flows. On GKE Autopilot and other platforms that forbid privileged pods, disable eBPF. See [Security](/docs/security#ebpf-privileges).
+
+## Federated collectors
+
+Run one control plane in a hub cluster and only the collector and operator in each workload cluster:
+
+```bash
+# in the hub: register the workload cluster and copy the one-time token
+kubehero cluster add --name eks-use1-prod --cloud aws --region us-east-1
+
+# in the workload cluster
+kubectl -n kubehero-system create secret generic kubehero-cluster-token --from-literal=token=<token>
+helm install kubehero oci://ghcr.io/kubehero-io/charts/kubehero -n kubehero-system --create-namespace \
+  --set controlPlane.enabled=false \
+  --set controlPlane.url=https://kubehero.hub.example.com \
+  --set cluster.id=<id printed by cluster add> \
+  --set cluster.tokenSecret=kubehero-cluster-token \
+  --set dashboard.enabled=false --set advisor.enabled=false --set pricingEngine.enabled=false \
+  --set postgresql.embedded=false --set clickhouse.embedded=false
+```
+
+Only the SHA-256 hash of each enrollment token is stored. Every row is stamped with its `cluster.id`, so one dashboard, one alert engine and one advisor cover the whole fleet.
 
 ## Air-gapped
 
-Pre-mirror images to your internal registry, then:
+Mirror the images (`control-plane`, `collector`, `operator`, `advisor`, `pricing-engine`, `dashboard`, plus `postgres:18-alpine` and `clickhouse/clickhouse-server:26.8-alpine`) to your registry, then:
 
 ```bash
-helm install kubehero kubehero/kubehero \
-  -f values.yaml \
+helm install kubehero oci://your-registry.internal/charts/kubehero -n kubehero-system --create-namespace \
   -f values.airgap.yaml \
-  --set image.registry=registry.internal.acme.com \
-  --set imagePullSecrets[0].name=acme-regcred
+  --set image.registry=your-registry.internal \
+  --set 'imagePullSecrets[0].name=regcred'
 ```
 
-## Troubleshooting
+Nothing phones home. Leave `advisor.anthropic` unset — the rules brain needs no network. The pricing engine falls back to its built-in price table when the cloud price APIs are unreachable; set exact prices per node with the `kubehero.io/node-hourly-usd` annotation.
 
-- **"collector pods not ready"** — check RBAC; the DaemonSet needs `hostPID: true`. On GKE Autopilot, see the [GKE Autopilot guide](/docs/deploy#gke-autopilot).
-- **"no telemetry at control plane"** — `kubectl -n kubehero-system logs ds/kubehero-collector`. If you see `ebpf: load: invalid argument`, your kernel is too old. The collector falls back to cAdvisor automatically; see `--enable-cadvisor-fallback`.
-- **"policies not firing"** — confirm `humanArm` is false, or run `kubehero cap --arm --policy <name>`.
+## Uninstall
+
+```bash
+helm uninstall kubehero -n kubehero-system
+```
+
+CRDs are kept by default (`crds.keep: true`) so your policies survive a reinstall; embedded stores' PersistentVolumeClaims are left for you to delete.

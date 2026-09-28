@@ -1,160 +1,133 @@
 ---
 title: Quickstart
-description: Five minutes, helm install to first waste scan. Works on any cluster 1.28+.
+description: From helm install to every signal in about five minutes — on any Kubernetes 1.28+ cluster.
 ---
 
-This page gets you from zero to "I can see which pods are wasting money" in under five minutes. For the long-form architecture, see [Overview](/docs/overview).
+This page takes you from zero to cost, logs, profiles, the network map and your first guarded policy. For the long form, see the [Overview](/docs/overview).
 
 ## Prerequisites
 
-- Kubernetes 1.28+ (kind, k3d, minikube all work locally)
-- `kubectl` authenticated to the cluster
-- `helm` 3.12+
+- Kubernetes **1.28+** — AKS, GKE, EKS, or kind / k3d / minikube locally
+- `kubectl` pointed at the cluster, and **Helm 3.12+**
+- For eBPF profiles and network flows: nodes with **Linux ≥ 5.8 and cgroup v2** (the default on current AKS, GKE and EKS images). Without it, everything else still works.
 
-If you want the dashboards to auto-load, also install [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) first. The stack-install script below handles this.
+No cluster handy? `docker compose up --build -d` in the [platform repo](https://github.com/kubehero-io/platform) runs the whole stack with a synthetic three-cluster fleet — then open http://localhost:3001.
 
-## Install the full stack
+<Steps>
+<Step>
 
-For a greenfield cluster, one interactive script handles everything (cert-manager, Prometheus, ClickHouse operator, CloudNativePG, Valkey, Dex, Trivy, Tetragon, KubeHero):
-
-```bash
-git clone https://github.com/kubehero-io/platform
-cd kubehero-platform
-./infra/demo/stack-install.sh
-```
-
-Or take everything at once:
+### Install
 
 ```bash
-./infra/demo/stack-install.sh --all
+helm install kubehero oci://ghcr.io/kubehero-io/charts/kubehero \
+  -n kubehero-system --create-namespace
 ```
 
-## Install just KubeHero on an existing cluster
-
-If your cluster already runs kube-prometheus-stack + whatever storage you use, register the cluster with the control plane first to mint an enrollment token, then install the chart with the token wired in:
+This installs the collector DaemonSet, control plane, operator, advisor, pricing engine and dashboard, plus single-replica **Postgres** and **ClickHouse** so it shows real data from the first minute. Auth is on by default. Watch it come up — the control plane waits for its stores:
 
 ```bash
-# 1 — mint a one-time enrollment token (only the SHA-256 hash is kept server-side)
-kubehero cluster add \
-  --name prod-eu-1 \
-  --cloud aws \
-  --region eu-west-1
-
-# 2 — paste the helm command the previous step printed:
-helm repo add kubehero https://charts.kubehero.io
-helm install kubehero kubehero/kubehero \
-  --namespace kubehero-system --create-namespace \
-  --set cluster.id=<id-from-step-1> \
-  --set cluster.token=<token-from-step-1> \
-  --set prometheus.release=kube-prometheus-stack
+kubectl -n kubehero-system get pods -w
 ```
 
-If you don't have a control plane yet (e.g. self-hosting and just kicking the tires), skip step 1 — the chart runs in stub mode without a token and the dashboard falls back to demo data.
+</Step>
+<Step>
 
-## Confirm telemetry is flowing
+### Get your admin token
+
+The chart generates tokens and keeps them in a Secret:
 
 ```bash
-kubectl -n kubehero-system get pods
-kubectl -n kubehero-system logs ds/kubehero-collector --tail=20
+kubectl -n kubehero-system get secret kubehero-control-plane \
+  -o jsonpath='{.data.admin-token}' | base64 -d; echo
 ```
 
-You should see `attribution ok · pods=NNN · nodes=NN` within 30 seconds of the collector starting. If not, see [Troubleshooting](/docs/troubleshooting).
+</Step>
+<Step>
 
-## Your first scan
-
-The CLI runs against your self-hosted control plane:
+### Open the dashboard
 
 ```bash
-kubehero cluster list
-
-kubehero scan --cluster prod-us-east-1 --report waste
+kubectl -n kubehero-system port-forward svc/kubehero-dashboard 3001:3001
 ```
 
-Expected output (excerpt, color-coded in a real terminal):
+Open http://localhost:3001 and sign in with the token. Cost appears within a minute; logs as soon as containers write; profiles and the service map after the first flush.
 
-```text
-WASTE REPORT    cluster-prod-us-east-1
-───────────────────────────────────────────────────────────────
-● vectordb-ingress       cpu.request=16  used=0.41   $8,640/mo recoverable
-● model-server-a100      gpu=8           util=12%    $18,200/mo recoverable
-⚠ jobs-etl-nightly       limit=32cpu     burst=2.1   overcommit risk: HIGH
-✓ frontend-gateway       cpu.request=2   used=1.6    right-sized
-───────────────────────────────────────────────────────────────
-total    47 pods flagged · $38,940/mo recoverable
-         run `kubehero rightsize` to apply
-```
+</Step>
+<Step>
 
-## Apply a rightsizing recommendation
+### Use the CLI
 
-Dry-run first (default):
+Download `kubehero` from [GitHub Releases](https://github.com/kubehero-io/platform/releases), then:
 
 ```bash
-kubehero rightsize vectordb-ingress --dry-run=true
+kubectl -n kubehero-system port-forward svc/kubehero-control-plane 8080:8080 &
+export KUBEHERO_ENDPOINT=http://localhost:8080
+export KUBEHERO_TOKEN=<admin token>
+
+kubehero cost allocation --aggregate namespace --window 24h --idle
+kubehero logs '{namespace="default"} |= "error"' --since 1h
+kubehero profile targets
+kubehero network costs --since 24h
+kubehero rightsize
+kubehero ask "what changed in spend today?"
 ```
 
-Live:
+</Step>
+<Step>
 
-```bash
-kubehero rightsize vectordb-ingress --dry-run=false
-```
+### Your first guarded policy
 
-The operator applies the recommended request, audit-logs the previous spec, and starts the 10-minute cooldown. If something breaks, `kubehero undo <audit-id>` restores the original in one call.
-
-## See it in Grafana
-
-```bash
-kubectl -n monitoring port-forward svc/kps-grafana 3000:80
-```
-
-Open http://localhost:3000 (admin / kubehero-demo if you used the kind demo), then **Dashboards → KubeHero folder**. Three dashboards are pre-loaded:
-
-- **Chargeback by team** — cost per team, 30-day projection, nodepool breakdown, top workloads
-- **Fleet** — total spend, recoverable, per-cluster time series
-- **GPU panel** — utilization heatmap + per-GPU idle cost ranking
-
-## Write your first BudgetPolicy
-
-Save as `budget.yaml`:
+Start in `shadow` mode: the operator computes exactly what it *would* change, and changes nothing.
 
 ```yaml
+# rightsizing-shadow.yaml
 apiVersion: kubehero.kubehero.io/v1
-kind: BudgetPolicy
+kind: RightsizingPolicy
 metadata:
-  name: prod-monthly
+  name: first-look
+  namespace: kubehero-system
 spec:
   scope:
-    clusterSelector:
-      matchLabels: { env: prod }
-  ceiling: "$100000/mo"
-  hardStop: true
-  # humanArm defaults to true — policy observes until armed.
-  escalation:
-    - action: hpa.cap
-      ratioPercent: 50
-      waitAfter: "2m"
-    - action: alert
-      channels: ["slack://ops-oncall"]
-  alertChannels:
-    - "slack://ops"
-    - "pagerduty://prod-p1"
+    namespaceSelector:
+      matchLabels: { kubernetes.io/metadata.name: default }
+  mode: shadow
 ```
-
-Apply it:
 
 ```bash
-kubectl apply -f budget.yaml
-
-# Observe — policy is alert-only until armed:
-kubectl get budgetpolicy prod-monthly -o yaml | grep -A5 status:
-
-# Arm for active escalation:
-kubehero cap --arm --policy prod-monthly
+kubectl apply -f rightsizing-shadow.yaml
+kubectl -n kubehero-system get rightsizingpolicy first-look -o yaml   # status.plannedChanges
 ```
 
-## Next steps
+When you like what you see, switch to `mode: apply` and arm it — from the dashboard, or:
 
-- [Concepts](/docs/concepts) — attribution, rightsizing, ceilings explained
-- [Advisor & agents](/docs/advisor) — daily briefings and proposed guarded actions (optionally Claude-powered)
-- [CRD reference](/docs/crd-reference) — every field of every CRD
-- [Chargeback](/docs/chargeback) — team / nodepool rollup via your existing Kubernetes labels
-- [Integrations](/docs/integrations/prometheus-grafana) — wiring details for each dependency
+```bash
+kubectl -n kubehero-system annotate rightsizingpolicy first-look kubehero.kubehero.io/armed=true
+```
+
+Every applied change can be reverted with `kubehero undo <change-id>`. See [Rightsizing](/docs/rightsizing).
+
+</Step>
+</Steps>
+
+## Optional: Claude as the advisor's brain
+
+Without a key the advisor uses its deterministic rules brain and nothing leaves the cluster. To use Claude with your own key:
+
+```bash
+kubectl -n kubehero-system create secret generic kubehero-anthropic \
+  --from-literal=api-key="$ANTHROPIC_API_KEY"
+helm upgrade kubehero oci://ghcr.io/kubehero-io/charts/kubehero -n kubehero-system \
+  --reuse-values --set advisor.anthropic.existingSecret=kubehero-anthropic
+```
+
+Read [Agents & MCP](/docs/agents) first — it explains exactly what the model sees.
+
+## Optional: Grafana
+
+If kube-prometheus-stack runs in the cluster, Prometheus scrapes KubeHero and the dashboards land in a **KubeHero** folder. Add KubeHero as a **Loki** data source to query its logs from Grafana — see [Compatibility](/docs/compatibility#grafana).
+
+## Next
+
+- [Production](/docs/production) — managed stores, sizing, retention, HA
+- [Alerting](/docs/alerts) — add channels to the default rules
+- [Security](/docs/security) — verify the read-only guarantees on your cluster

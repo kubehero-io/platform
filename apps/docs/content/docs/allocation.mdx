@@ -1,0 +1,133 @@
+---
+title: Cost allocation
+description: OpenCost-compatible allocation by any dimension, idle and shared cost, per-resource cost, forecasts, efficiency and a FinOps FOCUS export.
+---
+
+KubeHero prices every pod from the node it runs on and rolls those dollars up by any dimension you care about — namespace, workload, team, label — with idle and shared cost handled explicitly. The same data is served three ways: the `CostService` Connect-RPC API (dashboard, CLI, agents), an **OpenCost-compatible HTTP API**, and a **FinOps FOCUS CSV** export.
+
+<Callout title="Allocation is an estimate">
+  Allocation is reconciled to **node prices** (list prices from the pricing engine, or your own per-node
+  price), not to your cloud invoice. Commitments and discounts (Savings Plans, CUDs, reservations) are not
+  yet replayed onto allocations. Use the numbers to compare, attribute and trend — reconcile to the bill in
+  your FinOps tool.
+</Callout>
+
+## How a pod is priced
+
+Each collector reports **only the node it runs on** (see [Architecture](/docs/architecture)). For every pod it computes:
+
+1. **Share of the node** — `max(requests, measured usage)` for CPU and memory, as a fraction of the node's allocatable. Usage comes from the kubelet Summary API, so a pod bursting past its request pays for what it uses.
+2. **Node price** — resolved in this order and recorded on every node sample as `price_source`:
+   - the `kubehero.io/node-hourly-usd` node annotation (your negotiated price wins),
+   - the pricing engine's live AWS / GCP / Azure price lists (`pricing-engine`),
+   - a built-in estimate (`estimate`).
+3. **Per-resource split** — non-GPU nodes split the price 50/50 between CPU and memory. GPU nodes attribute a documented share of the price to accelerators (70% by default, by GPU count requested) and split the rest between CPU and memory.
+4. **Rate × interval** — each sample carries the interval it covers, so dollars are `cost_usd_sec × interval_sec`. Hourly rollups (`workload_cost_1h`, `node_cost_1h`) are built from those products.
+
+**Idle cost** is exact per node: `node price − Σ pod costs on that node`, reported by the same collector.
+
+## Query allocation
+
+<Tabs items={["CLI", "OpenCost API", "Connect-RPC"]}>
+  <Tab value="CLI">
+```bash
+# cost by namespace for the last 7 days, with idle shared back by weight
+kubehero cost allocation --aggregate namespace --window 7d --idle --share-idle weighted
+
+# composite keys: team × nodepool, only one cluster
+kubehero cost allocation --aggregate team,nodepool --cluster eks-use1-prod
+
+# redistribute platform namespaces onto everyone else
+kubehero cost allocation --aggregate namespace --shared-namespaces kube-system,monitoring
+```
+  </Tab>
+  <Tab value="OpenCost API">
+```bash
+curl -s -H "Authorization: Bearer $KUBEHERO_TOKEN" \
+  "$KUBEHERO_ENDPOINT/allocation/compute?window=7d&aggregate=namespace&accumulate=true&shareIdle=true"
+```
+  </Tab>
+  <Tab value="Connect-RPC">
+```bash
+curl -s -H "Authorization: Bearer $KUBEHERO_TOKEN" -H "Content-Type: application/json" \
+  -d '{"window":"7d","aggregate":["namespace"],"includeIdle":true,"shareIdle":"weighted"}' \
+  "$KUBEHERO_ENDPOINT/kubehero.v1.CostService/GetAllocation"
+```
+  </Tab>
+</Tabs>
+
+### Windows
+
+`24h` · `7d` · `30d` · `today` · `yesterday` · `week` · `month` · `lastmonth` · or an RFC 3339 pair: `"2026-09-01T00:00:00Z,2026-09-08T00:00:00Z"`.
+
+### Dimensions
+
+`cluster` · `namespace` · `workload` · `controller` (workload kind + name) · `pod` · `container` · `node` · `nodepool` · `team` · `cost_center` · `zone` · `label:<key>`. Pass several to get a composite key joined with `/`. Filters use the same names (`--filter team=payments`).
+
+Windows longer than about two hours are served from the hourly rollups; `pod`, `container` and `node` granularity and short windows read the raw per-sample table.
+
+## Idle and shared cost
+
+| Option | Effect |
+|---|---|
+| `includeIdle` / `--idle` | Adds an `__idle__` row per cluster: node cost that no pod was allocated. |
+| `shareIdle: "weighted"` | Redistributes idle cost onto every row in proportion to its own cost. |
+| `shareIdle: "even"` | Splits idle cost evenly across rows. |
+| `sharedNamespaces` / `--shared-namespaces` | Redistributes the cost of the named namespaces (e.g. `kube-system`, `monitoring`) onto the rest, weighted by each row's cost. |
+
+## What each row carries
+
+The `Allocation` message mirrors OpenCost's model and adds two KubeHero columns:
+
+| Field | Meaning |
+|---|---|
+| `cpuCoreHours`, `cpuCoreRequestAverage`, `cpuCoreUsageAverage`, `cpuCost`, `cpuEfficiency` | CPU usage, requests, cost and usage ÷ request |
+| `ramByteHours`, `ramByteRequestAverage`, `ramByteUsageAverage`, `ramCost`, `ramEfficiency` | the same for memory |
+| `gpuHours`, `gpuCost` | GPU time and cost |
+| `networkCost` | internet egress + cross-zone transfer attributed to this row's **source** workload ([Network](/docs/network)) |
+| `pvCost`, `sharedCost`, `idleCost`, `totalCost`, `totalEfficiency` | as in OpenCost |
+| `recoverableCost` | what rightsizing would recover ([Rightsizing](/docs/rightsizing)) |
+| `logIngestGb` | log volume attributed to this row ([Logs](/docs/logs)) |
+
+## OpenCost compatibility
+
+`GET /allocation/compute` and `GET /allocation` accept OpenCost's parameters — `window`, `aggregate` (OpenCost names: `namespace`, `controller`, `controllerKind`, `pod`, `container`, `node`, `cluster`, `label:<key>`), `accumulate`, `idle`, `includeIdle`, `shareIdle`, `shareNamespaces` — and answer in OpenCost's JSON shape (`{"code":200,"status":"success","data":[…]}`, with `cpuCost`, `ramCost`, `totalCost`, `cpuEfficiency`, … per allocation). Tools that already read OpenCost's allocation API can point at KubeHero instead. See [Compatibility](/docs/compatibility#opencost-api-consumers).
+
+## FinOps FOCUS export
+
+```bash
+kubehero cost export --format focus --window 30d --aggregate workload --file focus-september.csv
+# or over HTTP
+curl -s -H "Authorization: Bearer $KUBEHERO_TOKEN" \
+  "$KUBEHERO_ENDPOINT/api/v1/export/focus?window=30d&aggregate=workload" > focus.csv
+```
+
+The CSV follows the FinOps FOCUS 1.2 columns KubeHero can fill honestly: `BilledCost`, `EffectiveCost`, `ListCost`, `ContractedCost`, `BillingCurrency` (USD), `ChargePeriodStart` / `ChargePeriodEnd`, `ChargeCategory` (`Usage`), `ConsumedQuantity` / `ConsumedUnit` (core-hours), `ProviderName`, `PublisherName` (`KubeHero`), `InvoiceIssuerName` (`KubeHero (allocated)`), `RegionId`, `AvailabilityZone`, `ResourceId` (`cluster/namespace/workload`), `ResourceType` (`Kubernetes Workload`), `ServiceCategory` (`Compute`), `SubAccountId` (cluster), `Tags` (namespace, workload, team, cost center, labels), plus `x_`-prefixed extensions for idle, shared, network and efficiency.
+
+<Callout type="warn" title="Allocated, not billed">
+  The invoice issuer is deliberately `KubeHero (allocated)`: these are allocated estimates derived from node
+  prices, so a FOCUS consumer can keep them apart from provider-billed rows.
+</Callout>
+
+## Over time, forecasts, efficiency
+
+```bash
+kubehero cost timeseries --window 30d --group-by team --top 5   # daily spend, month-end forecast
+kubehero cost efficiency --window 7d                            # fleet score + per cluster / namespace
+```
+
+`GetCostTimeseries` returns spend per step (hourly or daily, chosen from the window), grouped and folded to the top N plus `other`, and `forecast_month_usd`: month-to-date plus the trailing 7-day daily average for the remaining days.
+
+`GetEfficiency` returns a 0–100 fleet score: the cost-weighted blend of CPU and RAM efficiency (usage ÷ request), minus the idle share of spend — with per-cluster and per-namespace breakdowns, idle cost and recoverable cost.
+
+## Configuration
+
+| Setting | Default | Notes |
+|---|---|---|
+| `kubehero.io/node-hourly-usd` (node annotation) | — | Your price for that node, in USD/hour. Wins over everything. |
+| `pricingEngine.enabled` | `true` | Live price lists. AWS and Azure need no credentials; GCP's Cloud Billing Catalog takes an API key (`pricingEngine.gcpBillingSecret`). |
+| `chargeback.teamLabel` | `kubehero.io/team` | Pod label that defines a team. |
+| `chargeback.costCenterLabel` | `kubehero.io/cost-center` | Optional cost-center label. |
+| `chargeback.namespaceToTeam` | `{}` | Map namespaces with no team label to a team. |
+
+Next: [Chargeback](/docs/chargeback) for team rollups in Prometheus and Grafana, [Rightsizing](/docs/rightsizing) for recoverable cost.

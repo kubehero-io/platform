@@ -1,0 +1,110 @@
+---
+title: Continuous profiling
+description: eBPF whole-node CPU profiling with no code changes, pprof scraping with Pyroscope/Alloy annotations, Pyroscope-compatible ingest, and flamegraphs priced per function.
+---
+
+KubeHero profiles in three ways and stores the results together, priced with the workload's actual CPU spend:
+
+| Source | `origin` | What you do |
+|---|---|---|
+| **eBPF CPU sampling** | `ebpf` | Nothing. Every container on every node is sampled. |
+| **pprof scraping** | `pprof-scrape` | Annotate pods that expose `/debug/pprof` — the same annotations Pyroscope and Grafana Alloy use. |
+| **Pyroscope ingest** | `pyroscope` | Point a Pyroscope SDK (or Alloy's `pyroscope.write`) at KubeHero's `/ingest`. |
+
+## eBPF CPU profiling
+
+The collector opens a `perf_event` CPU-clock sampler on every online CPU (49 Hz by default) with a BPF program attached. Each sample records the process, its cgroup, and kernel and user stack IDs. Every flush:
+
+- cgroups are resolved to **pod and container** (systemd and cgroupfs layouts, containerd, CRI-O and Docker IDs);
+- **kernel frames** are symbolised from `/proc/kallsyms` and suffixed ` [k]`;
+- **user frames** are symbolised per process from the binary's ELF `.symtab` / `.dynsym`, or from Go's `.gopclntab` when a Go binary is stripped;
+- identical stacks are merged and emitted as one profile per container: `type: cpu`, `unit: nanoseconds`, `origin: ebpf`.
+
+No code changes, no restarts, no sidecars. The collector skips its own process.
+
+| Helm value | Default | Notes |
+|---|---|---|
+| `collector.ebpf.enabled` | `true` | Master switch for kernel telemetry (profiling and flows). Requires a privileged container. |
+| `collector.ebpf.profiler` | `true` | CPU sampling only. |
+| `collector.ebpf.profileHz` | `49` | Samples per second per CPU. |
+
+## pprof scraping
+
+For pods on its node, the collector scrapes pprof endpoints every `collector.profiling.interval` (60s by default): CPU via `/debug/pprof/profile?seconds=15`, heap via `/debug/pprof/heap` (both `inuse_space` and `alloc_space`), goroutines via `/debug/pprof/goroutine`.
+
+Use the Pyroscope / Alloy annotations you may already have:
+
+```yaml
+metadata:
+  annotations:
+    profiles.grafana.com/cpu.scrape: "true"
+    profiles.grafana.com/cpu.port: "6060"
+    profiles.grafana.com/memory.scrape: "true"
+    profiles.grafana.com/memory.port: "6060"
+    profiles.grafana.com/goroutine.scrape: "true"
+```
+
+…or KubeHero's own:
+
+```yaml
+metadata:
+  annotations:
+    kubehero.io/profile: "true"
+    kubehero.io/profile-port: "6060"
+    kubehero.io/profile-path: "/debug/pprof"   # default
+    kubehero.io/service: "checkout-api"         # optional; defaults to the workload name
+```
+
+Scrapes have timeouts and a maximum body size. Turn scraping off with `collector.profiling.scrape: false`.
+
+## Pyroscope ingest
+
+`POST /ingest` on the control plane accepts the Pyroscope HTTP ingest API — `name=<app>.<type>{k=v,…}`, `from`, `until`, `format=pprof|folded`, `sampleRate`, `spyName` — including the multipart uploads the Pyroscope SDKs send. The application name and labels map to service, namespace and pod; profiles are stored with `origin: pyroscope`.
+
+```go
+// Go SDK: point the server address at KubeHero
+pyroscope.Start(pyroscope.Config{
+    ApplicationName: "checkout-api",
+    ServerAddress:   "http://kubehero-control-plane.kubehero-system.svc:8080",
+    AuthToken:       os.Getenv("KUBEHERO_TOKEN"),
+    Tags:            map[string]string{"namespace": "checkout"},
+})
+```
+
+## Flamegraphs and $/month
+
+`ProfilesService` answers three questions:
+
+- **`ListProfileTargets`** — which services have profiles in the window, which types, from which origin, their average CPU cores and what they cost per month.
+- **`GetFlamegraph`** — a merged call tree for a service (up to ~50k heaviest stacks, pruned to `max_nodes`, 2,048 by default). Pass a **baseline window** and each node also carries its baseline self/total, normalised to the same total: a diff flamegraph where regressions stand out.
+- **`GetTopFunctions`** — functions ranked by self or total time. A recursive function's total is counted once per stack.
+
+For CPU profiles every frame is priced: `frame $/mo = workload CPU $/mo × frame total ÷ root total`, using the workload's CPU spend from the allocation engine.
+
+```bash
+kubehero profile targets --since 1h
+kubehero profile top --service checkout-api --since 30m          # ranked by self, with $/mo
+kubehero profile flame --service checkout-api --diff-since 24h   # ASCII tree, vs the same window a day ago
+```
+
+The home page has an [interactive flamegraph](/#demos) with zoom, search and diff.
+
+## Retention
+
+| Table | Holds | TTL |
+|---|---|---|
+| `profile_samples` | stack samples by service, type and window | 14 days |
+| `profile_stacks` | content-addressed stacks (hash → frames) | 30 days |
+
+## Limitations
+
+<Callout type="warn" title="Read these before you trust a flamegraph">
+  - **Kernel and privileges.** eBPF needs Linux ≥ 5.8 with cgroup v2 — the default on current AKS, GKE and EKS node
+    images — and a privileged collector. Where that isn't available the collector logs one line and keeps collecting
+    everything else; pprof scraping and Pyroscope ingest still work.
+  - **Frame pointers.** User-space stacks are walked with frame pointers. Go and Rust keep them; the JVM needs
+    `-XX:+PreserveFramePointer`; C/C++ built with `-fomit-frame-pointer` produces truncated stacks.
+  - **JIT runtimes.** JIT-compiled frames (Node.js, Python, the JVM) show as `[unknown]` unless the runtime writes perf
+    maps. Use pprof scraping or a Pyroscope SDK for those.
+  - **Sampling.** 49 Hz per CPU is a statistical view — short-lived spikes between samples can be missed.
+</Callout>

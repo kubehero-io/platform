@@ -1,0 +1,72 @@
+---
+title: FAQ
+description: Common questions about running KubeHero — accuracy, overhead, privileges, data residency, Grafana, licensing and more.
+---
+
+## How close is allocation to my cloud bill?
+
+Allocation prices each pod from its node's price — your per-node annotation, the pricing engine's live list prices, or an estimate — and splits that between pods by `max(requests, usage)`, with idle cost kept explicit. It's an estimate reconciled to **node prices**, not to your invoice: commitments and discounts (Savings Plans, CUDs, reservations) aren't replayed onto allocations yet. Use it to attribute, compare and trend; reconcile totals to the bill in your FinOps tool (the [FOCUS export](/docs/allocation#finops-focus-export) is built for that).
+
+## What does the collector cost to run?
+
+The chart requests 100m CPU and 128 Mi per node, with limits of 1 CPU and 512 Mi. Real usage depends mostly on how many log lines your pods write; the per-container rate limit (`collector.logs.rateLimit`) and a bounded shipping queue keep it from running away. We haven't published benchmark numbers yet — measure on your nodes with the collector's own [health metrics](/docs/metrics-reference#collector-health).
+
+## Does it need privileged containers?
+
+Only for eBPF. With `collector.ebpf.enabled: true` (default) the collector is privileged with `hostPID` — required to load BPF programs and read CPU stacks. Turn eBPF off and it runs unprivileged; you keep cost, logs, pprof profiles and events, and lose eBPF profiles and network flows. See [Security](/docs/security#ebpf-privileges).
+
+## Which kernels and nodes are supported?
+
+Any Kubernetes ≥ 1.28. eBPF needs Linux ≥ 5.8 with cgroup v2 — the default on current AKS (Ubuntu 22.04+, Azure Linux), GKE (COS) and EKS (AL2023, Bottlerocket) node images. Windows nodes aren't supported by the collector.
+
+## Does it replace Prometheus?
+
+No. KubeHero keeps Prometheus as the metrics TSDB, exports chargeback series to it and ships recording rules and dashboards. It replaces the *other* tools: the cost allocator, the log store, the profiler, the network cost agent and per-tool alert rules.
+
+## Can Grafana query KubeHero?
+
+Yes. Add KubeHero as a **Loki** data source for logs — it implements Loki's query API — and keep using Prometheus for metrics. See [Compatibility](/docs/compatibility#grafana).
+
+## Do I have to change my code to get profiles?
+
+No. The eBPF profiler samples every container on every node. Go and Rust binaries give full stacks; the JVM needs `-XX:+PreserveFramePointer`. If you already expose pprof endpoints or use a Pyroscope SDK, KubeHero scrapes or ingests those too.
+
+## Will KubeHero change my workloads?
+
+Only the operator can, only through a `RightsizingPolicy` in `apply` mode or an escalating `BudgetPolicy` / `CeilingPolicy`, only after a human arms that policy, in bounded steps — and every change can be undone. The collector and the advisor are read-only. See [Rightsizing](/docs/rightsizing).
+
+## Does any data leave my cluster?
+
+No — unless you give the advisor an Anthropic API key. Then the telemetry the model reasons over, including capped samples of log lines during investigations, goes to Anthropic under your key. Without a key, a deterministic rules brain answers and nothing leaves. See [Agents & MCP](/docs/agents).
+
+## Which model do the agents use?
+
+Claude Opus 5 by default, configurable with `advisor.model`. You bring your own Anthropic API key; KubeHero never proxies model traffic through anyone else.
+
+## Can it run air-gapped?
+
+Yes. Mirror the images, install with `values.airgap.yaml`, and leave the Anthropic key unset. The pricing engine falls back to its built-in table; set exact node prices with annotations. See [Deploy](/docs/deploy#air-gapped).
+
+## How do I cover several clusters?
+
+Run one control plane in a hub cluster and the collector plus operator in each workload cluster, enrolled with a per-cluster token from `kubehero cluster add`. See [Deploy](/docs/deploy#federated-collectors).
+
+## We already run OpenCost or Kubecost. Now what?
+
+They can run side by side. KubeHero serves the OpenCost allocation API, so scripts and dashboards built on it can point at KubeHero when you're ready. See the [comparison](/docs/comparison) for where each tool fits.
+
+## Does it support our identity provider?
+
+If it speaks OIDC, yes — with JWKS signature verification and group-to-role mapping, plus SCIM provisioning. LDAP and SAML go through Dex. See [Identity](/docs/integrations/identity).
+
+## How is it licensed?
+
+The CLI, collector, cost model and protos are Apache 2.0. The control plane, operator, advisor, pricing engine and dashboard are BSL 1.1 — source-available and free to self-host. Source: [github.com/kubehero-io/platform](https://github.com/kubehero-io/platform).
+
+## What does it cost?
+
+Nothing to license. You pay for the compute and storage KubeHero uses in your cluster — mostly ClickHouse, which grows with your log volume and retention.
+
+## Is there support or an SLA?
+
+KubeHero is software you run yourself; there's no hosted service and no SLA. Community support is on [GitHub Discussions](https://github.com/kubehero-io/platform/discussions); security reports go to [security@kubehero.io](mailto:security@kubehero.io).

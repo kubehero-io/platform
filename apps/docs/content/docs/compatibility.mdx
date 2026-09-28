@@ -1,0 +1,159 @@
+---
+title: Compatibility
+description: Point Grafana, Promtail, Grafana Alloy, Fluent Bit, the OpenTelemetry Collector, Pyroscope SDKs, OpenCost clients, FinOps tools, Alertmanager and MCP clients at KubeHero — with config snippets.
+---
+
+KubeHero speaks the wire formats your tools already use. Adopting it is a configuration change: keep your dashboards, shippers and pipelines, and point them here.
+
+All HTTP APIs below are served by the control plane on its service port — in-cluster, `http://kubehero-control-plane.kubehero-system.svc:8080` — and authenticate with the same bearer tokens as the rest of the API. Pushes need a token with at least the `member` role; queries need `viewer`. See [Identity](/docs/integrations/identity) for tokens and roles.
+
+| You run | Talks to KubeHero via | Section |
+|---|---|---|
+| Grafana | Loki datasource, Prometheus | [Grafana](#grafana) |
+| Promtail, Grafana Alloy, Fluent Bit | Loki push API | [Log shippers](#log-shippers) |
+| OpenTelemetry Collector | OTLP/HTTP logs | [OpenTelemetry](#opentelemetry-collector) |
+| Pyroscope SDKs | Pyroscope `/ingest` | [Profiles](#pyroscope-sdks) |
+| OpenCost / Kubecost API clients | `/allocation/compute` | [OpenCost](#opencost-api-consumers) |
+| FinOps tools | FOCUS 1.2 CSV | [FOCUS](#finops-focus) |
+| Slack, PagerDuty, Opsgenie, Teams, Discord, webhooks, Alertmanager | alert channels | [Alerting](#alerting) |
+| Claude and MCP clients | `kubehero mcp` | [MCP](#mcp-clients) |
+| Karpenter, Cluster Autoscaler, HPA, KEDA, VPA, Trivy | runs beside them | [Autoscalers](#autoscalers-and-scanners) |
+
+## Grafana
+
+### Logs — the Loki datasource
+
+KubeHero implements Loki's query API (`query_range`, `query`, `labels`, `label/{name}/values`, `series`, `index/volume`, `index/stats`, `status/buildinfo`), so Grafana's built-in **Loki** data source works for Explore, dashboards and Grafana-managed alerts.
+
+```yaml
+# provisioning/datasources/kubehero.yaml
+apiVersion: 1
+datasources:
+  - name: KubeHero logs
+    type: loki
+    access: proxy
+    url: http://kubehero-control-plane.kubehero-system.svc:8080
+    jsonData:
+      httpHeaderName1: Authorization
+      httpHeaderName2: X-Scope-OrgID       # optional: pin one cluster
+    secureJsonData:
+      httpHeaderValue1: "Bearer <a viewer token>"
+      httpHeaderValue2: eks-use1-prod
+```
+
+Loki's tenant header, `X-Scope-OrgID`, maps to a **cluster**. Multi-tenant queries (`a|b`) are not supported — add one data source per cluster, or leave the header off and filter with `{cluster="…"}`.
+
+### Metrics — Prometheus
+
+KubeHero doesn't replace your metrics TSDB. The chart ships ServiceMonitors, recording rules and Grafana dashboards for kube-prometheus-stack — see [Prometheus + Grafana](/docs/integrations/prometheus-grafana) and the [metrics reference](/docs/metrics-reference).
+
+## Log shippers
+
+The collector already tails every container's logs, so you don't need a shipper for Kubernetes pods. Use these to bring in logs from elsewhere — VMs, other clusters, an existing pipeline — through the **Loki push API** (`POST /loki/api/v1/push`, JSON or protobuf + snappy).
+
+<Tabs items={["Grafana Alloy", "Promtail", "Fluent Bit"]}>
+  <Tab value="Grafana Alloy">
+```hcl
+loki.write "kubehero" {
+  endpoint {
+    url          = "http://kubehero-control-plane.kubehero-system.svc:8080/loki/api/v1/push"
+    bearer_token = sys.env("KUBEHERO_TOKEN")
+    tenant_id    = "eks-use1-prod"   // becomes the cluster
+  }
+}
+```
+  </Tab>
+  <Tab value="Promtail">
+```yaml
+clients:
+  - url: http://kubehero-control-plane.kubehero-system.svc:8080/loki/api/v1/push
+    bearer_token: <a member token>
+    tenant_id: eks-use1-prod
+```
+  </Tab>
+  <Tab value="Fluent Bit">
+```ini
+[OUTPUT]
+    Name          loki
+    Match         *
+    Host          kubehero-control-plane.kubehero-system.svc
+    Port          8080
+    Uri           /loki/api/v1/push
+    Bearer_Token  <a member token>
+    Tenant_ID     eks-use1-prod
+    Labels        job=fluent-bit
+```
+  </Tab>
+</Tabs>
+
+Stream labels `namespace`, `pod`, `container`, `app`, `job` and `level` / `detected_level` map onto KubeHero's columns; other labels are kept as extra labels. A `cluster` stream label, or `X-Scope-OrgID`, sets the cluster.
+
+## OpenTelemetry Collector
+
+`POST /v1/logs` accepts OTLP/HTTP logs, protobuf or JSON.
+
+```yaml
+exporters:
+  otlphttp/kubehero:
+    logs_endpoint: http://kubehero-control-plane.kubehero-system.svc:8080/v1/logs
+    headers:
+      Authorization: "Bearer ${env:KUBEHERO_TOKEN}"
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [k8sattributes, batch]
+      exporters: [otlphttp/kubehero]
+```
+
+Resource attributes `k8s.namespace.name`, `k8s.pod.name`, `k8s.container.name`, `k8s.deployment.name` and `service.name` map onto the columns; `severity_text` / `severity_number` become the level; trace IDs are kept. OTLP **traces** are not ingested in v0.3.
+
+## Pyroscope SDKs
+
+`POST /ingest` implements the Pyroscope HTTP ingest API (`pprof` and `folded` formats, including the SDKs' multipart uploads). Point an SDK's server address at the control plane:
+
+```python
+# Python
+import pyroscope
+pyroscope.configure(
+    application_name="payments-worker",
+    server_address="http://kubehero-control-plane.kubehero-system.svc:8080",
+    auth_token=os.environ["KUBEHERO_TOKEN"],
+    tags={"namespace": "payments"},
+)
+```
+
+For Kubernetes pods you usually don't need an SDK at all: KubeHero's eBPF profiler covers every container, and the collector scrapes pprof endpoints annotated the Pyroscope/Alloy way (`profiles.grafana.com/cpu.scrape: "true"`). See [Profiling](/docs/profiling). Alloy's `pyroscope.write` uses Pyroscope's push API, which KubeHero does not implement — scrape with KubeHero's collector instead.
+
+## OpenCost API consumers
+
+`GET /allocation/compute` (and `/allocation`) answer in OpenCost's JSON shape with OpenCost's parameters — `window`, `aggregate`, `accumulate`, `idle`, `includeIdle`, `shareIdle`, `shareNamespaces`:
+
+```bash
+curl -s -H "Authorization: Bearer $KUBEHERO_TOKEN" \
+  "http://kubehero-control-plane.kubehero-system.svc:8080/allocation/compute?window=7d&aggregate=namespace&accumulate=true"
+```
+
+Scripts, reports and dashboards built on OpenCost's allocation API can switch by changing the base URL. See [Cost allocation](/docs/allocation#opencost-compatibility).
+
+## FinOps FOCUS
+
+`GET /api/v1/export/focus?window=30d&aggregate=workload` streams a FinOps FOCUS 1.2 CSV (or `kubehero cost export --format focus`). Feed it to your FinOps platform next to provider billing data; KubeHero's rows are marked as allocated estimates (`InvoiceIssuerName: KubeHero (allocated)`).
+
+## Alerting
+
+Alert rules route to `slack://`, `pagerduty://`, `opsgenie://`, `teams://` (or `teams+https://`), `discord+https://`, `webhook+https://` and `alertmanager+https://` channels. With Alertmanager, KubeHero posts to `/api/v2/alerts` with labels, annotations, `startsAt` / `endsAt` and a generator URL, and your existing routing, grouping and inhibition apply. See [Alerting](/docs/alerts#channels).
+
+## MCP clients
+
+`kubehero mcp` serves KubeHero's read-only tools to Claude Code, Claude Desktop and any MCP client over stdio or streamable HTTP. See [Agents & MCP](/docs/agents#mcp-server).
+
+## Autoscalers and scanners
+
+| Tool | How KubeHero coexists |
+|---|---|
+| Karpenter, Cluster Autoscaler | Nodes they create are priced like any other; KubeHero never provisions or removes nodes (a CeilingPolicy's `nodepool.cordon` step only cordons, and only when armed). |
+| HPA, KEDA | Rightsizing changes requests, never replica counts; recommendations are priced with the average replica count. |
+| VPA | Containers targeted by a VerticalPodAutoscaler are skipped by `RightsizingPolicy` apply mode. |
+| Trivy | Vulnerability reports from the Trivy operator appear in the posture view, ranked by workload cost. |

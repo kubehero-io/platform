@@ -1,34 +1,97 @@
 ---
 title: Architecture
-description: How the collector, control plane, and operator fit together.
+description: How the collector, control plane, operator, advisor and dashboard fit together — data flow, stores, retention and the guarded action loop.
 ---
 
-KubeHero is five services plus an open CRD surface. The split is designed so you can run any subset in your own cluster without losing functionality.
+KubeHero is a collector on every node, a control plane that stores and serves everything, an operator that is the only thing allowed to change workloads, and an advisor that can read everything and change nothing.
 
-## Services
+```text
+┌──────────────────── every cluster (K8s ≥ 1.28 · AKS · GKE · EKS) ────────────────────┐
+│ collector (DaemonSet — reports only its own node)          operator (Deployment)      │
+│  cost + usage · logs · pprof scrape · eBPF flows + CPU     RightsizingPolicy          │
+│  profiles · events (leader: unschedulable, Warning events)  CeilingPolicy · Budget     │
+└──────────────┬───────────────────────────────────────────────────────▲────────────────┘
+               │ Connect-RPC (protobuf, gzip, per-cluster token)          │ burn rate, recommendations
+               ▼                                                         │
+┌──────────────────────────────────── control plane ─────────────────────┴──────────────┐
+│ ingest: IngestPodCost + TelemetryService · compat: Loki push/query · OTLP · Pyroscope  │
+│ engines: LogQL · Drain · allocation · FOCUS · rightsizing · flamegraphs · service map  │
+│          anomalies · alert evaluator          auth: API keys, cluster tokens, OIDC     │
+│   ClickHouse — every time series (TTLs + rollups)      Postgres — clusters, policies,  │
+│                                                        alerts, silences, audit         │
+└──────▲─────────────────▲────────────────────▲────────────────────────▲────────────────┘
+       │ read RPCs        │                    │                        │ Loki / OpenCost APIs
+   dashboard         advisor (read-only)   CLI · MCP server         Grafana · OpenCost clients
+                          │ optional, your key
+                          ▼
+                      Claude API
+```
 
-| Service | Language | Where it runs | Responsibility |
+## Components
+
+| Component | License | Runs as | Responsibility |
 |---|---|---|---|
-| **collector** | Go | Customer cluster (DaemonSet) | Per-pod cost attribution from resource requests blended with **measured utilization** (kubelet Summary API via the API-server node proxy). Ships cost batches to the control plane. eBPF probes for 1-second burst attribution are future work. |
-| **control-plane** | Go + Connect-RPC | Your cluster | Ingests telemetry, evaluates policies, detects spend anomalies (rolling z-scores), serves the dashboard and CLI. |
-| **pricing-engine** | Go | Your cluster | Serves per-SKU quotes: in-memory cache, then live cloud pricing APIs, then a static built-in table as fallback. Normalizes across clouds and lifecycles (on-demand, spot, savings-plan, committed). |
-| **operator** | Go + kubebuilder | Customer cluster | Reconciles `BudgetPolicy`, `CeilingPolicy`, `RightsizingPolicy` CRDs. Never runs enforcement without `humanArm`. |
-| **advisor** | Go + Connect-RPC | Your cluster | Read-only agentic layer: briefings + proposed guarded actions from an LLM / rules / demo brain tier. See [Advisor & agents](/docs/advisor). |
+| **collector** | Apache 2.0 | DaemonSet | Everything node-local: pod cost and usage, container logs, pprof scraping, eBPF flows and CPU profiles, events. |
+| **control-plane** | BSL 1.1 | Deployment (2 replicas) | Ingest, storage, query engines, compatibility APIs, alert evaluation, auth, audit. |
+| **operator** | BSL 1.1 | Deployment | Reconciles `BudgetPolicy`, `CeilingPolicy`, `RightsizingPolicy`; the only writer to workloads. |
+| **advisor** | BSL 1.1 | Deployment | Briefings and investigations over read RPCs; no Kubernetes credentials. |
+| **pricing-engine** | BSL 1.1 | Deployment | `Quote` over cache → live cloud price list → built-in table. |
+| **dashboard** | BSL 1.1 | Deployment | Next.js UI; token sign-in with per-user roles. |
+| **CLI + MCP** | Apache 2.0 | your laptop / CI | Every surface from a terminal; `kubehero mcp` for agents. |
 
-## Data plane
+## The collector
 
-- **Telemetry**: the collector scans pods and nodes every 5 seconds, blends requests with measured usage from the kubelet Summary API, and ships cost batches to the control plane over Connect-RPC. Target overhead: < 0.5% CPU, < 50 MiB RSS per node.
-- **Storage**: ClickHouse for time-series, PostgreSQL for metadata (users, orgs, policies, audit log).
-- **Transport**: mTLS end-to-end via `cert-manager` with your own CA.
+Each collector reports **only the node it runs on** (`NODE_NAME` from the downward API). Cluster-scoped scans — unschedulable pods and Kubernetes Warning events — run on one leader elected through a `coordination.k8s.io` Lease named `kubehero-collector`.
 
-## The three CRDs
+- **Cost** — pods are priced from their node: `max(requests, measured usage)` share of allocatable × the node's hourly price, split into CPU / memory / GPU. Each sample carries its interval, so spend is `rate × interval`. See [Cost allocation](/docs/allocation#how-a-pod-is-priced).
+- **Usage history** — per-container CPU and working-set memory from the kubelet Summary API with requests, limits, restarts and the last termination reason — the input to [rightsizing](/docs/rightsizing).
+- **Logs** — tails `/var/log/pods` (CRI and json-file), checkpointed and rate-limited. See [Logs](/docs/logs).
+- **Profiles** — pprof scraping of annotated pods, and eBPF `perf_event` CPU sampling of every container. See [Profiling](/docs/profiling).
+- **Flows** — eBPF `cgroup_skb` byte accounting and TCP retransmits. See [Network](/docs/network).
+- **Events** — OOM kills, crash loops, image pull failures, restarts, evictions, node pressure, unschedulable pods.
 
-- `BudgetPolicy` — declarative spending intent (ceiling, scope, escalation).
-- `CeilingPolicy` — burn-rate triggered enforcement that references a `BudgetPolicy`.
-- `RightsizingPolicy` — how aggressively to recommend or apply workload right-sizing.
+Its Kubernetes RBAC is read-only. eBPF requires a privileged container — see [Security](/docs/security#ebpf-privileges).
 
-See the [CRD reference](/docs/crd-reference) for every field.
+The collector ships to the control plane with generated Connect clients (protobuf + gzip), per-call timeouts, jittered retries and a bounded queue: a control-plane outage drops the oldest items (counted) rather than growing memory.
 
-## Licensing
+## The control plane
 
-Open-core. Apache 2.0 for the CLI, collector, cost-model library, and proto schemas. BSL 1.1 (converts to Apache 2.0 after three years) for the control plane, operator, pricing engine, advisor, and dashboard.
+- **Transport** — [Connect-RPC](https://connectrpc.com/): the same `.proto` contracts serve Go, TypeScript, the CLI and plain `curl`. The services: `ControlPlaneService`, `TelemetryService`, `CostService`, `LogsService`, `ProfilesService`, `NetworkService`, `AlertsService` (and `AdvisorService` on the advisor). See the [API reference](/docs/api-reference).
+- **Ingest** — batched writers per table with backpressure (`ResourceExhausted` when a queue is full) and validation limits: at most 10,000 log entries, 5,000 flows, 2,000 profiles per request; log lines truncated at 64 KiB; timestamps more than 10 minutes in the future rejected.
+- **Stores** — ClickHouse for every time series, Postgres for metadata. The ClickHouse schema is versioned (`kubehero_schema_migrations`); Postgres uses golang-migrate. `control-plane migrate` applies both; on start the control plane waits for configured stores (`KUBEHERO_STORE_WAIT`, default 2m) instead of silently falling back to demo data.
+- **Demo mode** — RPCs whose store isn't configured serve clearly-labelled fixtures (`source: "demo"`). `KUBEHERO_DEMO_MODE=false` (`controlPlane.demoMode: "false"`) turns them off; those RPCs then fail with `FailedPrecondition`.
+
+### Retention
+
+| Table | Holds | TTL |
+|---|---|---|
+| `workload_cost_1h`, `node_cost_1h` | hourly spend rollups | 400 days |
+| `node_cost_1s` | per-sample node cost and idle | 90 days |
+| `logs` | log lines | 14 days |
+| `log_volume_1m` | per-minute log volume | 90 days |
+| `profile_samples` / `profile_stacks` | profiles / content-addressed stacks | 14 / 30 days |
+| `net_flows` / `net_flows_1h` | flows / hourly rollups | 30 / 400 days |
+| `container_usage` / `container_usage_5m` | usage samples / 5-minute digests | 35 / 180 days |
+| `cluster_events` | Kubernetes health events | 90 days |
+
+## The operator and the guarded loop
+
+The operator watches three CRDs — see the [CRD reference](/docs/crd-reference):
+
+1. **Propose** — an agent (or you) drafts a policy manifest. It is inert.
+2. **Arm** — a human sets the arming annotation from the dashboard or `kubehero cap --arm`.
+3. **Execute** — the operator acts in bounded steps: rightsizing patches requests only when every guard passes; ceilings escalate `alert → hpa.cap → pod.evict → nodepool.cordon`, dry-run by default.
+4. **Audit** — every change writes an HMAC-signed, append-only row.
+5. **Reverse** — `kubehero undo` restores the previous spec.
+
+The operator reads burn rates and rightsizing recommendations from the control plane. If it can't reach the control plane it runs observe-only: ceilings never trip and rightsizing never applies.
+
+## The advisor
+
+Read-only by construction: its only inputs are the control plane's read RPCs, it holds no Kubernetes credentials, and every proposal is validated against a CRD whitelist. Claude (your key) or a deterministic rules brain. See [Agents & MCP](/docs/agents).
+
+## Deployment topologies
+
+- **Single cluster** — everything in one namespace, embedded stores. [Quickstart](/docs/quickstart).
+- **Federated** — one control plane in a hub; collector + operator in each workload cluster. [Deploy](/docs/deploy#federated-collectors).
+- **Air-gapped** — images mirrored, rules brain only. [Deploy](/docs/deploy#air-gapped).
