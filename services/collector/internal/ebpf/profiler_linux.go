@@ -232,9 +232,14 @@ func (p *profiler) flush(ctx context.Context) {
 			"kept", len(keys), "dropped", capped)
 	}
 
-	// Clear the idle stack map even if symbolization below fails: stale
-	// buckets would make the next window's new stacks collide.
+	// Leave the idle set empty whatever happens below: counts a failed
+	// drain left behind would reference stack ids that are about to be
+	// reused, and stale stack buckets would make next window's stacks
+	// collide. Counts go first so nothing references a cleared stack.
 	defer func() {
+		if n, _ := drainMap(counts, func([]stackKey, []uint64) {}); n > 0 {
+			p.log.Warn("ebpf profiler: discarded counts a failed drain left behind", "entries", n)
+		}
 		if err := clearStackMap(stacks); err != nil {
 			counters.drainErrors.Add(1)
 			p.log.Warn("ebpf profiler: clearing stack map failed", "err", err)
