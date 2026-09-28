@@ -47,7 +47,7 @@ export default async function ChargebackPage({
   const fleetRecoverableK = fr * mult;
   return (
     <>
-      <Topbar crumbs={[{ label: "chargeback" }]} />
+      <Topbar crumbs={[{ label: "cost" }, { label: "chargeback" }]} />
       <div className="px-5 py-6">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>

@@ -6,7 +6,7 @@ import { SkeletonKpi, SkeletonTable } from "@/components/skeleton";
 export default function PostureLoading() {
   return (
     <>
-      <Topbar crumbs={[{ label: "posture" }]} />
+      <Topbar crumbs={[{ label: "security" }, { label: "posture" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6">
           <div className="mb-2 h-3 w-64 bg-[var(--color-line-bright)]" />

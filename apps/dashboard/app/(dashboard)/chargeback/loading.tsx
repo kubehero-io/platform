@@ -6,7 +6,7 @@ import { SkeletonTable } from "@/components/skeleton";
 export default function ChargebackLoading() {
   return (
     <>
-      <Topbar crumbs={[{ label: "chargeback" }]} />
+      <Topbar crumbs={[{ label: "cost" }, { label: "chargeback" }]} />
       <div className="px-5 py-6">
         <div className="mb-6">
           <div className="mb-2 h-3 w-64 bg-[var(--color-line-bright)]" />

@@ -5,7 +5,7 @@ import { Topbar } from "@/components/topbar";
 export default function ClusterLoading() {
   return (
     <>
-      <Topbar crumbs={[{ label: "fleet", href: "/fleet" }, { label: "loading…" }]} />
+      <Topbar crumbs={[{ label: "fleet", href: "/fleet" }, { label: "loading…" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>

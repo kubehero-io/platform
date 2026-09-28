@@ -34,7 +34,7 @@ export default async function SettingsPage() {
   const s = await getSession();
   return (
     <>
-      <Topbar crumbs={[{ label: "settings" }]} />
+      <Topbar crumbs={[{ label: "settings" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6">
           <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">

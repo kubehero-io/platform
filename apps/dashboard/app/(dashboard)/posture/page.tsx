@@ -54,7 +54,7 @@ export default async function PosturePage({
 
   return (
     <>
-      <Topbar crumbs={[{ label: "posture" }]} />
+      <Topbar crumbs={[{ label: "security" }, { label: "posture" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>

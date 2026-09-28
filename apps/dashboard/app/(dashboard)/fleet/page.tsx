@@ -2,25 +2,23 @@
 // Copyright (c) KubeHero contributors
 
 import Link from "next/link";
-import { ChevronRight, Flame, DollarSign, Cpu, Shield } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Topbar } from "@/components/topbar";
 import { DataSourceBadge } from "@/components/data-source-badge";
-import { Sparkline, syntheticSeries } from "@/components/sparkline";
+import { StatGrid, StatTile } from "@/components/ui/stat-tile";
 import { TableFilter } from "@/components/table-filter";
 import { cloudColor, stateMeta, type Cloud } from "@/lib/fleet-data";
 import { getFleet } from "@/lib/api/clusters";
+import { getAllocation, getCostTimeseries, getEfficiency } from "@/lib/api/cost";
+import { getPolicies } from "@/lib/api/policies";
+import { combineSources } from "@/lib/api/source";
+import { formatPct, formatUsd } from "@/lib/chart/scale";
 
 export const metadata = { title: "Fleet · KubeHero" };
 export const dynamic = "force-dynamic"; // always re-fetch from control-plane
 
 type SearchParams = Promise<{ q?: string; cloud?: string; state?: string }>;
 
-const kpis = [
-  { label: "Monthly spend",   value: "$608,240",  sub: "+4.2% vs previous 30d",    icon: DollarSign, tone: "var(--color-warn)",   trend: syntheticSeries({ seed: "fleet-spend",       center: 608, variance: 0.05, trend: 0.0035 }) },
-  { label: "Recoverable",     value: "$184,320",  sub: "30.3% of fleet spend",     icon: Flame,      tone: "var(--color-accent)", trend: syntheticSeries({ seed: "fleet-recoverable", center: 184, variance: 0.10, trend: -0.0015 }) },
-  { label: "GPU idle share",  value: "41.8%",     sub: "40× A100 · 32× H100",      icon: Cpu,        tone: "var(--color-fg)",     trend: syntheticSeries({ seed: "fleet-gpu-idle",    center: 42,  variance: 0.07 }) },
-  { label: "Policies active", value: "12 armed",  sub: "0 firing · cooldown clear", icon: Shield,     tone: "var(--color-signal)", trend: syntheticSeries({ seed: "fleet-armed",       center: 12,  variance: 0.04 }) },
-];
 
 export default async function FleetPage({
   searchParams,
@@ -28,7 +26,19 @@ export default async function FleetPage({
   searchParams: SearchParams;
 }) {
   const sp = await searchParams;
-  const { clusters: all, source } = await getFleet();
+  const [{ clusters: all, source }, spend, eff, gpu, policies] = await Promise.all([
+    getFleet(),
+    getCostTimeseries({ window: "30d", groupBy: "" }),
+    getEfficiency({ window: "7d" }),
+    getAllocation({ window: "30d", aggregate: "cluster" }),
+    getPolicies(),
+  ]);
+  const src = combineSources({ source }, spend, eff, gpu);
+  const daily = spend.data.series[0]?.values ?? [];
+  const last30 = daily.slice(-30).reduce((a, b) => a + b, 0);
+  const prev = daily.slice(-60, -30).reduce((a, b) => a + b, 0);
+  const gpuCost = gpu.data.totals.gpuCost;
+  const nearCeiling = policies.rows.filter((p) => p.spentPct >= 70).length;
 
   const q = (sp.q ?? "").toLowerCase().trim();
   const cloudFilter = (sp.cloud ?? "").toUpperCase();
@@ -42,7 +52,7 @@ export default async function FleetPage({
   const totalNodes = clusters.reduce((s, c) => s + c.nodes, 0);
   return (
     <>
-      <Topbar crumbs={[{ label: "fleet" }]} />
+      <Topbar crumbs={[{ label: "observe" }, { label: "fleet" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6 flex items-end justify-between gap-3">
           <div>
@@ -53,40 +63,40 @@ export default async function FleetPage({
               Every cluster, every cloud.
             </h1>
           </div>
-          <DataSourceBadge source={source} />
+          <DataSourceBadge {...src} />
         </div>
 
-        {/* KPIs */}
-        <div className="grid gap-[1px] border border-[var(--color-line)] bg-[var(--color-line)] sm:grid-cols-2 lg:grid-cols-4">
-          {kpis.map((k) => {
-            const Icon = k.icon;
-            return (
-              <div
-                key={k.label}
-                className="flex flex-col gap-2 bg-[var(--color-bg-raised)] px-5 py-4"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">
-                    {k.label}
-                  </span>
-                  <Icon className="h-3.5 w-3.5 text-[var(--color-fg-faint)]" />
-                </div>
-                <div className="flex items-baseline justify-between gap-2">
-                  <span
-                    className="font-mono text-[22px] tabular-nums tracking-tight"
-                    style={{ color: k.tone }}
-                  >
-                    {k.value}
-                  </span>
-                  <Sparkline values={k.trend} color={k.tone} width={84} height={24} ariaLabel={`${k.label} trend`} />
-                </div>
-                <div className="font-mono text-[11px] text-[var(--color-fg-dim)]">
-                  {k.sub}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {/* KPIs — all computed from the cost plane, nothing hard-coded */}
+        <StatGrid cols={4}>
+          <StatTile
+            label="Spend · last 30d"
+            value={formatUsd(last30)}
+            sub={prev > 0 ? `${last30 >= prev ? "+" : "−"}${formatPct(Math.abs(last30 / prev - 1), 1)} vs previous 30d` : `forecast ${formatUsd(spend.data.forecastMonthUsd)} this month`}
+            series={daily.slice(-30)}
+            seriesColor="var(--color-cool)"
+            href="/allocation?window=30d&agg=cluster"
+          />
+          <StatTile
+            label="Recoverable"
+            value={`${formatUsd(eff.data.recoverableUsdMonth)}/mo`}
+            sub={last30 > 0 ? `${formatPct(eff.data.recoverableUsdMonth / last30, 1)} of fleet spend` : "—"}
+            tone="var(--color-signal)"
+            href="/rightsizing"
+          />
+          <StatTile
+            label="GPU spend · 30d"
+            value={formatUsd(gpuCost)}
+            sub={gpu.data.totals.totalCost > 0 ? `${formatPct(gpuCost / gpu.data.totals.totalCost, 1)} of allocated spend` : "—"}
+            href="/allocation?window=30d&agg=nodepool"
+          />
+          <StatTile
+            label="Budget policies"
+            value={`${policies.rows.length}`}
+            sub={nearCeiling > 0 ? `${nearCeiling} at ≥ 70% of ceiling` : "all well under ceiling"}
+            tone={nearCeiling > 0 ? "var(--color-warn)" : "var(--color-signal)"}
+            href="/budgets"
+          />
+        </StatGrid>
 
         {/* filter */}
         <div className="mt-8">

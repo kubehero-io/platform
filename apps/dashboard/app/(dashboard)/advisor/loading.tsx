@@ -5,7 +5,7 @@ import { Topbar } from "@/components/topbar";
 export default function AdvisorLoading() {
   return (
     <>
-      <Topbar crumbs={[{ label: "advisor" }]} />
+      <Topbar crumbs={[{ label: "agents" }, { label: "advisor" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6">
           <div className="mb-2 h-3 w-72 bg-[var(--color-line-bright)]" />

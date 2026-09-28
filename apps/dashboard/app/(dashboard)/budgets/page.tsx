@@ -21,7 +21,7 @@ export default async function BudgetsPage() {
   const canArm = authMode() === "demo" || canAdmin(session?.role);
   return (
     <>
-      <Topbar crumbs={[{ label: "budgets" }]} />
+      <Topbar crumbs={[{ label: "control" }, { label: "budgets" }]} range={false} />
       <div className="px-5 py-6">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
