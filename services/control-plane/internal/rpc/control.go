@@ -587,80 +587,27 @@ func (c *ControlPlane) ListVulnerabilities(
 }
 
 // IngestPodCost is the high-throughput write path the collector calls
-// every 5s with a batch of pod-second samples. Writes land in
-// ClickHouse pod_cost_1s; everything downstream (burn-rate, sparklines,
-// anomaly detection, /chargeback) reads from there.
+// every scan (~5s) with its node's pod cost samples, the node's own
+// price + allocation, and pod labels when they change. Rows land in
+// pod_cost_1s, node_cost_1s and pod_metadata; everything downstream
+// (allocation, burn rate, idle, anomaly detection, chargeback) reads
+// from there.
 //
-// Auth: requires member-or-above role (collector tokens are typically
-// admin so they pass; humans with member can also call this for
-// debugging). cluster_id resolution: a slug like "eks-use1-prod"
-// works; the writer's slug→UUID lookup happens at insert time so
-// SCIM/operator-issued tokens carrying the cluster slug land cleanly.
+// Auth: requires member-or-above role (collectors present their
+// cluster's enrollment token, which authenticates as member of that
+// cluster). Cluster attribution: sample cluster, else the request's
+// cluster_id, else the token's cluster — a cluster-scoped token cannot
+// write for another cluster.
 //
-// Idempotent on (cluster_id, pod, ts) — re-emitting a 5s window is
-// harmless. Returns (written, dropped) so the caller can detect
-// validation drops.
+// Requests from many nodes share inserts (group commit, see
+// clickhouse.PodCostWriter) and the call returns once its rows are
+// stored. Returns (written, dropped) so the caller can detect
+// validation drops; ResourceExhausted / Unavailable mean "retry later".
 func (c *ControlPlane) IngestPodCost(
 	ctx context.Context,
 	req *connect.Request[kuberov1.IngestPodCostRequest],
 ) (*connect.Response[kuberov1.IngestPodCostResponse], error) {
-	if err := auth.Require(ctx, auth.RoleMember); err != nil {
-		return nil, err
-	}
-	in := req.Msg.GetSamples()
-	if len(in) == 0 {
-		return connect.NewResponse(&kuberov1.IngestPodCostResponse{}), nil
-	}
-	if c.PodCost == nil {
-		// Stub mode: silently accept the batch so the kind-demo +
-		// unit-test paths don't fail when ClickHouse isn't wired.
-		return connect.NewResponse(&kuberov1.IngestPodCostResponse{
-			Written: 0,
-			Dropped: int32(len(in)),
-		}), nil
-	}
-
-	// Default cluster_id from request top-level if individual samples
-	// don't carry it. The collector typically sets it once on the
-	// request and leaves it off the per-sample shape.
-	defaultCluster := strings.TrimSpace(req.Msg.GetClusterId())
-
-	batch := make([]clickhouse.Sample, 0, len(in))
-	for _, s := range in {
-		cluster := s.GetCluster()
-		if cluster == "" {
-			cluster = defaultCluster
-		}
-		batch = append(batch, clickhouse.Sample{
-			OrgID:      "default", // resolved per-cluster once orgs are wired
-			ClusterID:  cluster,
-			Node:       s.GetNode(),
-			Namespace:  s.GetNamespace(),
-			Pod:        s.GetPod(),
-			Team:       s.GetTeam(),
-			CostCenter: s.GetCostCenter(),
-			Nodepool:   s.GetNodepool(),
-			Region:     s.GetRegion(),
-			SKU:        s.GetSku(),
-			Lifecycle:  s.GetLifecycle(),
-			GPUKind:    s.GetGpuKind(),
-			CPUMilli:   s.GetCpuMillicores(),
-			MemBytes:   s.GetMemBytes(),
-			GPUUtilPct: s.GetGpuUtilPct(),
-			CostUSDSec: s.GetCostUsdSec(),
-			RecoverUSD: s.GetRecoverableUsdSec(),
-			TsUnixMS:   s.GetTsUnixMs(),
-		})
-	}
-
-	written, dropped, err := c.PodCost.Insert(ctx, batch)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("clickhouse write: %w", err))
-	}
-	return connect.NewResponse(&kuberov1.IngestPodCostResponse{
-		Written: int32(written),
-		Dropped: int32(dropped),
-	}), nil
+	return c.ingestPodCost(ctx, req)
 }
 
 // ListCapacityDemands surfaces unschedulable pods + recommended
