@@ -35,7 +35,10 @@ jobs:
         run: |
           for d in $GO_MODULES; do
             echo "::group::$d"
-            (cd "$d" && go vet ./... && go build ./... && go test -race ./...)
+            (cd "$d" && go vet ./... && go build ./...)
+            # The operator's suite needs kube-apiserver + etcd from envtest;
+            # it runs in the "operator (envtest suite)" step below.
+            [ "$d" = services/operator ] || (cd "$d" && go test -race ./...)
             echo "::endgroup::"
           done
       - name: modules build outside the workspace (what the images do)
