@@ -119,18 +119,31 @@ has_logs()     { rpc LogsService/QueryLogs '{"query":"{namespace=\"shop\"}","lim
 has_errors()   { rpc LogsService/QueryLogs '{"query":"sum(count_over_time({namespace=\"shop\"} |= \"request failed\" [5m]))"}' | jq -e '(.series // []) | length > 0'; }
 has_usage()    { rpc CostService/ListRightsizing '{"namespace":"shop","window":"1h"}' | jq -e '(.recommendations // []) | length > 0'; }
 has_profiles() { rpc ProfilesService/ListProfileTargets '{}' | jq -e '[.targets[]? | select(.namespace=="shop")] | length > 0'; }
-has_flows()    { rpc NetworkService/GetServiceMap '{"namespace":"shop"}' | jq -e '(.edges // []) | length > 0 and .source != "demo"'; }
+has_flows()    { rpc NetworkService/GetServiceMap '{"namespace":"shop"}' | jq -e '.source != "demo" and ((.edges // []) | length > 0)'; }
 
 eventually "cost allocation has the shop namespace"       300 has_cost
 eventually "container logs are queryable with LogQL"      300 has_logs
 eventually "LogQL metric query over error lines"          300 has_errors
 eventually "rightsizing has recommendations for shop"     420 has_usage
 eventually "profiles collected for shop services"         420 has_profiles
+ebpf_diag() { # what the flow path saw, when the service map stays empty
+  note "service map (shop): $(rpc NetworkService/GetServiceMap '{"namespace":"shop"}' | head -c 800)"
+  note "service map (all):  $(rpc NetworkService/GetServiceMap '{}' | jq -c '{source, nodes: (.nodes // [] | length), edges: (.edges // [] | length)}')"
+  kubectl -n "$NS" exec kubehero-clickhouse-0 -- sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" -d "$CLICKHOUSE_DB" -q "
+    SELECT direction, src_kind, src_namespace, src_workload, dst_kind, dst_namespace,
+           dst_workload, dst_service, port, sum(bytes) AS b, count() AS n
+    FROM net_flows WHERE ts > now() - INTERVAL 30 MINUTE
+    GROUP BY ALL ORDER BY b DESC LIMIT 25 FORMAT PrettyCompactMonoBlock"' || true
+  for p in $(kubectl -n "$NS" get pods -l app.kubernetes.io/component=collector -o name); do
+    note "${p#pod/}: $(kubectl get --raw "/api/v1/namespaces/$NS/pods/${p#pod/}:8081/proxy/metrics" 2>&1 \
+      | grep -E '^kubehero_collector_ebpf|flows' | tr '\n' ' ' | head -c 900)"
+  done
+}
 if kubectl -n "$NS" logs ds/kubehero-collector | grep -q '"ebpf'; then
   # Soft check: some kind hosts lack cgroup_skb support. fail() exits,
   # so run it in a subshell to keep going either way.
   ( eventually "eBPF service map has shop edges"          300 has_flows ) \
-    || note "no eBPF flows yet (kernel without cgroup_skb?); continuing"
+    || { note "no eBPF flows yet (kernel without cgroup_skb?); continuing"; ebpf_diag; }
 fi
 
 ok "end-to-end checks passed"
