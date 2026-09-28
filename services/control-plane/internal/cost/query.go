@@ -516,6 +516,11 @@ func (e *Engine) fineRows(ctx context.Context, p *plan, seg segment, bk bucketin
 		"\n\t\tWHERE " + w.SQL() +
 		"\n\t\tGROUP BY " + strings.Join(group, ", ") +
 		"\n\t\tLIMIT ?"
+	if join != "" {
+		// Unmatched workloads must read an empty label map, never NULL
+		// (Map can't be Nullable), whatever the server default is.
+		query += " SETTINGS join_use_nulls = 0"
+	}
 	args := append(append(append(selArgs, joinArgs...), w.Args()...), e.maxRows()+1)
 
 	qctx, cancel := context.WithTimeout(ctx, e.timeout())

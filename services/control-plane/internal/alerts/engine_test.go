@@ -294,3 +294,50 @@ func TestDefaultRulesAreValid(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineRetriesWhenEveryDeliveryFailed(t *testing.T) {
+	e, st, src, rec, c, r := setup(t, 0, "slack://hooks.slack.com/x")
+	rec.fail = map[string]bool{"slack://hooks.slack.com/x": true}
+	src.set(50)
+	e.EvaluateOnce(context.Background(), r)
+	rec.take()
+	alerts, _ := st.RuleAlerts(context.Background(), r.ID)
+	if !alerts[0].LastNotifiedAt.IsZero() {
+		t.Fatal("a firing nobody received must not count as notified")
+	}
+	rec.fail = nil
+	c.t = t0.Add(time.Minute)
+	e.EvaluateOnce(context.Background(), r)
+	if got := rec.take(); len(got) != 1 || got[0].msg.Status != alerter.StatusFiring {
+		t.Fatalf("next evaluation must retry the firing: %v", channelsOf(got))
+	}
+}
+
+func TestEngineResolveReachesReceiversUnderLaterSilence(t *testing.T) {
+	e, st, src, rec, c, r := setup(t, 0, "pagerduty://routing-key")
+	ctx := context.Background()
+	src.set(50)
+	e.EvaluateOnce(ctx, r) // fires and pages
+	if len(rec.take()) != 1 {
+		t.Fatal("firing page")
+	}
+	_, _ = st.CreateSilence(ctx, &Silence{Matchers: map[string]string{"alertname": "High spend"}, StartsAt: c.t, EndsAt: c.t.Add(time.Hour)})
+	c.t = t0.Add(5 * time.Minute)
+	src.set(1)
+	e.EvaluateOnce(ctx, r)
+	got := rec.take()
+	if len(got) != 1 || got[0].msg.Status != alerter.StatusResolved {
+		t.Fatalf("the open incident must be resolved even under a silence: %v", channelsOf(got))
+	}
+}
+
+func TestEngineLogsRepeatedErrorsOnce(t *testing.T) {
+	e := &Engine{}
+	if !e.shouldLogError("r", "boom") || e.shouldLogError("r", "boom") || !e.shouldLogError("r", "other") {
+		t.Fatal("same error must log once, a new one again")
+	}
+	e.shouldLogError("r", "")
+	if !e.shouldLogError("r", "other") {
+		t.Fatal("a success clears the de-duplication")
+	}
+}

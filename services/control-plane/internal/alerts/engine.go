@@ -48,6 +48,7 @@ type Engine struct {
 	reload   chan struct{}
 	leader   bool
 	leaderAt time.Time
+	lastErr  map[string]loggedErr
 }
 
 func (e *Engine) now() time.Time {
@@ -249,9 +250,12 @@ func (e *Engine) evaluate(ctx context.Context, r *Rule) {
 	if err != nil {
 		// Keep state untouched: a transient store error must not
 		// resolve (and page "resolved" for) every firing alert.
-		e.log().Warn("alerts: rule evaluation failed", "rule", r.Name, "kind", r.Kind, "err", err)
+		if e.shouldLogError(r.ID, err.Error()) {
+			e.log().Warn("alerts: rule evaluation failed", "rule", r.Name, "kind", r.Kind, "err", err)
+		}
 		return
 	}
+	e.shouldLogError(r.ID, "")
 	prev, err := e.Store.RuleAlerts(ctx, r.ID)
 	if err != nil {
 		e.log().Warn("alerts: loading alert state failed", "rule", r.Name, "err", err)
@@ -271,6 +275,32 @@ func (e *Engine) evaluate(ctx context.Context, r *Rule) {
 			e.log().Warn("alerts: recording notifications failed", "err", err)
 		}
 	}
+}
+
+// shouldLogError de-duplicates evaluation errors per rule: a rule that
+// can't run (e.g. no ClickHouse in demo mode) logs once, then again
+// only when the error changes or every 30 minutes. msg "" clears.
+func (e *Engine) shouldLogError(ruleID, msg string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lastErr == nil {
+		e.lastErr = map[string]loggedErr{}
+	}
+	if msg == "" {
+		delete(e.lastErr, ruleID)
+		return false
+	}
+	prev, ok := e.lastErr[ruleID]
+	if ok && prev.msg == msg && time.Since(prev.at) < 30*time.Minute {
+		return false
+	}
+	e.lastErr[ruleID] = loggedErr{msg: msg, at: time.Now()}
+	return true
+}
+
+type loggedErr struct {
+	msg string
+	at  time.Time
 }
 
 func silenced(a *Alert, silences []*Silence, now time.Time) bool {
@@ -302,35 +332,53 @@ func (e *Engine) notify(ctx context.Context, r *Rule, res StepResult, silences [
 	var log []Notification
 	for _, a := range res.Alerts {
 		a.Silenced = silenced(a, silences, now)
-		if e.Notifier == nil || len(r.Channels) == 0 || a.Silenced {
+		if e.Notifier == nil || len(r.Channels) == 0 {
 			continue
 		}
+		if resolvedNow[a.ID] {
+			// Resolve exactly what was announced — even under a silence
+			// that started later, so paging incidents get closed — and
+			// nothing that never reached anyone.
+			if !a.LastNotifiedAt.IsZero() {
+				log = append(log, e.send(ctx, r, a, r.Channels, "resolved", now)...)
+			}
+			continue
+		}
+		if a.State != StateFiring || a.Silenced {
+			continue
+		}
+		event := ""
 		switch {
-		case a.State == StateFiring:
-			event := ""
-			switch {
-			case a.LastNotifiedAt.IsZero():
-				event = "firing"
-			case now.Sub(a.LastNotifiedAt) >= RenotifyInterval:
-				event = "renotify"
+		case a.LastNotifiedAt.IsZero():
+			event = "firing"
+		case now.Sub(a.LastNotifiedAt) >= RenotifyInterval:
+			event = "renotify"
+		}
+		delivered := false
+		if event != "" && len(chat) > 0 {
+			sent := e.send(ctx, r, a, chat, event, now)
+			for _, n := range sent {
+				delivered = delivered || n.OK
 			}
-			if event != "" && len(chat) > 0 {
-				log = append(log, e.send(ctx, r, a, chat, event, now)...)
+			log = append(log, sent...)
+		}
+		if len(beat) > 0 {
+			ev := event
+			if ev == "" {
+				ev = "heartbeat"
 			}
-			if len(beat) > 0 {
-				ev := event
-				if ev == "" {
-					ev = "heartbeat"
+			sent := e.send(ctx, r, a, beat, ev, now)
+			if len(chat) == 0 {
+				for _, n := range sent {
+					delivered = delivered || n.OK
 				}
-				log = append(log, e.send(ctx, r, a, beat, ev, now)...)
 			}
-			if event != "" {
-				a.LastNotifiedAt = now
-			}
-		case resolvedNow[a.ID] && !a.LastNotifiedAt.IsZero():
-			// Resolve only what was announced: a silenced firing never
-			// reached anyone, so its resolve shouldn't either.
-			log = append(log, e.send(ctx, r, a, r.Channels, "resolved", now)...)
+			log = append(log, sent...)
+		}
+		// If every delivery failed, leave LastNotifiedAt alone so the
+		// next evaluation retries instead of waiting out the 4h cadence.
+		if event != "" && delivered {
+			a.LastNotifiedAt = now
 		}
 	}
 	return log

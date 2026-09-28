@@ -87,7 +87,8 @@ func (e *Engine) CapacityDemands(ctx context.Context, clusterID string, now time
 		rw.In("cluster_id", aliases)
 	}
 	// A pod that shows up in pod_cost_1s after its last unschedulable
-	// event got placed; only the rest are still pending.
+	// event got placed; only the rest are still pending. join_use_nulls
+	// is pinned: an unmatched pod must read seen_ms = 0, not NULL.
 	query := `
 		SELECT e.cluster_id, e.namespace, e.workload, e.pod, e.attrs, e.msg, e.last_ms
 		FROM (
@@ -103,7 +104,8 @@ func (e *Engine) CapacityDemands(ctx context.Context, clusterID string, now time
 			GROUP BY cluster_id, namespace, pod
 		) AS r ON r.cluster_id = e.cluster_id AND r.namespace = e.namespace AND r.pod = e.pod
 		WHERE r.seen_ms < e.last_ms
-		LIMIT 20000`
+		LIMIT 20000
+		SETTINGS join_use_nulls = 0`
 	qctx, cancel := context.WithTimeout(ctx, e.timeout())
 	defer cancel()
 	rows, err := e.CH.QueryContext(qctx, query, append(ew.Args(), rw.Args()...)...)
