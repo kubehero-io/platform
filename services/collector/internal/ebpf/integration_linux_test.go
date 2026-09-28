@@ -721,3 +721,44 @@ func TestStartReportsNothingEnabled(t *testing.T) {
 		t.Fatalf("non-cgroup2 root: err = %v, want ErrUnsupported", err)
 	}
 }
+
+// TestStartDegradesUnprivileged checks Start in a container without
+// privileges (set KH_EBPF_EXPECT=unsupported):
+//
+//	docker run --rm -e KH_EBPF_EXPECT=unsupported ... go test -tags ebpfintegration -run Degrades ./internal/ebpf/
+func TestStartDegradesUnprivileged(t *testing.T) {
+	if os.Getenv("KH_EBPF_EXPECT") != "unsupported" {
+		t.Skip("run in an unprivileged container with KH_EBPF_EXPECT=unsupported")
+	}
+	s := &sink{}
+	err := Start(context.Background(), Config{
+		Netflow: true, Profiler: true, Resolver: newFakeResolver(),
+		EmitFlows: s.emitFlows, EmitProfiles: s.emitProfiles, Logger: testLogger(t),
+	})
+	if !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("Start = %v, want an error wrapping ErrUnsupported", err)
+	}
+	if st := Stats(); st.NetflowAttached || st.ProfilerAttached {
+		t.Fatalf("nothing may stay attached: %+v", st)
+	}
+	t.Logf("Start: %v", err)
+}
+
+// TestStartDegradesWithoutHostPID checks subsystem independence in a
+// privileged container without --pid=host (KH_EBPF_EXPECT=no-hostpid):
+// the profiler must fail alone, netflow must run, Start must succeed.
+func TestStartDegradesWithoutHostPID(t *testing.T) {
+	if os.Getenv("KH_EBPF_EXPECT") != "no-hostpid" {
+		t.Skip("run in a privileged container without --pid=host, KH_EBPF_EXPECT=no-hostpid")
+	}
+	s := &sink{}
+	stop := startTelemetry(t, Config{
+		Netflow: true, Profiler: true, FlushInterval: time.Second, Resolver: newFakeResolver(),
+		EmitFlows: s.emitFlows, EmitProfiles: s.emitProfiles,
+	})
+	st := Stats()
+	if !st.NetflowAttached || st.ProfilerAttached {
+		t.Fatalf("want netflow attached and the profiler not: %+v", st)
+	}
+	stop()
+}

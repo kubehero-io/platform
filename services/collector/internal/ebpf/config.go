@@ -26,7 +26,7 @@ const (
 	maxProfileHz = 1000
 
 	// defaultFlowMapEntries sizes the kernel flow table (kh_flows). Each
-	// entry costs ~100 bytes of kernel memory (preallocated).
+	// entry costs ~120 bytes of kernel memory (preallocated).
 	defaultFlowMapEntries = 131072
 	minFlowMapEntries     = 1024
 	maxFlowMapEntries     = 1 << 20

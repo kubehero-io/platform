@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	cebpf "github.com/cilium/ebpf"
@@ -40,11 +39,7 @@ type netflow struct {
 	rtReadErrs                   deltaCounter
 }
 
-func startNetflow(ctx context.Context, cfg Config, log *slog.Logger) (err error) {
-	entries, err := flowMapEntries(os.Getenv)
-	if err != nil {
-		return err
-	}
+func startNetflow(ctx context.Context, cfg Config, entries uint32, log *slog.Logger) (err error) {
 	spec, err := loadNetflow()
 	if err != nil {
 		return err

@@ -43,6 +43,10 @@ func start(ctx context.Context, cfg Config) error {
 		log.Info("ebpf: no kernel programs enabled")
 		return nil
 	}
+	flowEntries, err := flowMapEntries(os.Getenv)
+	if err != nil {
+		return err
+	}
 	if err := requireCgroup2(cfg.CgroupRoot); err != nil {
 		return unsupported(err)
 	}
@@ -56,7 +60,7 @@ func start(ctx context.Context, cfg Config) error {
 	var errs []error
 	started := 0
 	if cfg.Netflow {
-		if err := startNetflow(ctx, cfg, log); err != nil {
+		if err := startNetflow(ctx, cfg, flowEntries, log); err != nil {
 			errs = append(errs, fmt.Errorf("netflow: %w", err))
 			log.Warn("ebpf netflow unavailable", "err", err)
 		} else {
