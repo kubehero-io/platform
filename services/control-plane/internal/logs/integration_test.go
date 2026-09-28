@@ -224,6 +224,9 @@ func TestEngineAgainstClickHouse(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s (%s): %v", q, run.name, err)
 				}
+				if got.Stats.RowsScanned < int64(len(got.Lines)) {
+					t.Fatalf("%s (%s): %d rows scanned for %d lines", q, run.name, got.Stats.RowsScanned, len(got.Lines))
+				}
 				want, err := f.mem.Query(ctx, p)
 				if err != nil {
 					t.Fatalf("%s (reference): %v", q, err)

@@ -136,18 +136,29 @@ func (s *CHStore) Scan(ctx context.Context, req ScanRequest, fn func(Row) bool) 
 		dest = append(dest, &cols[i])
 	}
 	dest = append(dest, &trace, &extra, &body)
+	// Progress packets can trail the data: a scan the engine stops early
+	// is cancelled before ClickHouse reports what it read. The rows and
+	// body bytes handed over are a floor.
+	var got, gotBytes int64
+	stats := func() ScanStats {
+		st := pr.stats()
+		st.Rows, st.Bytes = max(st.Rows, got), max(st.Bytes, gotBytes)
+		return st
+	}
 	for rows.Next() {
 		if err := rows.Scan(dest...); err != nil {
-			return pr.stats(), fmt.Errorf("clickhouse scan: %w", err)
+			return stats(), fmt.Errorf("clickhouse scan: %w", err)
 		}
+		got++
+		gotBytes += int64(len(body))
 		if !fn(Row{TS: ts, Labels: streamLabels(cols, extra), TraceID: trace, Body: body}) {
-			return pr.stats(), nil
+			return stats(), nil
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return pr.stats(), fmt.Errorf("clickhouse: %w", err)
+		return stats(), fmt.Errorf("clickhouse: %w", err)
 	}
-	return pr.stats(), nil
+	return stats(), nil
 }
 
 // Count implements Store (the plan's SQL part only).
