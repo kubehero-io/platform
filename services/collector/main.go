@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -139,5 +140,17 @@ func serveCmd() *cobra.Command {
 	f.StringSliceVar(&cfg.Logs.PodLabels, "logs-pod-labels", []string{"app", "app.kubernetes.io/name", "version", "app.kubernetes.io/version"},
 		"pod labels copied onto every log entry (keys sanitised to LogQL names, e.g. app_kubernetes_io_name)")
 	f.IntVar(&cfg.Logs.MaxBufferBytes, "logs-max-buffer-bytes", 64<<20, "max log bytes queued in memory while the control plane is slow or down (oldest dropped beyond)")
+
+	f.BoolVar(&cfg.Profiles.Enabled, "profiles", true,
+		"scrape pprof endpoints of pods annotated profiles.grafana.com/<type>.scrape=true or kubehero.io/profile=true (needs CONTROL_PLANE_URL)")
+	f.DurationVar(&cfg.Profiles.Interval, "profile-interval", 60*time.Second, "pprof scrape interval")
+	f.IntVar(&cfg.Profiles.CPUSeconds, "profile-cpu-seconds", 15, "CPU profile duration per scrape (/debug/pprof/profile?seconds=N)")
+
+	f.BoolVar(&cfg.EBPF.Enabled, "ebpf", runtime.GOOS == "linux", "load eBPF programs (Linux, cgroup v2, CAP_BPF/CAP_PERFMON or privileged); degrades to off when unsupported")
+	f.BoolVar(&cfg.EBPF.Netflow, "ebpf-netflow", true, "eBPF L3/L4 flow accounting + TCP retransmits, attributed to pods/services/nodes")
+	f.BoolVar(&cfg.EBPF.Profiler, "ebpf-profiler", true, "eBPF whole-node CPU profiler (perf_event sampling)")
+	f.IntVar(&cfg.EBPF.ProfileHz, "ebpf-profile-hz", 49, "eBPF CPU sampling frequency per CPU")
+	f.StringVar(&cfg.EBPF.CgroupRoot, "cgroup-root", "/sys/fs/cgroup", "cgroup v2 mount the flow programs attach to")
+	f.DurationVar(&cfg.EBPF.FlushInterval, "ebpf-flush-interval", 15*time.Second, "how often eBPF maps are drained and shipped")
 	return c
 }

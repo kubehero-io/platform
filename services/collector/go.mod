@@ -12,7 +12,10 @@ require (
 	k8s.io/client-go v0.35.0
 )
 
-require github.com/fsnotify/fsnotify v1.9.0
+require (
+	github.com/fsnotify/fsnotify v1.9.0
+	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6
+)
 
 require (
 	connectrpc.com/connect v1.20.0

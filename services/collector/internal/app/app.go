@@ -24,6 +24,7 @@ import (
 
 	kuberov1 "github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1"
 	"github.com/kubehero-io/platform/packages/proto/gen/go/kubehero/v1/kuberov1connect"
+	"github.com/kubehero-io/platform/services/collector/internal/ebpf"
 	"github.com/kubehero-io/platform/services/collector/internal/events"
 	"github.com/kubehero-io/platform/services/collector/internal/ingest"
 	"github.com/kubehero-io/platform/services/collector/internal/kube"
@@ -31,6 +32,7 @@ import (
 	"github.com/kubehero-io/platform/services/collector/internal/leader"
 	"github.com/kubehero-io/platform/services/collector/internal/logs"
 	"github.com/kubehero-io/platform/services/collector/internal/metrics"
+	"github.com/kubehero-io/platform/services/collector/internal/profiles"
 	"github.com/kubehero-io/platform/services/collector/internal/ship"
 	"github.com/kubehero-io/platform/services/collector/internal/usage"
 )
@@ -68,7 +70,9 @@ type Config struct {
 	LeaderElect bool
 	LeaseName   string
 
-	Logs LogsConfig
+	Logs     LogsConfig
+	Profiles ProfilesConfig
+	EBPF     EBPFConfig
 
 	// ShutdownTimeout bounds the final queue flush.
 	ShutdownTimeout time.Duration
@@ -88,6 +92,23 @@ type LogsConfig struct {
 	ExcludeNamespaces []string
 	PodLabels         []string
 	MaxBufferBytes    int
+}
+
+// ProfilesConfig configures pprof scraping.
+type ProfilesConfig struct {
+	Enabled    bool
+	Interval   time.Duration
+	CPUSeconds int
+}
+
+// EBPFConfig configures the kernel telemetry (internal/ebpf).
+type EBPFConfig struct {
+	Enabled       bool
+	Netflow       bool
+	Profiler      bool
+	ProfileHz     int
+	CgroupRoot    string
+	FlushInterval time.Duration
 }
 
 // App is a running collector.
@@ -218,6 +239,17 @@ func (a *App) run(ctx context.Context) error {
 		if a.cfg.Logs.Enabled {
 			a.startLogs(ctx, &wg, owners)
 		}
+		var profileQ *ship.Queue[*kuberov1.IngestProfilesRequest]
+		if a.cfg.Profiles.Enabled || (a.cfg.EBPF.Enabled && a.cfg.EBPF.Profiler) {
+			profileQ = ship.NewQueue(ship.QueueConfig{Signal: "profiles", MaxItems: 20_000, MaxBytes: 32 << 20, Timeout: 30 * time.Second}, a.ship.SendProfiles, a.log)
+			a.startQueue(ctx, &wg, profileQ.Run, profileQ.Flush)
+		}
+		if a.cfg.Profiles.Enabled {
+			a.startProfiles(ctx, &wg, owners, profileQ)
+		}
+		if a.cfg.EBPF.Enabled {
+			a.startEBPF(ctx, &wg, owners, profileQ)
+		}
 	}
 
 	select {
@@ -336,6 +368,104 @@ func (a *App) startLogs(ctx context.Context, wg *sync.WaitGroup, owners *kube.Ow
 	})
 	a.goLoop(ctx, wg, tailer.Run)
 	a.afterFlush = append(a.afterFlush, tailer.Checkpoint)
+}
+
+func (a *App) startProfiles(ctx context.Context, wg *sync.WaitGroup, owners *kube.OwnerResolver, q *ship.Queue[*kuberov1.IngestProfilesRequest]) {
+	sc := profiles.New(profiles.Config{
+		ClusterID: a.cfg.ClusterID, NodeName: a.cfg.NodeName,
+		Interval: a.cfg.Profiles.Interval, CPUSeconds: a.cfg.Profiles.CPUSeconds, Logger: a.log,
+	}, a.local, owners, func(r *kuberov1.IngestProfilesRequest) { enqueueProfiles(q, r) })
+	a.goLoop(ctx, wg, sc.Run)
+}
+
+func enqueueProfiles(q *ship.Queue[*kuberov1.IngestProfilesRequest], r *kuberov1.IngestProfilesRequest) {
+	q.Enqueue(ship.Batch[*kuberov1.IngestProfilesRequest]{Req: r, Items: len(r.Profiles), Bytes: proto.Size(r)})
+}
+
+// maxFlowsPerRequest matches the control plane's per-request limit.
+const maxFlowsPerRequest = 5000
+
+// startEBPF attaches the kernel programs. Netflow needs the cluster-wide
+// IP index (pod / service / node informers on every node); those
+// informers are only kept running if the programs actually attached, so
+// a host without eBPF support doesn't pay their memory.
+func (a *App) startEBPF(ctx context.Context, wg *sync.WaitGroup, owners *kube.OwnerResolver, profileQ *ship.Queue[*kuberov1.IngestProfilesRequest]) {
+	ec := a.cfg.EBPF
+	ectx, ecancel := context.WithCancel(ctx)
+	var client kubernetes.Interface
+	if ec.Netflow {
+		client = a.kube
+	}
+	res, err := kube.NewResolver(client, a.local, owners)
+	if err != nil {
+		ecancel()
+		a.log.Warn("eBPF resolver setup failed — kernel telemetry disabled", "err", err)
+		return
+	}
+	if ec.Netflow {
+		sctx, scancel := context.WithTimeout(ectx, 2*time.Minute)
+		err := res.Start(sctx)
+		scancel()
+		if err != nil {
+			ecancel()
+			a.log.Warn("cluster-wide pod/service/node cache did not sync — eBPF disabled", "err", err)
+			return
+		}
+	}
+	flowQ := ship.NewQueue(ship.QueueConfig{Signal: "flows", MaxItems: 200_000, MaxBytes: 32 << 20, Timeout: 20 * time.Second}, a.ship.SendFlows, a.log)
+	a.startQueue(ctx, wg, flowQ.Run, flowQ.Flush)
+
+	err = ebpf.Start(ectx, ebpf.Config{
+		Netflow:       ec.Netflow,
+		Profiler:      ec.Profiler,
+		CgroupRoot:    ec.CgroupRoot,
+		FlushInterval: ec.FlushInterval,
+		ProfileHz:     ec.ProfileHz,
+		Resolver:      res,
+		Logger:        a.log.With("component", "ebpf"),
+		EmitFlows: func(_ context.Context, flows []*kuberov1.Flow) error {
+			for len(flows) > 0 {
+				n := min(len(flows), maxFlowsPerRequest)
+				r := &kuberov1.IngestFlowsRequest{ClusterId: a.cfg.ClusterID, Flows: flows[:n]}
+				flowQ.Enqueue(ship.Batch[*kuberov1.IngestFlowsRequest]{Req: r, Items: n, Bytes: proto.Size(r)})
+				flows = flows[n:]
+			}
+			return nil
+		},
+		EmitProfiles: func(_ context.Context, ps []*kuberov1.Profile) error {
+			if profileQ == nil {
+				return nil
+			}
+			for _, r := range profiles.Split(a.cfg.ClusterID, ps) {
+				enqueueProfiles(profileQ, r)
+			}
+			return nil
+		},
+	})
+	switch {
+	case errors.Is(err, ebpf.ErrUnsupported):
+		ecancel()
+		a.log.Info("eBPF kernel telemetry unavailable on this host — continuing without network flows and CPU sampling", "reason", err.Error())
+		return
+	case err != nil:
+		ecancel()
+		a.log.Warn("eBPF programs failed to start — continuing without kernel telemetry", "err", err)
+		return
+	}
+	if ec.Netflow {
+		metrics.EBPFStatus.With("netflow").Set(1)
+	}
+	if ec.Profiler {
+		metrics.EBPFStatus.With("profiler").Set(1)
+	}
+	// TODO(integration): publish ebpf.Stats() (flows/profiles emitted,
+	// drain errors, map-full events) as kubehero_collector_ebpf_* once
+	// the kernel side (feat/ebpf) lands; the stub on this branch has no
+	// Stats().
+	a.goLoop(ctx, wg, func(ctx context.Context) {
+		<-ctx.Done()
+		ecancel()
+	})
 }
 
 // tickLoop calls fn every interval until ctx ends.
