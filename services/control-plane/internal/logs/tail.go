@@ -78,8 +78,17 @@ func (e *Engine) Tail(ctx context.Context, p TailParams, send func(TailBatch) er
 	defer ticker.Stop()
 
 	cur := cursor.UnixNano()
+	full := false
 	for {
-		batch, next, err := e.tailPoll(ctx, sel, plan, pipe, cur, overlap, sent)
+		// After a full poll the tail is catching up on a burst: resume at
+		// the cursor itself, since re-reading the overlap (all already
+		// sent) would eat the whole per-poll budget.
+		back := overlap
+		if full {
+			back = 0
+		}
+		batch, next, scanned, err := e.tailPoll(ctx, sel, plan, pipe, cur, back, sent)
+		full = scanned >= e.opts.TailMaxPerPoll
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -108,23 +117,28 @@ func (e *Engine) Tail(ctx context.Context, p TailParams, send func(TailBatch) er
 	}
 }
 
-// tailPoll reads (cursor - overlap, now + skew] once and returns the new
-// lines and the next cursor.
+// tailPoll reads [cursor - back, now + skew) once and returns the new
+// lines, the next cursor and how many rows it read.
 func (e *Engine) tailPoll(ctx context.Context, sel *logql.LogSelectorExpr, plan *logql.Plan, pipe *logql.Pipeline,
-	cursor, overlap int64, sent map[tailKey]struct{}) (TailBatch, int64, error) {
+	cursor, back int64, sent map[tailKey]struct{}) (TailBatch, int64, int, error) {
 	var batch TailBatch
+	overlap := int64(e.opts.TailOverlap)
 	now := e.now().UnixNano()
 	if lag := now - cursor; lag > int64(maxTailLag) {
 		// Fell behind: count what is skipped and jump ahead.
 		skipTo := now - int64(e.opts.TailOverlap)
 		n, err := e.store.Count(ctx, plan, sel, cursor+1, skipTo)
 		if err != nil {
-			return batch, cursor, err
+			return batch, cursor, 0, err
 		}
 		batch.Dropped = n
 		cursor = skipTo
+		back = overlap
 	}
-	from := cursor - overlap + 1
+	from := cursor - back + 1
+	if back == 0 {
+		from = cursor // lines sharing the cursor's timestamp; sent ones are deduped
+	}
 	// Lines stamped slightly in the future (skewed node clocks, which
 	// ingest accepts) are shown when they arrive; they never move the
 	// cursor past now.
@@ -149,7 +163,7 @@ func (e *Engine) tailPoll(ctx context.Context, sel *logql.LogSelectorExpr, plan 
 		return true
 	})
 	if err != nil {
-		return batch, cursor, err
+		return batch, cursor, scanned, err
 	}
 	if scanned < max && next < now-overlap {
 		// Nothing newer than the cursor arrived: advance to "now minus
@@ -167,7 +181,7 @@ func (e *Engine) tailPoll(ctx context.Context, sel *logql.LogSelectorExpr, plan 
 	if len(sent) > 200_000 { // pathological burst on one timestamp window
 		clear(sent)
 	}
-	return batch, next, nil
+	return batch, next, scanned, nil
 }
 
 func hashString(s string) uint64 {

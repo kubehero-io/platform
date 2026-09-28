@@ -485,3 +485,55 @@ func TestTailDedupeLateLinesAndSkip(t *testing.T) {
 		t.Fatalf("dropped = %d, want the 5 lines skipped while lagging", dropped)
 	}
 }
+
+// A burst larger than the per-poll budget inside the overlap window is
+// delivered completely (no stall re-reading already-sent lines, no
+// skip-ahead).
+func TestTailBurstCatchUp(t *testing.T) {
+	store := newTailStore()
+	e := New(Options{Store: store, Now: func() time.Time { return t0 }, TailPoll: 5 * time.Millisecond,
+		TailOverlap: 5 * time.Second, TailMaxPerPoll: 3})
+	for i := 0; i < 10; i++ {
+		store.add(t0.Add(-4*time.Second+time.Duration(i)*time.Millisecond), fmt.Sprintf("burst %d", i))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var mu sync.Mutex
+	var got []string
+	var dropped int64
+	done := make(chan error, 1)
+	go func() {
+		done <- e.Tail(ctx, TailParams{Query: `{app="a"}`}, func(b TailBatch) error {
+			mu.Lock()
+			defer mu.Unlock()
+			for _, l := range b.Lines {
+				got = append(got, l.Body)
+			}
+			dropped += b.Dropped
+			return nil
+		})
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(got)
+		mu.Unlock()
+		if n >= 10 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 10 || dropped != 0 {
+		t.Fatalf("burst delivered %d lines (%v), dropped %d; want all 10, none dropped", len(got), got, dropped)
+	}
+	for i, b := range got {
+		if b != fmt.Sprintf("burst %d", i) {
+			t.Fatalf("out of order or duplicated: %v", got)
+		}
+	}
+}
