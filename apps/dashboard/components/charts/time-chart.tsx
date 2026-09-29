@@ -357,32 +357,37 @@ export function TimeChart({
         />
       )}
 
-      <table className="sr-only">
-        <caption>{ariaLabel}</caption>
-        <thead>
-          <tr>
-            <th scope="col">time</th>
-            {series.map((s) => (
-              <th key={s.key} scope="col">
-                {s.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {times.slice(-60).map((t, k) => {
-            const i = times.length > 60 ? times.length - 60 + k : k;
-            return (
-              <tr key={t}>
-                <th scope="row">{formatTimeFull(t)}</th>
-                {series.map((s) => (
-                  <td key={s.key}>{s.values[i] === null || s.values[i] === undefined ? "—" : fmtV(s.values[i] as number)}</td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      {/* sr-only on the table itself does not hide it: a table grows to its
+          content whatever its width, and the invisible box then widens the
+          page (horizontal scroll on phones). The wrapper clips it. */}
+      <div className="sr-only">
+        <table>
+          <caption>{ariaLabel}</caption>
+          <thead>
+            <tr>
+              <th scope="col">time</th>
+              {series.map((s) => (
+                <th key={s.key} scope="col">
+                  {s.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {times.slice(-60).map((t, k) => {
+              const i = times.length > 60 ? times.length - 60 + k : k;
+              return (
+                <tr key={t}>
+                  <th scope="row">{formatTimeFull(t)}</th>
+                  {series.map((s) => (
+                    <td key={s.key}>{s.values[i] === null || s.values[i] === undefined ? "—" : fmtV(s.values[i] as number)}</td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

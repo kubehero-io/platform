@@ -32,14 +32,15 @@ export function UserMenu({ label, org, role, mode }: UserMenuProps) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`Account: ${label}${role ? ` (${role})` : ""}`}
         className="flex items-center gap-2 rounded-[2px] px-1 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)] hover:text-[var(--color-fg)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-cool)]"
       >
         {role && (
-          <span style={{ color: roleTone(role) }} title={`role · ${role}`}>
+          <span className="hidden sm:inline" style={{ color: roleTone(role) }} title={`role · ${role}`}>
             {role}
           </span>
         )}
-        <span className="text-[var(--color-line-bright)]">·</span>
+        <span className="hidden text-[var(--color-line-bright)] sm:inline">·</span>
         <span className="hidden max-w-[180px] truncate normal-case tracking-normal text-[var(--color-fg-dim)] lg:inline">
           {label}
         </span>

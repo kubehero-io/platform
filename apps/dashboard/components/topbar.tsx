@@ -23,7 +23,7 @@ export async function Topbar({
   const mode = authMode();
   const label = s?.email || (s?.subject ? s.subject : mode === "demo" ? "demo@kubehero.io" : "signed in");
   return (
-    <header className="sticky top-0 z-20 flex h-12 items-center gap-3 border-b border-[var(--color-line)] bg-[var(--color-bg)]/90 px-5 backdrop-blur-md">
+    <header className="sticky top-0 z-20 flex h-12 items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-bg)]/90 px-3 backdrop-blur-md sm:gap-3 sm:px-5">
       <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 font-mono text-[12px] text-[var(--color-fg-dim)]">
         {crumbs.map((c, i) => (
           <span key={i} className="flex min-w-0 items-center gap-2">

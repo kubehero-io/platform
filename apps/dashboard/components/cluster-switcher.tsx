@@ -123,11 +123,13 @@ export function ClusterSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 border border-[var(--color-line-bright)] bg-[var(--color-bg-sunken)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-fg-dim)] hover:text-[var(--color-fg)]"
+        className="flex shrink-0 items-center gap-2 border border-[var(--color-line-bright)] bg-[var(--color-bg-sunken)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-fg-dim)] hover:text-[var(--color-fg)]"
         title="Switch cluster — press g then c"
+        aria-label={`Switch cluster (${label})`}
       >
         <Layers className="h-3 w-3" />
-        <span className="max-w-[220px] truncate">{label}</span>
+        {/* Icon-only on phones: the label would push the header past the viewport. */}
+        <span className="hidden max-w-[220px] truncate sm:inline">{label}</span>
         <ChevronDown className="h-3 w-3" />
       </button>
 
@@ -135,7 +137,7 @@ export function ClusterSwitcher() {
         <div className="fixed inset-0 z-20" aria-hidden onClick={close} />
       )}
       {open && (
-        <div className="absolute left-0 top-8 z-30 w-[400px] border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] shadow-xl">
+        <div className="fixed inset-x-3 top-14 z-30 border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] shadow-xl sm:absolute sm:inset-x-auto sm:left-0 sm:top-8 sm:w-[400px]">
           <div className="flex items-center justify-between border-b border-[var(--color-line)] px-3 py-2">
             <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-faint)]">
               /// federation · {CLUSTERS.length} clusters

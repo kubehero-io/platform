@@ -48,7 +48,9 @@ export function Segmented({
     <div
       role="radiogroup"
       aria-label={label}
-      className={`inline-flex items-center gap-0.5 rounded-[2px] border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] p-0.5 font-mono text-[10px] uppercase tracking-[0.12em] ${pending ? "opacity-70" : ""}`}
+      // max-w-full + overflow-x-auto: on a phone a long option list scrolls
+      // inside the control instead of widening the page.
+      className={`inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-[2px] border border-[var(--color-line-bright)] bg-[var(--color-bg-raised)] p-0.5 font-mono text-[10px] uppercase tracking-[0.12em] [scrollbar-width:none] ${pending ? "opacity-70" : ""}`}
     >
       {options.map((o) => {
         const on = o.value === value;
@@ -65,7 +67,7 @@ export function Segmented({
                 ...Object.fromEntries(clear.map((k) => [k, null])),
               })
             }
-            className="rounded-[1px] px-2 py-1 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-cool)]"
+            className="shrink-0 whitespace-nowrap rounded-[1px] px-2 py-1 transition-colors focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--color-cool)]"
             style={{
               background: on ? "var(--color-fg)" : "transparent",
               color: on ? "var(--color-bg)" : "var(--color-fg-dim)",
