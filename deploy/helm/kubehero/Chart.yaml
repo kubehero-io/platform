@@ -2,8 +2,8 @@ apiVersion: v2
 name: kubehero
 description: KubeHero — open-source Kubernetes observability + FinOps in one install. Cost allocation, logs, continuous profiling, eBPF network cost, alerting, guarded rightsizing and read-only AI agents for AKS, GKE and EKS.
 type: application
-version: 0.3.0
-appVersion: "0.3.0"
+version: 0.3.1
+appVersion: "0.3.1"
 kubeVersion: ">=1.28-0"
 maintainers:
   - name: KubeHero

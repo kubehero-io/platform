@@ -5,6 +5,31 @@ Every release, newest first. The same notes, with more context, are at
 to `ghcr.io/kubehero-io/<image>:<version>` and the chart to
 `oci://ghcr.io/kubehero-io/charts/kubehero`, all signed with cosign.
 
+## v0.3.1 — 2026-09-28
+
+A patch release: the dashboard fits a phone screen. No API, schema or
+chart-values changes.
+
+### Fixes
+
+- **Dashboard on phones.** Six pages (allocation, chargeback, ceiling log,
+  logs, profiles, network) were wider than a phone screen and scrolled
+  sideways. Time charts' screen-reader data tables no longer widen the
+  page, segmented pickers scroll within themselves, and on narrow screens
+  the top bar shows the cluster switcher and account menu as icons (both
+  keep their accessible names), with the cluster picker opening as a
+  full-width sheet. Desktop layouts are unchanged.
+
+### Project
+
+- GitHub Release notes are generated from this changelog and unwrapped, so
+  they render without hard line breaks.
+
+### Upgrade notes
+
+- Upgrade in place: `helm upgrade` to chart 0.3.1 with the values you
+  installed with.
+
 ## v0.3.0 — 2026-09-28
 
 **Every signal, every dollar, one agent.** v0.3 turns KubeHero from a cost
