@@ -9,6 +9,16 @@
  * Stacks are deduplicated by the kernel in a STACK_TRACE map; userspace
  * symbolizes them.
  *
+ * Nested PID namespaces (kind, k3d, Docker Desktop: every "node" is a
+ * container sharing one kernel): bpf_get_current_pid_tgid() returns PIDs
+ * of the kernel's top-level namespace, which the collector can't see in
+ * its /proc. With ns_mode set, userspace fills kh_pidns with the PID
+ * namespace of each container cgroup it can see, and samples record the
+ * process's tgid inside that namespace instead
+ * (bpf_get_ns_current_pid_tgid). Samples from cgroups without an entry
+ * - another node's containers, or one started since the last refresh -
+ * are dropped before any stack is taken.
+ *
  * Double buffering: every map exists twice and kh_active selects the set
  * samples go to. Userspace flips the selector, waits for in-flight samples
  * to finish, then reads and clears the idle set at its leisure. Without
@@ -73,7 +83,9 @@ struct {
 
 #define KH_PROF_ERR_COUNTS_FULL 0 /* sample lost: counts map full */
 #define KH_PROF_ERR_STACK_LOST 1  /* stack lost: bucket collision or map full */
-#define KH_PROF_ERR_MAX 2
+#define KH_PROF_ERR_NO_PIDNS 2    /* ns_mode: cgroup not in kh_pidns (not ours, or new) */
+#define KH_PROF_ERR_NS_PID 3      /* ns_mode: task not in its cgroup's namespace */
+#define KH_PROF_ERR_MAX 4
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -84,6 +96,23 @@ struct {
 
 /* The collector's own tgid (host PID namespace); never sampled. */
 volatile const __u32 self_tgid = 0;
+
+/* Set by the loader when the collector runs in a nested PID namespace. */
+volatile const __u8 ns_mode = 0;
+
+/* Key: cgroup id. Value: the PID namespace of that cgroup's processes,
+ * as stat(2) reports /proc/<pid>/ns/pid. Filled by userspace. */
+struct kh_pidns_id {
+	__u64 dev;
+	__u64 ino;
+};
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 8192);
+	__type(key, __u64);
+	__type(value, struct kh_pidns_id);
+} kh_pidns SEC(".maps");
 
 static __always_inline void kh_prof_error(__u32 idx)
 {
@@ -141,10 +170,25 @@ int kh_profile(void *ctx)
 	if (tgid == self_tgid)
 		return 0;
 
+	__u64 cgroup_id = bpf_get_current_cgroup_id();
+	if (ns_mode) {
+		struct kh_pidns_id *ns = bpf_map_lookup_elem(&kh_pidns, &cgroup_id);
+		if (!ns) {
+			kh_prof_error(KH_PROF_ERR_NO_PIDNS);
+			return 0;
+		}
+		struct bpf_pidns_info info = {};
+		if (bpf_get_ns_current_pid_tgid(ns->dev, ns->ino, &info, sizeof(info))) {
+			kh_prof_error(KH_PROF_ERR_NS_PID);
+			return 0;
+		}
+		tgid = info.tgid;
+	}
+
 	struct stack_key key;
 
 	__builtin_memset(&key, 0, sizeof(key));
-	key.cgroup_id = bpf_get_current_cgroup_id();
+	key.cgroup_id = cgroup_id;
 	key.tgid = tgid;
 
 	__u32 *active = bpf_map_lookup_elem(&kh_active, &zero);

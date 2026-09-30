@@ -840,21 +840,99 @@ func TestStartDegradesUnprivileged(t *testing.T) {
 	t.Logf("Start: %v", err)
 }
 
-// TestStartDegradesWithoutHostPID checks subsystem independence in a
-// privileged container without --pid=host (KH_EBPF_EXPECT=no-hostpid):
-// the profiler must fail alone, netflow must run, Start must succeed.
-func TestStartDegradesWithoutHostPID(t *testing.T) {
-	if os.Getenv("KH_EBPF_EXPECT") != "no-hostpid" {
-		t.Skip("run in a privileged container without --pid=host, KH_EBPF_EXPECT=no-hostpid")
+// TestProfilerNestedPIDNamespace runs the profiler the way it runs on a
+// kind / k3d / Docker Desktop node: in a privileged container without
+// --pid=host (KH_EBPF_EXPECT=nested, --cgroupns=host), so the collector's
+// PID namespace is not the kernel's top-level one, and the profiled
+// process sits in a PID namespace of its own, like a pod container. Its
+// samples must still be attributed and symbolized (the kernel records
+// the tgid inside its namespace; userspace maps it back), and the
+// collector's own cgroup must never be sampled.
+func TestProfilerNestedPIDNamespace(t *testing.T) {
+	if os.Getenv("KH_EBPF_EXPECT") != "nested" {
+		t.Skip("run in a privileged container without --pid=host, KH_EBPF_EXPECT=nested")
 	}
+	requireRoot(t)
+	if inHostPIDNamespace() {
+		t.Fatal("this test needs a nested PID namespace; drop --pid=host")
+	}
+	home := ownCgroup(t)
+	base := filepath.Join(defaultCgroupRoot, fmt.Sprintf("kh-ebpf-test-%d", os.Getpid()))
+	busyCg := fakeContainerCgroup(t, base, testUIDBusy, testCIDBusy)
+	selfCg := fakeContainerCgroup(t, base, testUIDSelf, testCIDSelf)
+	t.Cleanup(func() { removeCgroupTree(base) })
+
+	r := newFakeResolver()
+	r.pods[[2]string{testUIDBusy, testCIDBusy}] = &kuberov1.PodRef{
+		Namespace: "kh-test", Pod: "busy-7d9f", Container: "spin", Workload: "busy", WorkloadKind: "Deployment", PodUid: testUIDBusy,
+	}
+	r.pods[[2]string{testUIDSelf, testCIDSelf}] = &kuberov1.PodRef{Namespace: "kh-test", Pod: "collector", Container: "self", Workload: "collector"}
 	s := &sink{}
-	stop := startTelemetry(t, Config{
-		Netflow: true, Profiler: true, FlushInterval: time.Second, Resolver: newFakeResolver(),
-		EmitFlows: s.emitFlows, EmitProfiles: s.emitProfiles,
-	})
-	st := Stats()
-	if !st.NetflowAttached || st.ProfilerAttached {
-		t.Fatalf("want netflow attached and the profiler not: %+v", st)
+	const hz = 99
+	const flush = time.Second
+	stop := startTelemetry(t, Config{Netflow: true, Profiler: true, ProfileHz: hz, FlushInterval: flush, Resolver: r,
+		EmitProfiles: s.emitProfiles, EmitFlows: s.emitFlows})
+	if st := Stats(); !st.ProfilerAttached || !st.NetflowAttached {
+		t.Fatalf("both subsystems must attach in a nested PID namespace: %+v", st)
 	}
+
+	const busyFor = 3 * time.Second
+	child := exec.Command(os.Args[0], "-test.run=^TestHelperBusyProcess$")
+	child.Env = append(os.Environ(), busyEnv+"="+busyFor.String())
+	child.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWPID} // a pod's own PID namespace
+	stdin, err := child.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.Stdout, child.Stderr = os.Stderr, os.Stderr
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	moveToCgroup(t, busyCg, child.Process.Pid)
+	moveToCgroup(t, selfCg, os.Getpid())
+	t.Cleanup(func() { moveToCgroup(t, home, os.Getpid()) })
+	time.Sleep(2 * flush) // a refresh maps the new container before it spins
+
+	selfDone := make(chan struct{})
+	go func() { defer close(selfDone); khBusyLoop(time.Now().Add(busyFor)) }()
+	if _, err := stdin.Write([]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Wait(); err != nil {
+		t.Fatalf("busy child: %v", err)
+	}
+	<-selfDone
+	childCPU := child.ProcessState.UserTime() + child.ProcessState.SystemTime()
+	time.Sleep(1500 * time.Millisecond)
 	stop()
+
+	s.mu.Lock()
+	profiles := append([]*kuberov1.Profile(nil), s.profiles...)
+	s.mu.Unlock()
+	var total, busyVal int64
+	for _, p := range profiles {
+		switch p.Source.GetContainer() {
+		case "self":
+			t.Errorf("the collector's own samples were attributed: %d stacks", len(p.Samples))
+		case "spin":
+			for _, smp := range p.Samples {
+				total += smp.Value
+				if strings.Contains(strings.Join(smp.Frames, ";"), ".khBusyLoop") {
+					busyVal += smp.Value
+				}
+			}
+		}
+	}
+	st := Stats()
+	t.Logf("busy child: rusage CPU %s; profiled %s (khBusyLoop %s); foreign samples %d",
+		childCPU, time.Duration(total), time.Duration(busyVal), st.SamplesForeign)
+	if total == 0 {
+		t.Fatalf("no samples attributed to the busy container among %d profiles", len(profiles))
+	}
+	if lo, hi := childCPU*6/10, childCPU*14/10; time.Duration(total) < lo || time.Duration(total) > hi {
+		t.Errorf("profiled CPU %s, want within [%s, %s] of rusage %s", time.Duration(total), lo, hi, childCPU)
+	}
+	if busyVal < total/4 {
+		t.Errorf("user frames not symbolized through the translated PID: khBusyLoop %d of %d", busyVal, total)
+	}
 }

@@ -114,4 +114,13 @@ _Static_assert(__builtin_offsetof(struct __sk_buff, len) == 0, "__sk_buff.len");
 _Static_assert(__builtin_offsetof(struct __sk_buff, flow_keys) == 144, "__sk_buff.flow_keys");
 _Static_assert(__builtin_offsetof(struct __sk_buff, gso_segs) == 164, "__sk_buff.gso_segs");
 
+/*
+ * include/uapi/linux/bpf.h: struct bpf_pidns_info, filled by
+ * bpf_get_ns_current_pid_tgid() (Linux 5.7+).
+ */
+struct bpf_pidns_info {
+	__u32 pid;
+	__u32 tgid;
+};
+
 #endif /* KH_UAPI_H */

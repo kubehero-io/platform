@@ -155,8 +155,14 @@ type cgroupIndex struct {
 	now  func() time.Time
 
 	mu       sync.Mutex
-	ids      map[uint64]containerRef
+	ids      map[uint64]cgroupEntry
 	lastScan time.Time
+}
+
+// cgroupEntry is one indexed pod or container cgroup.
+type cgroupEntry struct {
+	ref containerRef
+	dir string
 }
 
 func newCgroupIndex(root string) *cgroupIndex {
@@ -172,15 +178,34 @@ func (ix *cgroupIndex) lookup(id uint64) (containerRef, bool) {
 	if ix.ids == nil || now.Sub(ix.lastScan) >= cgroupRescanMax {
 		ix.rescanLocked(now)
 	}
-	if ref, ok := ix.ids[id]; ok {
-		return ref, true
+	if e, ok := ix.ids[id]; ok {
+		return e.ref, true
 	}
 	if now.Sub(ix.lastScan) >= cgroupRescanMin {
 		ix.rescanLocked(now)
-		ref, ok := ix.ids[id]
-		return ref, ok
+		e, ok := ix.ids[id]
+		return e.ref, ok
 	}
 	return containerRef{}, false
+}
+
+// containerDirs returns the directory of every indexed container cgroup
+// (pod-level cgroups hold no processes), rescanning at most every
+// cgroupRescanMin so containers started since show up quickly.
+func (ix *cgroupIndex) containerDirs() map[uint64]string {
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	now := ix.now()
+	if ix.ids == nil || now.Sub(ix.lastScan) >= cgroupRescanMin {
+		ix.rescanLocked(now)
+	}
+	out := make(map[uint64]string, len(ix.ids))
+	for id, e := range ix.ids {
+		if e.ref.containerID != "" {
+			out[id] = e.dir
+		}
+	}
+	return out
 }
 
 func (ix *cgroupIndex) rescanLocked(now time.Time) {
@@ -191,8 +216,8 @@ func (ix *cgroupIndex) rescanLocked(now time.Time) {
 // scanCgroups finds kubepods trees near the root and indexes every pod /
 // container cgroup inside them. Errors (a cgroup removed mid-walk) only
 // skip the affected directory.
-func scanCgroups(root string) map[uint64]containerRef {
-	ids := make(map[uint64]containerRef)
+func scanCgroups(root string) map[uint64]cgroupEntry {
+	ids := make(map[uint64]cgroupEntry)
 	var visit func(dir string, depth int)
 	visit = func(dir string, depth int) {
 		if depth > cgroupWalkDepth || len(ids) >= maxIndexedCgroups {
@@ -201,7 +226,7 @@ func scanCgroups(root string) map[uint64]containerRef {
 		rel := strings.TrimPrefix(dir, root)
 		if ref, ok := parseCgroupPath(rel); ok {
 			if ino, ok := dirInode(dir); ok {
-				ids[ino] = ref
+				ids[ino] = cgroupEntry{ref: ref, dir: dir}
 			}
 		}
 		for _, e := range readDirs(dir) {

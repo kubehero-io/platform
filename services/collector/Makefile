@@ -9,7 +9,7 @@
 REPO_ROOT := $(abspath ../..)
 GO_IMAGE ?= golang:1.26.8
 
-.PHONY: bpf ebpf-test
+.PHONY: bpf ebpf-test ebpf-test-nested
 
 # Regenerate internal/ebpf/*_bpfel.{go,o} from internal/ebpf/bpf/*.bpf.c.
 bpf:
@@ -24,3 +24,13 @@ ebpf-test:
 		-v $(REPO_ROOT):/src -w /src/services/collector \
 		-v kubehero-bpf-gomod:/go/pkg/mod -v kubehero-bpf-gocache:/root/.cache/go-build \
 		$(GO_IMAGE) go test -tags ebpfintegration -count=1 -v ./internal/ebpf/...
+
+# The profiler the way it runs on kind / k3d / Docker Desktop nodes: no
+# --pid=host, so the test runs in a nested PID namespace and the profiled
+# child gets one of its own.
+ebpf-test-nested:
+	docker run --rm --privileged --cgroupns=host -e KH_EBPF_EXPECT=nested \
+		-v /sys/fs/cgroup:/sys/fs/cgroup -v /sys/kernel:/sys/kernel \
+		-v $(REPO_ROOT):/src -w /src/services/collector \
+		-v kubehero-bpf-gomod:/go/pkg/mod -v kubehero-bpf-gocache:/root/.cache/go-build \
+		$(GO_IMAGE) go test -tags ebpfintegration -count=1 -v -run 'Nested' ./internal/ebpf/...

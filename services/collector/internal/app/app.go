@@ -554,7 +554,7 @@ func (a *App) serveMetrics(w http.ResponseWriter, _ *http.Request) {
 		map[string]bool{"netflow": st.NetflowAttached, "retransmits": st.RetransmitsAttached, "profiler": st.ProfilerAttached},
 		map[string]uint64{"flows_emitted": st.FlowsEmitted, "flow_entries_drained": st.FlowEntriesDrained,
 			"profiles_emitted": st.ProfilesEmitted, "samples_drained": st.SamplesDrained,
-			"samples_unattributed": st.SamplesUnattributed, "stacks_capped": st.StacksCapped,
+			"samples_unattributed": st.SamplesUnattributed, "samples_foreign": st.SamplesForeign, "stacks_capped": st.StacksCapped,
 			"stacks_lost": st.StacksLost, "drain_errors": st.DrainErrors, "map_full_events": st.MapFullEvents})
 	metrics.Default.Write(w)
 }

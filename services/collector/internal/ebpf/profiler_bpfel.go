@@ -13,6 +13,12 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type profilerKhPidnsId struct {
+	_   structs.HostLayout
+	Dev uint64
+	Ino uint64
+}
+
 type profilerStackKey struct {
 	_             structs.HostLayout
 	CgroupId      uint64
@@ -29,10 +35,12 @@ const (
 	profilerMapKhActive     = "kh_active"
 	profilerMapKhCounts0    = "kh_counts0"
 	profilerMapKhCounts1    = "kh_counts1"
+	profilerMapKhPidns      = "kh_pidns"
 	profilerMapKhProfErrors = "kh_prof_errors"
 	profilerMapKhStacks0    = "kh_stacks0"
 	profilerMapKhStacks1    = "kh_stacks1"
 	profilerProgKhProfile   = "kh_profile"
+	profilerVarNsMode       = "ns_mode"
 	profilerVarSelfTgid     = "self_tgid"
 )
 
@@ -88,6 +96,7 @@ type profilerMapSpecs struct {
 	KhActive     *ebpf.MapSpec `ebpf:"kh_active"`
 	KhCounts0    *ebpf.MapSpec `ebpf:"kh_counts0"`
 	KhCounts1    *ebpf.MapSpec `ebpf:"kh_counts1"`
+	KhPidns      *ebpf.MapSpec `ebpf:"kh_pidns"`
 	KhProfErrors *ebpf.MapSpec `ebpf:"kh_prof_errors"`
 	KhStacks0    *ebpf.MapSpec `ebpf:"kh_stacks0"`
 	KhStacks1    *ebpf.MapSpec `ebpf:"kh_stacks1"`
@@ -97,6 +106,7 @@ type profilerMapSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type profilerVariableSpecs struct {
+	NsMode   *ebpf.VariableSpec `ebpf:"ns_mode"`
 	SelfTgid *ebpf.VariableSpec `ebpf:"self_tgid"`
 }
 
@@ -123,6 +133,7 @@ type profilerMaps struct {
 	KhActive     *ebpf.Map `ebpf:"kh_active"`
 	KhCounts0    *ebpf.Map `ebpf:"kh_counts0"`
 	KhCounts1    *ebpf.Map `ebpf:"kh_counts1"`
+	KhPidns      *ebpf.Map `ebpf:"kh_pidns"`
 	KhProfErrors *ebpf.Map `ebpf:"kh_prof_errors"`
 	KhStacks0    *ebpf.Map `ebpf:"kh_stacks0"`
 	KhStacks1    *ebpf.Map `ebpf:"kh_stacks1"`
@@ -133,6 +144,7 @@ func (m *profilerMaps) Close() error {
 		m.KhActive,
 		m.KhCounts0,
 		m.KhCounts1,
+		m.KhPidns,
 		m.KhProfErrors,
 		m.KhStacks0,
 		m.KhStacks1,
@@ -143,6 +155,7 @@ func (m *profilerMaps) Close() error {
 //
 // It can be passed to loadProfilerObjects or ebpf.CollectionSpec.LoadAndAssign.
 type profilerVariables struct {
+	NsMode   *ebpf.Variable `ebpf:"ns_mode"`
 	SelfTgid *ebpf.Variable `ebpf:"self_tgid"`
 }
 

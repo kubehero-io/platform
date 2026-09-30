@@ -33,6 +33,8 @@ const (
 
 	profErrCountsFull = 0
 	profErrStackLost  = 1
+	profErrNoPidns    = 2 // nested mode: cgroup not in kh_pidns
+	profErrNsPid      = 3 // nested mode: task outside its cgroup's namespace
 )
 
 // cpuEvent is one CPU's sampling perf event and its program attachment.
@@ -62,13 +64,23 @@ type profiler struct {
 	sym     *symbolizer
 	cgroups *cgroupIndex
 
-	countsFull, stacksLost deltaCounter
+	// nested: the collector is not in the kernel's top-level PID
+	// namespace (kind, k3d, Docker Desktop); see pidns.go.
+	nested     bool
+	pidnsKeys  map[uint64]struct{} // cgroup ids currently in kh_pidns
+	pidnsLocal map[nsProc]uint32   // (cgroup, tgid in its namespace) -> PID in /proc
+
+	countsFull, stacksLost, noPidns, nsPid deltaCounter
 }
 
 func startProfiler(ctx context.Context, cfg Config, log *slog.Logger) (err error) {
-	if !inHostPIDNamespace() {
-		return unsupported(errors.New("the profiler needs the host PID namespace (hostPID: true): " +
-			"it reads other processes' memory maps and must know its own host PID"))
+	// Outside the kernel's top-level PID namespace (a kind / k3d / Docker
+	// Desktop node) PIDs are translated per container; see pidns.go.
+	nested := !inHostPIDNamespace()
+	if nested {
+		if _, err := statPidns(procRoot + "/self/ns/pid"); err != nil {
+			return unsupported(fmt.Errorf("the profiler needs the node's PID namespace (hostPID: true): %w", err))
+		}
 	}
 	spec, err := loadProfiler()
 	if err != nil {
@@ -80,13 +92,21 @@ func startProfiler(ctx context.Context, cfg Config, log *slog.Logger) (err error
 		}
 	}
 	// The program skips samples of this process: symbolizing ourselves
-	// would only profile the profiler.
-	if err := setVariables(spec, map[string]any{profilerVarSelfTgid: uint32(os.Getpid())}); err != nil {
+	// would only profile the profiler. Nested, the kernel knows it under
+	// another PID; its cgroup is kept out of kh_pidns instead.
+	vars := map[string]any{profilerVarSelfTgid: uint32(os.Getpid()), profilerVarNsMode: boolByte(false)}
+	if nested {
+		vars = map[string]any{profilerVarSelfTgid: uint32(0), profilerVarNsMode: boolByte(true)}
+	}
+	if err := setVariables(spec, vars); err != nil {
 		return err
 	}
 
-	p := &profiler{cfg: cfg, log: log}
+	p := &profiler{cfg: cfg, log: log, nested: nested}
 	if err := spec.LoadAndAssign(&p.objs, nil); err != nil {
+		if nested {
+			err = fmt.Errorf("%w (a nested PID namespace needs bpf_get_ns_current_pid_tgid, Linux 5.7+)", err)
+		}
 		return unsupported(fmt.Errorf("loading profiler program: %w", err))
 	}
 	defer func() {
@@ -95,6 +115,12 @@ func startProfiler(ctx context.Context, cfg Config, log *slog.Logger) (err error
 			_ = p.objs.Close()
 		}
 	}()
+
+	p.sym = newSymbolizer(procRoot, log)
+	p.cgroups = newCgroupIndex(cfg.CgroupRoot)
+	if nested {
+		p.refreshPidns() // before the first sample, or it would be dropped
+	}
 
 	cpus, err := onlineCPUs()
 	if err != nil {
@@ -116,11 +142,10 @@ func startProfiler(ctx context.Context, cfg Config, log *slog.Logger) (err error
 		log.Warn("ebpf profiler: some CPUs are not sampled", "sampled", len(p.events), "failed", len(errs), "err", errs[0])
 	}
 
-	p.sym = newSymbolizer(procRoot, log)
-	p.cgroups = newCgroupIndex(cfg.CgroupRoot)
 	p.windowStart = time.Now()
 	counters.profilerAttached.Store(true)
-	log.Info("ebpf profiler attached", "cpus", len(p.events), "hz", cfg.ProfileHz, "flush_interval", cfg.FlushInterval)
+	log.Info("ebpf profiler attached", "cpus", len(p.events), "hz", cfg.ProfileHz, "flush_interval", cfg.FlushInterval,
+		"nested_pid_namespace", nested)
 	loops.Add(1)
 	go p.run(ctx)
 	return nil
@@ -196,6 +221,11 @@ func (p *profiler) buffers(set uint32) (counts, stacks *cebpf.Map) {
 // flush switches the kernel to the other buffer set, then drains,
 // symbolizes and clears the one it just left.
 func (p *profiler) flush(ctx context.Context) {
+	if p.nested {
+		// Before draining: processes seen in this window get their PIDs
+		// mapped, and the next window samples new containers.
+		p.refreshPidns()
+	}
 	idle, next := p.active, p.active^1
 	if err := p.objs.KhActive.Update(uint32(0), next, cebpf.UpdateAny); err != nil {
 		counters.drainErrors.Add(1)
@@ -315,10 +345,16 @@ func (p *profiler) build(keys []stackKey, counts []uint64, stacks *cebpf.Map, st
 			counters.samplesUnattributed.Add(counts[i])
 			continue
 		}
-		us := userStack{k.Tgid, k.UserStackID}
+		pid := k.Tgid
+		if p.nested {
+			// The kernel recorded the tgid inside the process's own
+			// namespace; symbolizing needs the PID our /proc shows.
+			pid = p.pidnsLocal[nsProc{cgroup: k.CgroupID, tgid: k.Tgid}] // 0: exited; frames stay unknown
+		}
+		us := userStack{pid, k.UserStackID}
 		user, ok := userCache[us]
 		if !ok {
-			user = p.sym.userFrames(k.Tgid, readStack(k.UserStackID))
+			user = p.sym.userFrames(pid, readStack(k.UserStackID))
 			userCache[us] = user
 		}
 		kern, ok := kernelCache[k.KernelStackID]
@@ -366,6 +402,39 @@ func (p *profiler) readKernelErrors() {
 			counters.stacksLost.Add(d)
 		}
 	}
+	if !p.nested {
+		return
+	}
+	for _, c := range []struct {
+		idx uint32
+		dc  *deltaCounter
+	}{{profErrNoPidns, &p.noPidns}, {profErrNsPid, &p.nsPid}} {
+		if total, err := sumPerCPU(p.objs.KhProfErrors, c.idx); err == nil {
+			counters.samplesForeign.Add(c.dc.delta(total))
+		}
+	}
+}
+
+// refreshPidns rescans the container cgroups this collector sees and
+// syncs kh_pidns (cgroup -> PID namespace) with them. Only nested mode.
+func (p *profiler) refreshPidns() {
+	scan := scanPidns(procRoot, p.cgroups.containerDirs(), os.Getpid(), statPidns)
+	keys := make(map[uint64]struct{}, len(scan.ns))
+	for id, ns := range scan.ns {
+		if err := p.objs.KhPidns.Update(id, profilerKhPidnsId{Dev: ns.dev, Ino: ns.ino}, cebpf.UpdateAny); err != nil {
+			counters.drainErrors.Add(1)
+			p.log.Warn("ebpf profiler: updating kh_pidns failed", "cgroup", id, "err", err)
+			continue
+		}
+		keys[id] = struct{}{}
+	}
+	for id := range p.pidnsKeys {
+		if _, ok := keys[id]; !ok {
+			_ = p.objs.KhPidns.Delete(id)
+		}
+	}
+	p.pidnsKeys = keys
+	p.pidnsLocal = scan.local
 }
 
 func (p *profiler) detach() {

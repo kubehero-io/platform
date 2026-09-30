@@ -37,6 +37,11 @@ type Counters struct {
 	SamplesUnattributed uint64
 	// StacksCapped counts unique stacks dropped by the per-drain cap.
 	StacksCapped uint64
+	// SamplesForeign counts samples the kernel dropped in a nested PID
+	// namespace (kind, k3d, Docker Desktop) because their cgroup is not a
+	// container this collector sees: another node sharing the kernel, or
+	// a container newer than the last refresh.
+	SamplesForeign uint64
 	// StacksLost counts samples whose stack the kernel could not record
 	// (STACK_TRACE bucket collision or map full); their CPU time is kept
 	// under an "[unknown]" frame.
@@ -62,6 +67,7 @@ var counters struct {
 	profilesEmitted     atomic.Uint64
 	samplesDrained      atomic.Uint64
 	samplesUnattributed atomic.Uint64
+	samplesForeign      atomic.Uint64
 	stacksCapped        atomic.Uint64
 	stacksLost          atomic.Uint64
 	drainErrors         atomic.Uint64
@@ -79,6 +85,7 @@ func Stats() Counters {
 		ProfilesEmitted:     counters.profilesEmitted.Load(),
 		SamplesDrained:      counters.samplesDrained.Load(),
 		SamplesUnattributed: counters.samplesUnattributed.Load(),
+		SamplesForeign:      counters.samplesForeign.Load(),
 		StacksCapped:        counters.stacksCapped.Load(),
 		StacksLost:          counters.stacksLost.Load(),
 		DrainErrors:         counters.drainErrors.Load(),

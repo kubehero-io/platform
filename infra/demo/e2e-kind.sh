@@ -175,6 +175,7 @@ has_errors()   { rpc LogsService/QueryLogs '{"query":"sum(count_over_time({names
 has_usage()    { rpc CostService/ListRightsizing '{"namespace":"shop","window":"1h"}' | jq -e '(.recommendations // []) | length > 0'; }
 has_profiles() { rpc ProfilesService/ListProfileTargets '{}' | jq -e '[.targets[]? | select(.namespace=="shop")] | length > 0'; }
 has_flows()    { rpc NetworkService/GetServiceMap '{"namespace":"shop"}' | jq -e '.source != "demo" and ((.edges // []) | length > 0)'; }
+has_ebpf_cpu() { rpc ProfilesService/ListProfileTargets '{}' | jq -e '[.targets[]? | select(.namespace == "shop" and .origin == "ebpf")] | length > 0'; }
 
 eventually "cost allocation has the shop namespace"       300 has_cost
 eventually "container logs are queryable with LogQL"      300 has_logs
@@ -196,6 +197,10 @@ ebpf_diag() { # what the flow path saw, when the service map stays empty
 }
 if [ -n "${E2E_REQUIRE_EBPF:-}" ]; then
   ( eventually "eBPF service map has shop edges"          300 has_flows ) || { ebpf_diag; fail "eBPF flows required (E2E_REQUIRE_EBPF)"; }
+  # kind nodes are containers sharing the runner's kernel: this is the
+  # profiler's nested-PID-namespace path.
+  ( eventually "eBPF CPU profiles for shop (nested PID namespaces)" 300 has_ebpf_cpu ) \
+    || { kubectl -n "$NS" logs ds/kubehero-collector --tail=50 | grep -i profiler || true; fail "eBPF CPU profiles required (E2E_REQUIRE_EBPF)"; }
 elif kubectl -n "$NS" logs ds/kubehero-collector > "$WORK/collector.log" 2>&1 && grep -q '"ebpf' "$WORK/collector.log"; then
   # Soft locally: some kind hosts lack cgroup_skb support. fail() exits,
   # so run it in a subshell to keep going either way.

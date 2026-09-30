@@ -102,6 +102,9 @@ The home page has an [interactive flamegraph](/#demos) with zoom, search and dif
   - **Kernel and privileges.** eBPF needs Linux ≥ 5.8 with cgroup v2 — the default on current AKS, GKE and EKS node
     images — and a privileged collector. Where that isn't available the collector logs one line and keeps collecting
     everything else; pprof scraping and Pyroscope ingest still work.
+  - **Local clusters.** On kind, k3d and Docker Desktop every node is a container sharing one kernel. The collector
+    then records each sample's PID inside the process's own namespace and maps it back per container, so each node
+    profiles only its own pods (Linux 5.7+ for `bpf_get_ns_current_pid_tgid`).
   - **Frame pointers.** User-space stacks are walked with frame pointers. Go and Rust keep them; the JVM needs
     `-XX:+PreserveFramePointer`; C/C++ built with `-fomit-frame-pointer` produces truncated stacks.
   - **JIT runtimes.** JIT-compiled frames (Node.js, Python, the JVM) show as `[unknown]` unless the runtime writes perf
