@@ -2,8 +2,11 @@ name: e2e
 
 # The real thing on a 3-node kind cluster: build every image, helm install
 # the chart (embedded Postgres + ClickHouse, auth on), run a small shop and
-# assert cost, logs, profiles, rightsizing and eBPF flows through the
-# public API. See infra/demo/e2e-kind.sh.
+# assert every signal and product path through the public APIs: cost,
+# logs, profiles, eBPF flows, the Loki / OTLP / OpenCost / FOCUS faces,
+# alerting, the operator's guarded rightsizing (recommend → shadow → armed
+# apply → undo), the advisor, the CLI and its MCP server, the dashboard.
+# See infra/demo/e2e-kind.sh.
 
 on:
   push: { branches: [main] }
@@ -26,6 +29,9 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GO_VERSION: "1.26.8"
+
 jobs:
   kind:
     name: kind — helm install + live signals
@@ -33,6 +39,10 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
@@ -41,16 +51,44 @@ jobs:
           version: v0.33.0
           install_only: true
       - name: e2e
+        env:
+          # GitHub's runner kernels support cgroup_skb: flows must show up.
+          E2E_REQUIRE_EBPF: "1"
         run: ./infra/demo/e2e-kind.sh
       - name: diagnostics
         if: failure()
-        run: |
-          kubectl get nodes -o wide || true
-          kubectl get pods -A -o wide || true
-          kubectl -n kubehero-system get events --sort-by=.lastTimestamp | tail -100 || true
-          for w in $(kubectl -n kubehero-system get deploy,statefulset,daemonset -o name 2>/dev/null); do
-            echo "::group::logs $w"
-            kubectl -n kubehero-system logs "$w" --all-containers --tail=300 || true
-            echo "::endgroup::"
-          done
-          kubectl -n shop get pods -o wide || true
+        run: ./.github/scripts/e2e-diagnostics.sh
+
+  upgrade:
+    # In-place upgrade from the latest published release, with real data
+    # written before the upgrade. Main and manual runs only.
+    name: kind — upgrade from the latest release
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - uses: helm/kind-action@v1
+        with:
+          version: v0.33.0
+          install_only: true
+      - name: latest release
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "version=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+      - name: e2e (upgrade from ${{ steps.baseline.outputs.version }})
+        env:
+          E2E_UPGRADE_FROM: ${{ steps.baseline.outputs.version }}
+          E2E_REQUIRE_EBPF: "1"
+        run: ./infra/demo/e2e-kind.sh
+      - name: diagnostics
+        if: failure()
+        run: ./.github/scripts/e2e-diagnostics.sh
