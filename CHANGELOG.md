@@ -5,6 +5,42 @@ Every release, newest first. The same notes, with more context, are at
 to `ghcr.io/kubehero-io/<image>:<version>` and the chart to
 `oci://ghcr.io/kubehero-io/charts/kubehero`, all signed with cosign.
 
+## v0.3.2 — 2026-09-29
+
+A security patch. **Upgrade if you run the advisor without network
+policies** (the default): the advisor answered unauthenticated callers.
+No API, schema or chart-values changes.
+
+### Security
+
+- **The advisor authenticates its callers.** It reads the control plane
+  with its own service token but did not check who was asking, so any pod
+  that could reach it could read briefings and investigations over cost,
+  logs and alerts, and with an Anthropic key configured, run up the
+  operator's Claude bill. Every advisor RPC now needs a bearer token the
+  control plane accepts, with the `viewer` role or above; cluster
+  enrollment tokens are refused. A call without a token passes only when
+  the control plane itself accepts anonymous requests. The dashboard, the
+  CLI and `kubehero mcp` already send the signed-in user's token.
+- **`kubehero mcp --http` refuses cross-origin browser requests**, so a
+  web page can't drive a local MCP server that holds your token (DNS
+  rebinding was already refused).
+
+### Tests
+
+- The end-to-end suite on GitHub's runners now covers every product path:
+  the Loki / OTLP / OpenCost / FOCUS APIs, alert rules firing, the
+  operator's guarded rightsizing from recommend through armed apply to
+  `kubehero undo`, the advisor, the CLI and its MCP server, and the
+  dashboard. A second job upgrades the latest release in place with live
+  data and checks that nothing is lost. eBPF flows are required.
+
+### Upgrade notes
+
+- Upgrade in place: `helm upgrade` to chart 0.3.2 with the values you
+  installed with. Anything that calls the advisor directly needs a
+  KubeHero token (the same one it uses for the control plane).
+
 ## v0.3.1 — 2026-09-28
 
 A patch release: the dashboard fits a phone screen. No API, schema or
