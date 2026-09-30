@@ -243,9 +243,9 @@ spec:
   scope:
     namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: shop } }
   mode: recommend
+  humanArm: true
+  minConfidence: low
   safety:
-    humanArm: true
-    minConfidence: low
     minReplicas: 1
     observationWindow: "1h"
     maxChangePerDay: 1
