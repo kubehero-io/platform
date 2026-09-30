@@ -61,6 +61,8 @@ kubectl get rolebinding,clusterrolebinding -A -o wide | grep kubehero-advisor   
 
 It calls only read RPCs; proposals are validated against the CRD whitelist before they're returned.
 
+It is also never more open than the control plane. The advisor reads with its own service token, so it checks every caller itself: each request's bearer token goes to the control plane's `WhoAmI` and needs the `viewer` role or above (cluster enrollment tokens are refused). A request without a token passes only when the control plane accepts anonymous requests. The dashboard and the CLI send the signed-in user's token automatically.
+
 ## What leaves the cluster
 
 Nothing, by default. The only optional egress is the advisor's LLM brain: when `advisor.anthropic.existingSecret` is set, the snapshot and tool results the model reasons over — which can include capped samples of log lines — are sent to Anthropic's API under your key. Check what's configured:
@@ -76,7 +78,7 @@ With network policies enabled (`networkPolicies.enabled: true`), you can also re
 - **API keys** with roles `owner`, `admin`, `auditor`, `member`, `viewer` (`controlPlane.auth.apiKeysSecret`).
 - **Per-cluster enrollment tokens** from `kubehero cluster add` — only their SHA-256 hash is stored.
 - **OIDC** with JWKS signature verification and group → role mapping (`controlPlane.auth.oidc.*`); **SCIM 2.0** provisioning.
-- `controlPlane.auth.requireAuth: true` (default) rejects anonymous RPCs; the compatibility APIs (Loki, OTLP, Pyroscope, OpenCost) use the same tokens.
+- `controlPlane.auth.requireAuth: true` (default) rejects anonymous RPCs; the compatibility APIs (Loki, OTLP, Pyroscope, OpenCost) and the advisor use the same tokens.
 
 See [Identity](/docs/integrations/identity).
 

@@ -32,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -41,6 +42,7 @@ import (
 	"github.com/kubehero-io/platform/services/advisor/internal/brain"
 	"github.com/kubehero-io/platform/services/advisor/internal/brain/llm"
 	"github.com/kubehero-io/platform/services/advisor/internal/brain/rules"
+	"github.com/kubehero-io/platform/services/advisor/internal/callerauth"
 	"github.com/kubehero-io/platform/services/advisor/internal/investigate"
 	"github.com/kubehero-io/platform/services/advisor/internal/rpc"
 	"github.com/kubehero-io/platform/services/advisor/internal/source"
@@ -78,7 +80,13 @@ Configuration is via environment variables:
                           any LLM failure or refusal still falls back to
                           rules — the RPCs never fail because Anthropic is
                           down.
-  KUBEHERO_ADVISOR_MODEL  Claude model id (default claude-opus-5).`,
+  KUBEHERO_ADVISOR_MODEL  Claude model id (default claude-opus-5).
+
+Callers authenticate like they do with the control plane: every RPC's
+bearer token is checked with the control plane's WhoAmI and needs the
+viewer role or above. Without a token a call passes only when the
+control plane itself accepts anonymous requests. In demo mode (no
+CONTROL_PLANE_URL) nothing is checked: there is no real data to guard.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return serve(cmd.Context(), addr)
 		},
@@ -91,12 +99,18 @@ func serve(parent context.Context, addr string) error {
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
 	// ─── data in (tier 1) ─────────────────────────────────────────────────
-	var be backend.Backend
-	demo := false
+	var (
+		be       backend.Backend
+		demo     bool
+		handlers []connect.HandlerOption
+	)
 	if cpURL := os.Getenv("CONTROL_PLANE_URL"); cpURL != "" {
 		token := firstNonEmpty(os.Getenv("KUBEHERO_API_TOKEN"), os.Getenv("CONTROL_PLANE_TOKEN"))
 		log.Info("using control-plane source", "url", cpURL, "auth", token != "")
 		be = backend.NewConnect(cpURL, token)
+		// The advisor reads with its own service token; callers must prove
+		// they may read too, or it would widen access past the control plane.
+		handlers = append(handlers, connect.WithInterceptors(callerauth.New(cpURL, nil, log).Interceptor()))
 	} else {
 		log.Warn("DEMO MODE: CONTROL_PLANE_URL unset — briefings and investigations use built-in fixture data (source=\"demo\")")
 		be = backend.Demo{}
@@ -134,7 +148,7 @@ func serve(parent context.Context, addr string) error {
 	adv := rpc.New(b, src, log)
 	adv.Investigator = inv
 	adv.DemoData = demo
-	path, handler := kuberov1connect.NewAdvisorServiceHandler(adv)
+	path, handler := kuberov1connect.NewAdvisorServiceHandler(adv, handlers...)
 	mux.Handle(path, handler)
 
 	srv := &http.Server{
