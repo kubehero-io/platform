@@ -13,7 +13,9 @@ No API, schema or chart-values changes.
 
 ### Security
 
-- **The advisor authenticates its callers.** It reads the control plane
+- **The advisor authenticates its callers**
+  ([GHSA-w8qv-6r23-wjjc](https://github.com/kubehero-io/platform/security/advisories/GHSA-w8qv-6r23-wjjc)).
+  It reads the control plane
   with its own service token but did not check who was asking, so any pod
   that could reach it could read briefings and investigations over cost,
   logs and alerts, and with an Anthropic key configured, run up the
