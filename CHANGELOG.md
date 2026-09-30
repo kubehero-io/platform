@@ -5,6 +5,34 @@ Every release, newest first. The same notes, with more context, are at
 to `ghcr.io/kubehero-io/<image>:<version>` and the chart to
 `oci://ghcr.io/kubehero-io/charts/kubehero`, all signed with cosign.
 
+## v0.3.3 — 2026-09-29
+
+eBPF CPU profiling on local clusters. No API, schema or chart-values
+changes.
+
+### eBPF
+
+- **CPU profiling on kind, k3d and Docker Desktop.** There, every
+  Kubernetes node is a container sharing one kernel, so the collector
+  never saw the kernel's top-level PIDs and switched the profiler off.
+  It now maps each container cgroup it can see to its PID namespace, has
+  the kernel record each sample's PID inside the process's own namespace,
+  and maps it back per container. Each node profiles only its own pods:
+  samples from other nodes are dropped before a stack is taken
+  (`samples_foreign` in the collector's metrics). No BTF needed; Linux
+  5.7+. Behaviour on regular nodes is unchanged.
+
+### Tests
+
+- The kind e2e requires eBPF CPU profiles (its nodes are containers, so
+  this is the nested path), and a kernel test covers it
+  (`make ebpf-test-nested` in `services/collector`).
+
+### Upgrade notes
+
+- Upgrade in place: `helm upgrade` to chart 0.3.3 with the values you
+  installed with.
+
 ## v0.3.2 — 2026-09-29
 
 A security patch. **Upgrade if you run the advisor without network

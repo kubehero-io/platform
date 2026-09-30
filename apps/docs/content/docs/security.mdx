@@ -91,10 +91,10 @@ Policy changes, arming, enforcement actions and rightsizing applies are written 
 Images are signed with cosign (keyless, by the release workflow) and carry SPDX SBOM attestations; releases are scanned with Trivy.
 
 ```bash
-cosign verify ghcr.io/kubehero-io/control-plane:0.3.2 \
+cosign verify ghcr.io/kubehero-io/control-plane:0.3.3 \
   --certificate-identity-regexp 'https://github.com/kubehero-io/platform/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation --type spdxjson ghcr.io/kubehero-io/control-plane:0.3.2 \
+cosign verify-attestation --type spdxjson ghcr.io/kubehero-io/control-plane:0.3.3 \
   --certificate-identity-regexp 'https://github.com/kubehero-io/platform/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
