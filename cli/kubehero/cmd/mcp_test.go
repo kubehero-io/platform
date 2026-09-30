@@ -6,6 +6,8 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
@@ -131,5 +133,27 @@ func TestMCPCallsTools(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Error("bad enum must be a tool error")
+	}
+}
+
+func TestMCPHTTPRefusesCrossOriginBrowserRequests(t *testing.T) {
+	h := mcpHTTPHandler(mcp.NewServer(&mcp.Implementation{Name: "t", Version: "0"}, nil))
+	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`
+	do := func(headers map[string]string) int {
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8765/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := do(map[string]string{"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}); code != http.StatusForbidden {
+		t.Fatalf("cross-site browser request: %d, want 403", code)
+	}
+	if code := do(nil); code != http.StatusOK {
+		t.Fatalf("MCP client request (no Origin): %d, want 200", code)
 	}
 }

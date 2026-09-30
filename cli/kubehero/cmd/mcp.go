@@ -88,8 +88,7 @@ func serveMCPHTTP(ctx context.Context, cmd *cobra.Command, server *mcp.Server, a
 	if err != nil {
 		return err
 	}
-	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
-	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: mcpHTTPHandler(server), ReadHeaderTimeout: 10 * time.Second}
 	errOut := cmd.ErrOrStderr()
 	fmt.Fprintf(errOut, "KubeHero MCP server (streamable HTTP) on http://%s/\n", ln.Addr())
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
@@ -108,4 +107,13 @@ func serveMCPHTTP(ctx context.Context, cmd *cobra.Command, server *mcp.Server, a
 		}
 		return err
 	}
+}
+
+// mcpHTTPHandler serves server over streamable HTTP. The SDK already
+// refuses DNS-rebinding Host headers on loopback; this also refuses
+// cross-origin browser requests, so a web page the user visits can't
+// drive the server with their token. MCP clients send no Origin and pass.
+func mcpHTTPHandler(server *mcp.Server) http.Handler {
+	return http.NewCrossOriginProtection().Handler(
+		mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil))
 }
